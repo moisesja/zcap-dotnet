@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using ZcapLd.Core.Cryptography;
 using ZcapLd.Core.Serialization;
 
 namespace ZcapLd.Core.DependencyInjection;
@@ -11,7 +12,7 @@ public static class ServiceCollectionExtensions
 {
     /// <summary>
     /// Adds ZCAP-LD core services to the service collection.
-    /// Registers all serialization services required for ZCAP-LD operations.
+    /// Registers all serialization and cryptographic services required for ZCAP-LD operations.
     /// </summary>
     /// <param name="services">The service collection.</param>
     /// <returns>The service collection for chaining.</returns>
@@ -27,6 +28,11 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IZcapSerializationService, ZcapSerializationService>();
         services.TryAddSingleton<IMultibaseService, MultibaseService>();
         services.TryAddSingleton<IJsonLdCanonicalizationService, JsonLdCanonicalizationService>();
+
+        // Register cryptographic services
+        services.TryAddSingleton<ICryptographicService, Ed25519CryptographicService>();
+        services.TryAddSingleton<IKeyProvider, InMemoryKeyProvider>();
+        services.TryAddSingleton<IProofService, ProofService>();
 
         return services;
     }
@@ -106,6 +112,84 @@ public static class ServiceCollectionExtensions
         }
 
         services.AddSingleton<IZcapSerializationService, TImplementation>();
+        return services;
+    }
+
+    /// <summary>
+    /// Adds ZCAP-LD cryptographic services to the service collection.
+    /// Includes Ed25519 cryptographic service, in-memory key provider, and proof service.
+    /// </summary>
+    /// <param name="services">The service collection.</param>
+    /// <returns>The service collection for chaining.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when services is null.</exception>
+    public static IServiceCollection AddZcapCryptography(this IServiceCollection services)
+    {
+        if (services == null)
+        {
+            throw new ArgumentNullException(nameof(services));
+        }
+
+        services.TryAddSingleton<ICryptographicService, Ed25519CryptographicService>();
+        services.TryAddSingleton<IKeyProvider, InMemoryKeyProvider>();
+        services.TryAddSingleton<IProofService, ProofService>();
+
+        return services;
+    }
+
+    /// <summary>
+    /// Adds a custom cryptographic service implementation to the service collection.
+    /// </summary>
+    /// <typeparam name="TImplementation">The cryptographic service implementation type.</typeparam>
+    /// <param name="services">The service collection.</param>
+    /// <returns>The service collection for chaining.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when services is null.</exception>
+    public static IServiceCollection AddCryptographicService<TImplementation>(this IServiceCollection services)
+        where TImplementation : class, ICryptographicService
+    {
+        if (services == null)
+        {
+            throw new ArgumentNullException(nameof(services));
+        }
+
+        services.AddSingleton<ICryptographicService, TImplementation>();
+        return services;
+    }
+
+    /// <summary>
+    /// Adds a custom key provider implementation to the service collection.
+    /// </summary>
+    /// <typeparam name="TImplementation">The key provider implementation type.</typeparam>
+    /// <param name="services">The service collection.</param>
+    /// <returns>The service collection for chaining.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when services is null.</exception>
+    public static IServiceCollection AddKeyProvider<TImplementation>(this IServiceCollection services)
+        where TImplementation : class, IKeyProvider
+    {
+        if (services == null)
+        {
+            throw new ArgumentNullException(nameof(services));
+        }
+
+        services.AddSingleton<IKeyProvider, TImplementation>();
+        return services;
+    }
+
+    /// <summary>
+    /// Adds a custom proof service implementation to the service collection.
+    /// </summary>
+    /// <typeparam name="TImplementation">The proof service implementation type.</typeparam>
+    /// <param name="services">The service collection.</param>
+    /// <returns>The service collection for chaining.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when services is null.</exception>
+    public static IServiceCollection AddProofService<TImplementation>(this IServiceCollection services)
+        where TImplementation : class, IProofService
+    {
+        if (services == null)
+        {
+            throw new ArgumentNullException(nameof(services));
+        }
+
+        services.AddSingleton<IProofService, TImplementation>();
         return services;
     }
 }
