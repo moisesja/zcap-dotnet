@@ -1,0 +1,39 @@
+<Project>
+  <!-- Common properties for all projects -->
+  <PropertyGroup>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <WarningsAsErrors>nullable</WarningsAsErrors>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);1591</NoWarn><!-- CS1591: Missing XML comment for publicly visible type or member -->
+  </PropertyGroup>
+
+  <!-- Package metadata -->
+  <PropertyGroup>
+    <Authors>ZCAP-LD Contributors</Authors>
+    <Company>ZCAP-LD</Company>
+    <Product>ZcapLd</Product>
+    <Copyright>Copyright © 2024 ZCAP-LD Contributors</Copyright>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/moisesja/zcap-dotnet</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/moisesja/zcap-dotnet</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageTags>zcap;authorization;capabilities;linked-data;w3c;did;verifiable-credentials</PackageTags>
+    <Description>W3C ZCAP-LD (Authorization Capabilities for Linked Data) implementation for .NET</Description>
+  </PropertyGroup>
+
+  <!-- Versioning -->
+  <PropertyGroup>
+    <VersionPrefix>0.1.0</VersionPrefix>
+    <VersionSuffix>alpha</VersionSuffix>
+  </PropertyGroup>
+
+  <!-- Code analysis -->
+  <PropertyGroup>
+    <AnalysisMode>Default</AnalysisMode>
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+  </PropertyGroup>
+</Project>
