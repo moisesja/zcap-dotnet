@@ -21,6 +21,12 @@
 
     <!-- JSON-LD processing and RDF Dataset Canonicalization (RDFC-1.0) -->
     <PackageReference Include="JsonLD.Core" Version="1.2.1" />
+
+    <!-- Dependency injection -->
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="9.0.0" />
+
+    <!-- Logging abstractions -->
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="9.0.0" />
   </ItemGroup>
 
 </Project>
