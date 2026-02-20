@@ -39,7 +39,7 @@
     <PackageReference Include="NSec.Cryptography" Version="25.4.0" />
 
     <!-- Base58 multibase encoding -->
-    <PackageReference Include="SimpleBase" Version="4.0.0" />
+    <PackageReference Include="SimpleBase" Version="5.6.0" />
 
     <!-- Embed source and commit metadata for debugging/open-source distribution -->
     <PackageReference Include="Microsoft.SourceLink.GitHub" Version="8.0.0" PrivateAssets="All" />
