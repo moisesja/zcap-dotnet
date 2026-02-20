@@ -74,7 +74,7 @@ public class CaveatProcessor : ICaveatProcessor
     /// Per spec: Children inherit ALL parent caveats and MAY add new ones
     /// Children CANNOT remove parent caveats
     /// </summary>
-    public Task<bool> ValidateCaveatCompatibilityAsync(Caveat[] parentCaveats, Caveat[] childCaveats)
+    public Task<bool> ValidateCaveatCompatibilityAsync(Caveat[]? parentCaveats, Caveat[]? childCaveats)
     {
         if (parentCaveats == null)
             parentCaveats = Array.Empty<Caveat>();

@@ -35,7 +35,7 @@ public class CapabilityServiceTests
         capability.Id.Should().StartWith("urn:zcap:root:");
         capability.Controller.Should().Be(controller);
         capability.InvocationTarget.Should().Be(invocationTarget);
-        capability.AllowedAction.Should().Equal(allowedActions);
+        capability.AllowedAction.Should().BeEmpty();
         capability.Context.Should().Be("https://w3id.org/zcap/v1");
 
         // Root capabilities MUST NOT have:
@@ -142,14 +142,20 @@ public class CapabilityServiceTests
         var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
             parentController,
             invocationTarget,
-            new[] { "read" }); // Only "read" allowed
+            new[] { "read", "write" });
 
-        // Act & Assert - Try to delegate with "write" which is not allowed
-        var act = async () => await _capabilityService.DelegateCapabilityAsync(
+        var parentDelegation = await _capabilityService.DelegateCapabilityAsync(
             rootCapability,
+            parentController,
+            new[] { "read" },
+            DateTime.UtcNow.AddDays(20));
+
+        // Act & Assert - Try to delegate with "write", which expands delegated parent authority
+        var act = async () => await _capabilityService.DelegateCapabilityAsync(
+            parentDelegation,
             newController,
             new[] { "read", "write" }, // Trying to add "write"
-            DateTime.UtcNow.AddDays(30));
+            DateTime.UtcNow.AddDays(10));
 
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("*cannot expand authority*");
@@ -207,8 +213,7 @@ public class CapabilityServiceTests
         var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
             parentController,
             invocationTarget,
-            new[] { "read" },
-            caveats: new Caveat[] { parentCaveat });
+            new[] { "read", "write" });
 
         var childCaveat = new UsageCountCaveat
         {
@@ -216,12 +221,19 @@ public class CapabilityServiceTests
             CurrentUses = 0
         };
 
+        var parentDelegation = await _capabilityService.DelegateCapabilityAsync(
+            rootCapability,
+            parentController,
+            new[] { "read" },
+            DateTime.UtcNow.AddDays(20),
+            new Caveat[] { parentCaveat });
+
         // Act
         var delegatedCapability = await _capabilityService.DelegateCapabilityAsync(
-            rootCapability,
+            parentDelegation,
             newController,
             new[] { "read" },
-            DateTime.UtcNow.AddDays(30),
+            DateTime.UtcNow.AddDays(10),
             new Caveat[] { childCaveat });
 
         // Assert

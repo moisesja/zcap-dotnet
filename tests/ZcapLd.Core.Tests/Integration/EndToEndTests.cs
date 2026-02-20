@@ -147,9 +147,11 @@ public class EndToEndTests
     [Fact]
     public async Task CompleteWorkflow_WithExpirationCaveat_ShouldEnforce()
     {
-        // Arrange - Create capability with expiration caveat
-        var controllerDid = "did:key:z6MkController";
-        _signingService.GenerateAndRegisterKeyPair(controllerDid);
+        // Arrange - Create delegated capability with expiration caveat
+        var rootControllerDid = "did:key:z6MkRootController";
+        var delegatedControllerDid = "did:key:z6MkDelegatedController";
+        _signingService.GenerateAndRegisterKeyPair(rootControllerDid);
+        _signingService.GenerateAndRegisterKeyPair(delegatedControllerDid);
 
         var expirationCaveat = new ExpirationCaveat
         {
@@ -157,32 +159,40 @@ public class EndToEndTests
         };
 
         var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
-            controllerDid,
+            rootControllerDid,
             "https://api.example.com/documents",
+            new[] { "read", "write" });
+
+        var delegatedCapability = await _capabilityService.DelegateCapabilityAsync(
+            rootCapability,
+            delegatedControllerDid,
             new[] { "read" },
-            caveats: new Caveat[] { expirationCaveat });
+            DateTime.UtcNow.AddDays(5),
+            new Caveat[] { expirationCaveat });
 
         // Act - Invoke before expiration
         var invocation = new Invocation
         {
-            Capability = rootCapability.Id,
+            Capability = delegatedCapability.Id,
             CapabilityAction = "read",
             InvocationTarget = "https://api.example.com/documents/doc1"
         };
 
-        invocation.Proof = await _signingService.SignInvocationAsync(invocation, controllerDid);
+        invocation.Proof = await _signingService.SignInvocationAsync(invocation, delegatedControllerDid);
 
         // Assert - Should succeed
-        var isValid = await _verificationService.VerifyInvocationAsync(invocation, rootCapability);
+        var isValid = await _verificationService.VerifyInvocationAsync(invocation, delegatedCapability);
         isValid.Should().BeTrue();
     }
 
     [Fact]
     public async Task CompleteWorkflow_WithExpiredCaveat_ShouldReject()
     {
-        // Arrange - Create capability with expired caveat
-        var controllerDid = "did:key:z6MkController";
-        _signingService.GenerateAndRegisterKeyPair(controllerDid);
+        // Arrange - Create delegated capability with expired caveat
+        var rootControllerDid = "did:key:z6MkRootController";
+        var delegatedControllerDid = "did:key:z6MkDelegatedController";
+        _signingService.GenerateAndRegisterKeyPair(rootControllerDid);
+        _signingService.GenerateAndRegisterKeyPair(delegatedControllerDid);
 
         var expirationCaveat = new ExpirationCaveat
         {
@@ -190,32 +200,40 @@ public class EndToEndTests
         };
 
         var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
-            controllerDid,
+            rootControllerDid,
             "https://api.example.com/documents",
+            new[] { "read", "write" });
+
+        var delegatedCapability = await _capabilityService.DelegateCapabilityAsync(
+            rootCapability,
+            delegatedControllerDid,
             new[] { "read" },
-            caveats: new Caveat[] { expirationCaveat });
+            DateTime.UtcNow.AddDays(5),
+            new Caveat[] { expirationCaveat });
 
         // Act - Try to invoke after expiration
         var invocation = new Invocation
         {
-            Capability = rootCapability.Id,
+            Capability = delegatedCapability.Id,
             CapabilityAction = "read",
             InvocationTarget = "https://api.example.com/documents/doc1"
         };
 
-        invocation.Proof = await _signingService.SignInvocationAsync(invocation, controllerDid);
+        invocation.Proof = await _signingService.SignInvocationAsync(invocation, delegatedControllerDid);
 
         // Assert - Should fail
-        var isValid = await _verificationService.VerifyInvocationAsync(invocation, rootCapability);
+        var isValid = await _verificationService.VerifyInvocationAsync(invocation, delegatedCapability);
         isValid.Should().BeFalse();
     }
 
     [Fact]
     public async Task CompleteWorkflow_WithUsageCountCaveat_ShouldEnforce()
     {
-        // Arrange - Create capability with usage count caveat
-        var controllerDid = "did:key:z6MkController";
-        _signingService.GenerateAndRegisterKeyPair(controllerDid);
+        // Arrange - Create delegated capability with usage count caveat
+        var rootControllerDid = "did:key:z6MkRootController";
+        var delegatedControllerDid = "did:key:z6MkDelegatedController";
+        _signingService.GenerateAndRegisterKeyPair(rootControllerDid);
+        _signingService.GenerateAndRegisterKeyPair(delegatedControllerDid);
 
         var usageCaveat = new UsageCountCaveat
         {
@@ -224,37 +242,43 @@ public class EndToEndTests
         };
 
         var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
-            controllerDid,
+            rootControllerDid,
             "https://api.example.com/documents",
+            new[] { "read", "write" });
+
+        var delegatedCapability = await _capabilityService.DelegateCapabilityAsync(
+            rootCapability,
+            delegatedControllerDid,
             new[] { "read" },
-            caveats: new Caveat[] { usageCaveat });
+            DateTime.UtcNow.AddDays(5),
+            new Caveat[] { usageCaveat });
 
         // Act - Invoke within usage limit
         var invocation = new Invocation
         {
-            Capability = rootCapability.Id,
+            Capability = delegatedCapability.Id,
             CapabilityAction = "read",
             InvocationTarget = "https://api.example.com/documents/doc1"
         };
 
-        invocation.Proof = await _signingService.SignInvocationAsync(invocation, controllerDid);
+        invocation.Proof = await _signingService.SignInvocationAsync(invocation, delegatedControllerDid);
 
         // Assert - Should succeed
-        var isValid = await _verificationService.VerifyInvocationAsync(invocation, rootCapability);
+        var isValid = await _verificationService.VerifyInvocationAsync(invocation, delegatedCapability);
         isValid.Should().BeTrue();
 
         // Simulate usage increments
         usageCaveat.CurrentUses = 1;
-        isValid = await _verificationService.VerifyInvocationAsync(invocation, rootCapability);
+        isValid = await _verificationService.VerifyInvocationAsync(invocation, delegatedCapability);
         isValid.Should().BeTrue();
 
         usageCaveat.CurrentUses = 2;
-        isValid = await _verificationService.VerifyInvocationAsync(invocation, rootCapability);
+        isValid = await _verificationService.VerifyInvocationAsync(invocation, delegatedCapability);
         isValid.Should().BeTrue();
 
         // At limit - should fail
         usageCaveat.CurrentUses = 3;
-        isValid = await _verificationService.VerifyInvocationAsync(invocation, rootCapability);
+        isValid = await _verificationService.VerifyInvocationAsync(invocation, delegatedCapability);
         isValid.Should().BeFalse();
     }
 
@@ -268,19 +292,25 @@ public class EndToEndTests
         _signingService.GenerateAndRegisterKeyPair(controller1);
         _signingService.GenerateAndRegisterKeyPair(controller2);
 
-        // Root with expiration caveat
+        // Root without caveats; add caveat on first delegation.
         var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
             controller1,
             "https://api.example.com/documents",
+            new[] { "read", "write" });
+
+        var parentDelegation = await _capabilityService.DelegateCapabilityAsync(
+            rootCapability,
+            controller1,
             new[] { "read", "write" },
-            caveats: new Caveat[]
+            DateTime.UtcNow.AddDays(7),
+            new Caveat[]
             {
                 new ExpirationCaveat { Expires = DateTime.UtcNow.AddDays(10) }
             });
 
-        // Delegation with additional usage count caveat
+        // Second delegation with additional usage count caveat.
         var delegatedCapability = await _capabilityService.DelegateCapabilityAsync(
-            rootCapability,
+            parentDelegation,
             controller2,
             new[] { "read" },
             DateTime.UtcNow.AddDays(5),

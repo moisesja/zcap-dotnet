@@ -296,14 +296,21 @@ public class NormativeUnitComplianceTests
     public async Task Should05_CapabilityAction_ShouldBeReadOrWrite()
     {
         var fixture = new ComplianceTestFixture();
-        var controllerDid = fixture.RegisterControllerDid();
+        var parentDid = fixture.RegisterControllerDid();
+        var childDid = fixture.RegisterControllerDid();
 
         var root = await fixture.CapabilityService.CreateRootCapabilityAsync(
-            controllerDid,
+            parentDid,
             "https://example.com/resources",
-            new[] { "admin" });
+            new[] { "read", "write" });
 
-        var isValid = await fixture.CapabilityService.ValidateCapabilityAsync(root);
+        var delegated = await fixture.CapabilityService.DelegateCapabilityAsync(
+            root,
+            childDid,
+            new[] { "admin" },
+            DateTime.UtcNow.AddDays(5));
+
+        var isValid = await fixture.CapabilityService.ValidateCapabilityAsync(delegated);
         isValid.Should().BeFalse("SHOULD-05 expects enforcement or explicit validation feedback for non-standard actions.");
     }
 

@@ -42,92 +42,85 @@ public class VerificationService : IVerificationService
             return capability.Proof == null;
         }
 
-        // Delegated capability MUST have a proof
-        if (capability.Proof == null)
-            return false;
-
-        // Verify proof purpose is capabilityDelegation
-        if (capability.Proof.ProofPurpose != "capabilityDelegation")
-            return false;
-
         try
         {
-            // SECURITY FIX: MUST-09 - Verify the signer is authorized by the parent's controller
-            // Extract parent from capability chain to verify authorization
-            if (capability.Proof.CapabilityChain != null && capability.Proof.CapabilityChain.Length > 0)
-            {
-                // Get the parent capability from the chain (last element should be parent object per spec)
-                var lastElement = capability.Proof.CapabilityChain[^1];
-                Capability? parentCapability = null;
-
-                if (lastElement is JsonElement jsonElement && jsonElement.ValueKind == JsonValueKind.Object)
-                {
-                    parentCapability = JsonSerializer.Deserialize<Capability>(jsonElement.GetRawText());
-                }
-                else if (lastElement is Capability parentCap)
-                {
-                    parentCapability = parentCap;
-                }
-                else if (lastElement is JsonElement stringElement && stringElement.ValueKind == JsonValueKind.String)
-                {
-                    // COMPLIANCE FIX: MUST-09 - Chain with only string ID is malformed
-                    // Per W3C spec, the last element MUST be the parent capability object (not just ID)
-                    // This prevents attackers from creating delegations without providing verifiable parent
-                    return false;
-                }
-                else if (lastElement is string rootIdString)
-                {
-                    // COMPLIANCE FIX: MUST-09 - Chain with only string ID is malformed
-                    // Per W3C spec, the last element MUST be the parent capability object (not just ID)
-                    // This prevents attackers from creating delegations without providing verifiable parent
-                    return false;
-                }
-
-                // Verify the signer is authorized by the parent's controller
-                if (parentCapability != null)
-                {
-                    if (!IsControllerAuthorized(capability.Proof.VerificationMethod, parentCapability))
-                    {
-                        return false;
-                    }
-                }
-                else
-                {
-                    // If we couldn't extract parent capability, the chain is malformed
-                    return false;
-                }
-            }
-
-            // Get the public key for verification
-            var publicKey = await ResolvePublicKeyAsync(capability.Proof.VerificationMethod);
-
-            // Serialize the capability without the proof
-            var capabilityWithoutProof = new Capability
-            {
-                Context = capability.Context,
-                Id = capability.Id,
-                ParentCapability = capability.ParentCapability,
-                Controller = capability.Controller,
-                InvocationTarget = capability.InvocationTarget,
-                Expires = capability.Expires,
-                AllowedAction = capability.AllowedAction,
-                Caveat = capability.Caveat,
-                Proof = null
-            };
-
-            // TODO S-03: Full cryptographic binding of proof metadata deferred due to
-            // DateTime serialization complexity. Currently verifying document only.
-
-            // Canonicalize and verify signature
-            var canonicalBytes = Ed25519Signer.CanonicalizeDocument(capabilityWithoutProof);
-            var signatureBytes = Ed25519Signer.DecodeSignature(capability.Proof.ProofValue);
-
-            return Ed25519Signer.Verify(canonicalBytes, signatureBytes, publicKey);
+            // Standalone proof verification requires parent authorization context.
+            return await VerifyDelegationProofAsync(
+                capability,
+                parentCapabilityOverride: null,
+                requireParentAuthorization: true);
         }
         catch
         {
             return false;
         }
+    }
+
+    /// <summary>
+    /// Verifies a delegated capability proof, optionally using an already-resolved parent.
+    /// </summary>
+    private async Task<bool> VerifyDelegationProofAsync(
+        Capability capability,
+        Capability? parentCapabilityOverride,
+        bool requireParentAuthorization)
+    {
+        if (capability.Proof == null)
+        {
+            return false;
+        }
+
+        if (capability.Proof.ProofPurpose != "capabilityDelegation")
+        {
+            return false;
+        }
+
+        var parentCapability = parentCapabilityOverride;
+        if (parentCapability == null &&
+            !TryExtractEmbeddedParentFromProofChain(capability.Proof.CapabilityChain, out parentCapability))
+        {
+            if (requireParentAuthorization)
+            {
+                // Without embedded parent context, standalone authorization cannot be proven.
+                return false;
+            }
+        }
+
+        if (parentCapability != null &&
+            !string.IsNullOrWhiteSpace(parentCapability.Controller) &&
+            !IsControllerAuthorized(capability.Proof.VerificationMethod, parentCapability))
+        {
+            return false;
+        }
+
+        if (requireParentAuthorization &&
+            (parentCapability == null || string.IsNullOrWhiteSpace(parentCapability.Controller)))
+        {
+            return false;
+        }
+
+        // Get the public key for verification
+        var publicKey = await ResolvePublicKeyAsync(capability.Proof.VerificationMethod);
+
+        // Serialize the capability without the proof
+        var capabilityWithoutProof = new Capability
+        {
+            Context = capability.Context,
+            Id = capability.Id,
+            ParentCapability = capability.ParentCapability,
+            Controller = capability.Controller,
+            InvocationTarget = capability.InvocationTarget,
+            Expires = capability.Expires,
+            AllowedAction = capability.AllowedAction,
+            Caveat = capability.Caveat,
+            Proof = null
+        };
+
+        // TODO S-03: Full cryptographic binding of proof metadata deferred due to
+        // DateTime serialization complexity. Currently verifying document only.
+        var canonicalBytes = Ed25519Signer.CanonicalizeDocument(capabilityWithoutProof);
+        var signatureBytes = Ed25519Signer.DecodeSignature(capability.Proof.ProofValue);
+
+        return Ed25519Signer.Verify(canonicalBytes, signatureBytes, publicKey);
     }
 
     /// <summary>
@@ -224,31 +217,21 @@ public class VerificationService : IVerificationService
             // 1. Check chain length (MUST limit, SHOULD be max 10)
             if (chain.Count > MaxChainLength)
             {
-                // COMPLIANCE FIX: Throw exception for chain length violations
-                // This prevents long-chain attacks and provides clear error messages
-                throw new CapabilityValidationException(
-                    $"Capability chain length ({chain.Count}) exceeds maximum allowed ({MaxChainLength})");
+                return false;
             }
 
             // 2. Verify each link in the chain
-            for (int i = chain.Count - 1; i > 0; i--)
+            for (int i = 1; i < chain.Count; i++)
             {
-                var child = chain[i];
                 var parent = chain[i - 1];
+                var child = chain[i];
 
                 // Verify delegation proof
-                if (!await VerifyCapabilityProofAsync(child))
+                if (!await VerifyDelegationProofAsync(
+                        child,
+                        parentCapabilityOverride: parent,
+                        requireParentAuthorization: false))
                     return false;
-
-                // SECURITY FIX S-02: Verify that the delegation signer is authorized by parent's controller
-                // The verificationMethod in the child's proof MUST be controlled by the parent's controller
-                if (child.Proof?.VerificationMethod != null)
-                {
-                    if (!IsControllerAuthorized(child.Proof.VerificationMethod, parent))
-                    {
-                        return false;
-                    }
-                }
 
                 // Verify attenuation (child is more restrictive than parent)
                 if (!ValidateAttenuation(child, parent))
@@ -269,11 +252,6 @@ public class VerificationService : IVerificationService
                 return false;
 
             return true;
-        }
-        catch (CapabilityValidationException)
-        {
-            // Re-throw validation exceptions (chain length, chain building errors, etc.)
-            throw;
         }
         catch
         {
@@ -403,12 +381,12 @@ public class VerificationService : IVerificationService
     /// <summary>
     /// Builds the complete capability chain from leaf to root
     /// </summary>
-    private async Task<List<Capability>> BuildCapabilityChainAsync(Capability capability)
+    private Task<List<Capability>> BuildCapabilityChainAsync(Capability capability)
     {
         var chain = new List<Capability>();
         var current = capability;
 
-        while (current != null)
+        while (true)
         {
             chain.Insert(0, current); // Add to beginning to build root->leaf order
 
@@ -418,84 +396,58 @@ public class VerificationService : IVerificationService
                 break;
             }
 
-            // For delegated capabilities, the parent should be embedded in the proof's capabilityChain
-            if (current.Proof?.CapabilityChain != null && current.Proof.CapabilityChain.Length > 0)
-            {
-                // Last element should be the parent capability object (or root ID for first-level delegations)
-                var lastElement = current.Proof.CapabilityChain[^1];
-
-                if (lastElement is JsonElement jsonElement)
-                {
-                    if (jsonElement.ValueKind == JsonValueKind.Object)
-                    {
-                        current = JsonSerializer.Deserialize<Capability>(jsonElement.GetRawText());
-                    }
-                    else if (jsonElement.ValueKind == JsonValueKind.String)
-                    {
-                        // It's a string ID - should be the root capability ID
-                        var parentId = jsonElement.GetString();
-                        if (parentId == current.ParentCapability)
-                        {
-                            // This is a first-level delegation with just the root ID
-                            // Root capabilities can't be embedded since they have no proof
-                            // Create a minimal root capability object for chain validation
-                            var root = new Capability
-                            {
-                                Id = parentId,
-                                ParentCapability = null,
-                                Controller = ExtractControllerFromProof(current.Proof),
-                                InvocationTarget = current.InvocationTarget,
-                                AllowedAction = current.AllowedAction,
-                                Proof = null // Root has no proof
-                            };
-                            chain.Insert(0, root);
-                            break;
-                        }
-                        throw new CapabilityValidationException(
-                            $"Capability chain contains string ID '{parentId}' that doesn't match parent '{current.ParentCapability}'");
-                    }
-                }
-                else if (lastElement is Capability parentCap)
-                {
-                    current = parentCap;
-                }
-                else if (lastElement is string stringId)
-                {
-                    // It's a string ID - should be the root capability ID
-                    if (stringId == current.ParentCapability)
-                    {
-                        // This is a first-level delegation with just the root ID
-                        // Root capabilities can't be embedded since they have no proof
-                        // Create a minimal root capability object for chain validation
-                        var root = new Capability
-                        {
-                            Id = stringId,
-                            ParentCapability = null,
-                            Controller = ExtractControllerFromProof(current.Proof),
-                            InvocationTarget = current.InvocationTarget,
-                            AllowedAction = current.AllowedAction,
-                            Proof = null // Root has no proof
-                        };
-                        chain.Insert(0, root);
-                        break;
-                    }
-                    throw new CapabilityValidationException(
-                        $"Capability chain contains string ID '{stringId}' that doesn't match parent '{current.ParentCapability}'");
-                }
-                else
-                {
-                    throw new CapabilityValidationException(
-                        "Parent capability not properly embedded in capability chain");
-                }
-            }
-            else
+            if (current.Proof?.CapabilityChain == null || current.Proof.CapabilityChain.Length == 0)
             {
                 throw new CapabilityValidationException(
                     "Delegated capability missing capabilityChain in proof");
             }
+
+            var chainRootId = TryExtractStringValue(current.Proof.CapabilityChain[0]);
+            if (string.IsNullOrWhiteSpace(chainRootId))
+            {
+                throw new CapabilityValidationException(
+                    "capabilityChain first entry MUST be the root capability ID string");
+            }
+
+            // Direct delegation from root: chain contains only the root capability ID.
+            if (current.Proof.CapabilityChain.Length == 1)
+            {
+                if (!string.Equals(chainRootId, current.ParentCapability, StringComparison.Ordinal))
+                {
+                    throw new CapabilityValidationException(
+                        $"Capability chain root ID '{chainRootId}' does not match parentCapability '{current.ParentCapability}'");
+                }
+
+                current = new Capability
+                {
+                    Id = chainRootId,
+                    ParentCapability = null,
+                    InvocationTarget = current.InvocationTarget,
+                    AllowedAction = Array.Empty<string>(),
+                    Caveat = Array.Empty<Caveat>(),
+                    Proof = null
+                };
+
+                continue;
+            }
+
+            if (!TryDeserializeCapability(current.Proof.CapabilityChain[^1], out var parentCapability) ||
+                parentCapability == null)
+            {
+                throw new CapabilityValidationException(
+                    "capabilityChain last entry MUST embed the immediate parent capability object");
+            }
+
+            if (!string.Equals(parentCapability.Id, current.ParentCapability, StringComparison.Ordinal))
+            {
+                throw new CapabilityValidationException(
+                    $"Embedded parent capability ID '{parentCapability.Id}' does not match parentCapability '{current.ParentCapability}'");
+            }
+
+            current = parentCapability;
         }
 
-        return chain;
+        return Task.FromResult(chain);
     }
 
     /// <summary>
@@ -573,16 +525,55 @@ public class VerificationService : IVerificationService
         return did == capability.Controller || verificationMethod == capability.Controller;
     }
 
-    /// <summary>
-    /// Extracts the controller DID from a proof's verification method
-    /// </summary>
-    private string ExtractControllerFromProof(Proof? proof)
+    private static bool TryExtractEmbeddedParentFromProofChain(object[]? capabilityChain, out Capability? parentCapability)
     {
-        if (proof?.VerificationMethod == null)
-            return string.Empty;
+        parentCapability = null;
+        if (capabilityChain == null || capabilityChain.Length == 0)
+        {
+            return false;
+        }
 
-        // Extract base DID (before fragment)
-        return proof.VerificationMethod.Split('#')[0];
+        if (TryDeserializeCapability(capabilityChain[^1], out var parsedParent))
+        {
+            parentCapability = parsedParent;
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool TryDeserializeCapability(object element, out Capability? capability)
+    {
+        capability = null;
+
+        if (element is Capability cap)
+        {
+            capability = cap;
+            return true;
+        }
+
+        if (element is JsonElement jsonElement && jsonElement.ValueKind == JsonValueKind.Object)
+        {
+            capability = JsonSerializer.Deserialize<Capability>(jsonElement.GetRawText());
+            return capability != null;
+        }
+
+        return false;
+    }
+
+    private static string? TryExtractStringValue(object element)
+    {
+        if (element is string value)
+        {
+            return value;
+        }
+
+        if (element is JsonElement jsonElement && jsonElement.ValueKind == JsonValueKind.String)
+        {
+            return jsonElement.GetString();
+        }
+
+        return null;
     }
 
     /// <summary>

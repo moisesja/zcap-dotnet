@@ -19,9 +19,6 @@
     <!-- Cryptography for Ed25519 signing/verification -->
     <PackageReference Include="NSec.Cryptography" Version="25.4.0" />
 
-    <!-- JSON serialization -->
-    <PackageReference Include="System.Text.Json" Version="9.0.1" />
-
     <!-- Base58 multibase encoding -->
     <PackageReference Include="SimpleBase" Version="4.0.0" />
   </ItemGroup>

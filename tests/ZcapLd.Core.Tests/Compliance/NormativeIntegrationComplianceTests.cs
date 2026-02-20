@@ -102,15 +102,22 @@ public class NormativeIntegrationComplianceTests
     {
         var fixture = new ComplianceTestFixture();
         var parentDid = fixture.RegisterControllerDid();
+        var middleDid = fixture.RegisterControllerDid();
         var childDid = fixture.RegisterControllerDid();
 
         var root = await fixture.CapabilityService.CreateRootCapabilityAsync(
             parentDid,
             "https://example.com/resources",
-            new[] { "read" });
+            new[] { "read", "write" });
+
+        var parentDelegation = await fixture.CapabilityService.DelegateCapabilityAsync(
+            root,
+            middleDid,
+            new[] { "read" },
+            DateTime.UtcNow.AddDays(10));
 
         var act = async () => await fixture.CapabilityService.DelegateCapabilityAsync(
-            root,
+            parentDelegation,
             childDid,
             new[] { "read", "write" },
             DateTime.UtcNow.AddDays(7));
@@ -254,19 +261,26 @@ public class NormativeIntegrationComplianceTests
     {
         var fixture = new ComplianceTestFixture();
         var parentDid = fixture.RegisterControllerDid();
+        var middleDid = fixture.RegisterControllerDid();
         var childDid = fixture.RegisterControllerDid();
 
         var root = await fixture.CapabilityService.CreateRootCapabilityAsync(
             parentDid,
             "https://example.com/resources",
+            new[] { "read" });
+
+        var parentDelegation = await fixture.CapabilityService.DelegateCapabilityAsync(
+            root,
+            middleDid,
             new[] { "read" },
-            caveats: new Caveat[]
+            DateTime.UtcNow.AddDays(14),
+            new Caveat[]
             {
                 new ExpirationCaveat { Expires = DateTime.UtcNow.AddMinutes(-5) }
             });
 
         var delegated = await fixture.CapabilityService.DelegateCapabilityAsync(
-            root,
+            parentDelegation,
             childDid,
             new[] { "read" },
             DateTime.UtcNow.AddDays(7));
@@ -351,4 +365,3 @@ public class NormativeIntegrationComplianceTests
             "SHOULD-04 recommends rejecting unreasonably long delegated expirations.");
     }
 }
-

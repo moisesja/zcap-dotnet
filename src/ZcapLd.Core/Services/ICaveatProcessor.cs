@@ -28,7 +28,7 @@ public interface ICaveatProcessor
     /// <param name="parentCaveats">The parent capability's caveats</param>
     /// <param name="childCaveats">The child capability's caveats</param>
     /// <returns>True if child caveats are valid</returns>
-    Task<bool> ValidateCaveatCompatibilityAsync(Caveat[] parentCaveats, Caveat[] childCaveats);
+    Task<bool> ValidateCaveatCompatibilityAsync(Caveat[]? parentCaveats, Caveat[]? childCaveats);
 
     /// <summary>
     /// Evaluates all caveats from a complete capability chain

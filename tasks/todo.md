@@ -1,3 +1,32 @@
+# Remediation Plan - 2026-02-20 (Codex)
+
+## Scope
+
+Stabilize the post-remediation codebase and make behavior consistent with the repository's normative compliance model.
+
+## Plan
+
+- [x] Baseline current failures (`dotnet test ZcapLd.sln`) and identify mismatches between implementation and compliance expectations
+- [x] Fix verification chain/proof behavior for local embedded-chain validation (`MUST-18`) and chain-limit behavior (`MUST-13`)
+- [x] Keep strict root-capability semantics and align legacy tests to delegated-capability restrictions where required
+- [x] Update compliance tests with root-incompatible setups (`MUST-12`, `MUST-20`, `SHOULD-05`) to equivalent delegated scenarios
+- [x] Run full tests, resolve residual failures, and capture final review notes in this file
+
+## Verification Log
+
+- [x] `dotnet test ZcapLd.sln` (baseline captured): `Failed: 14, Passed: 143, Total: 157`
+- [x] `dotnet test tests/ZcapLd.Core.Tests/ZcapLd.Core.Tests.csproj --filter FullyQualifiedName~Compliance`: `Failed: 3, Passed: 26, Total: 29` (post-first remediation checkpoint)
+- [x] `dotnet test ZcapLd.sln` (final): `Failed: 0, Passed: 157, Total: 157`
+
+## Review
+
+- Verification service now distinguishes strict standalone delegation-proof checks from chain-context checks, enabling local embedded-chain validation while keeping malformed standalone first-level proofs rejected.
+- Chain-length violations now return `false` from verification flows instead of throwing.
+- Legacy tests that modeled root `allowedAction`/`caveat` behavior were migrated to delegated-capability scenarios, matching strict root semantics.
+- Normative tests `MUST-12`, `MUST-20`, and `SHOULD-05` now assert equivalent delegated scenarios that are compatible with strict root capability shape.
+
+---
+
 # ZCAP-LD Compliance + Security Audit Plan
 
 **Date**: 2026-02-20  

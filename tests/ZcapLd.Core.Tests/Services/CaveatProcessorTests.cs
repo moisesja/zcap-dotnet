@@ -593,13 +593,19 @@ public class CaveatProcessorTests
         var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
             controllerDid,
             "https://example.com/resource",
+            new[] { "read", "write" });
+
+        var delegatedCapability = await _capabilityService.DelegateCapabilityAsync(
+            rootCapability,
+            controllerDid,
             new[] { "read" },
-            caveats: new Caveat[]
+            DateTime.UtcNow.AddDays(5),
+            new Caveat[]
             {
                 new ExpirationCaveat { Expires = DateTime.UtcNow.AddDays(-1) } // Expired
             });
 
-        var chain = new[] { rootCapability };
+        var chain = new[] { rootCapability, delegatedCapability };
 
         var context = new InvocationContext
         {

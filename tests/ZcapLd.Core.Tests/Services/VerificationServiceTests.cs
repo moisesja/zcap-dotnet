@@ -206,7 +206,7 @@ public class VerificationServiceTests
     }
 
     [Fact]
-    public async Task VerifyCapabilityChain_ExceedsMaxLength_ShouldThrow()
+    public async Task VerifyCapabilityChain_ExceedsMaxLength_ShouldReturnFalse()
     {
         // Arrange - Create a chain longer than 10 delegations
         var controllers = new List<string>();
@@ -232,10 +232,11 @@ public class VerificationServiceTests
                 DateTime.UtcNow.AddDays(30));
         }
 
-        // Act & Assert
-        var act = async () => await _verificationService.VerifyCapabilityChainAsync(current);
-        await act.Should().ThrowAsync<CapabilityValidationException>()
-            .WithMessage("*exceeds maximum*");
+        // Act
+        var result = await _verificationService.VerifyCapabilityChainAsync(current);
+
+        // Assert
+        result.Should().BeFalse();
     }
 
     [Fact]
@@ -359,25 +360,33 @@ public class VerificationServiceTests
     public async Task VerifyInvocation_WithInvalidAction_ShouldReturnFalse()
     {
         // Arrange
-        var controllerDid = "did:key:z6MkController";
-        _signingService.GenerateAndRegisterKeyPair(controllerDid);
+        var rootControllerDid = "did:key:z6MkRootController";
+        var delegatedControllerDid = "did:key:z6MkDelegatedController";
+        _signingService.GenerateAndRegisterKeyPair(rootControllerDid);
+        _signingService.GenerateAndRegisterKeyPair(delegatedControllerDid);
 
         var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
-            controllerDid,
+            rootControllerDid,
             "https://example.com/resource",
-            new[] { "read" }); // Only "read" allowed
+            new[] { "read", "write" });
+
+        var delegatedCapability = await _capabilityService.DelegateCapabilityAsync(
+            rootCapability,
+            delegatedControllerDid,
+            new[] { "read" },
+            DateTime.UtcNow.AddDays(10));
 
         var invocation = new Invocation
         {
-            Capability = rootCapability.Id,
+            Capability = delegatedCapability.Id,
             CapabilityAction = "write", // Not allowed
             InvocationTarget = "https://example.com/resource"
         };
 
-        invocation.Proof = await _signingService.SignInvocationAsync(invocation, controllerDid);
+        invocation.Proof = await _signingService.SignInvocationAsync(invocation, delegatedControllerDid);
 
         // Act
-        var result = await _verificationService.VerifyInvocationAsync(invocation, rootCapability);
+        var result = await _verificationService.VerifyInvocationAsync(invocation, delegatedCapability);
 
         // Assert
         result.Should().BeFalse();
@@ -500,8 +509,10 @@ public class VerificationServiceTests
     public async Task VerifyInvocation_WithCaveats_ShouldEvaluateThem()
     {
         // Arrange
-        var controllerDid = "did:key:z6MkController";
-        _signingService.GenerateAndRegisterKeyPair(controllerDid);
+        var rootControllerDid = "did:key:z6MkRootController";
+        var delegatedControllerDid = "did:key:z6MkDelegatedController";
+        _signingService.GenerateAndRegisterKeyPair(rootControllerDid);
+        _signingService.GenerateAndRegisterKeyPair(delegatedControllerDid);
 
         var expiredCaveat = new ExpirationCaveat
         {
@@ -509,22 +520,28 @@ public class VerificationServiceTests
         };
 
         var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
-            controllerDid,
+            rootControllerDid,
             "https://example.com/resource",
+            new[] { "read" });
+
+        var delegatedCapability = await _capabilityService.DelegateCapabilityAsync(
+            rootCapability,
+            delegatedControllerDid,
             new[] { "read" },
-            caveats: new Caveat[] { expiredCaveat });
+            DateTime.UtcNow.AddDays(5),
+            new Caveat[] { expiredCaveat });
 
         var invocation = new Invocation
         {
-            Capability = rootCapability.Id,
+            Capability = delegatedCapability.Id,
             CapabilityAction = "read",
             InvocationTarget = "https://example.com/resource"
         };
 
-        invocation.Proof = await _signingService.SignInvocationAsync(invocation, controllerDid);
+        invocation.Proof = await _signingService.SignInvocationAsync(invocation, delegatedControllerDid);
 
         // Act
-        var result = await _verificationService.VerifyInvocationAsync(invocation, rootCapability);
+        var result = await _verificationService.VerifyInvocationAsync(invocation, delegatedCapability);
 
         // Assert
         result.Should().BeFalse(); // Caveat should cause failure
