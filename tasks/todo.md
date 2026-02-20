@@ -1,3 +1,34 @@
+# OSS NuGet Readiness Plan - 2026-02-20 (Codex)
+
+## Scope
+
+Prepare `zcap-dotnet` for open-source NuGet distribution, including package metadata, contributor/developer docs, and CI/CD automation.
+
+## Plan
+
+- [x] Add NuGet package metadata and packaging settings to `src/ZcapLd.Core/ZcapLd.Core.csproj`
+- [x] Add package-specific readme for NuGet and ensure it is packed
+- [x] Create `architecture.md` for developer architecture overview and data flow
+- [x] Create `contributors.md` and `CONTRIBUTING.md` with contributor workflow
+- [x] Update root `README.md` for OSS + NuGet publish/readme accuracy
+- [x] Add GitHub Actions CI pipeline for restore/build/test/pack
+- [x] Add GitHub Actions publish pipeline for tagged releases to NuGet.org
+- [x] Validate with `dotnet test` and `dotnet pack` locally
+
+## Verification Log
+
+- [x] `dotnet test ZcapLd.sln`: `Failed: 0, Passed: 157, Total: 157`
+- [x] `dotnet pack src/ZcapLd.Core/ZcapLd.Core.csproj -c Release`: generated `.nupkg` and `.snupkg` in `artifacts/`
+
+## Review
+
+- Added NuGet-ready package metadata, SourceLink, symbols, and packaged readme/license support.
+- Added OSS documentation set for architecture, contribution flow, contributors list, and NuGet release runbook.
+- Added GitHub Actions CI and release-to-NuGet workflows, plus Dependabot configuration.
+- Updated examples and README to match strict root capability semantics and delegated restriction behavior.
+
+---
+
 # Remediation Plan - 2026-02-20 (Codex)
 
 ## Scope

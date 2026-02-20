@@ -478,7 +478,8 @@ public class VerificationService : IVerificationService
 
     /// <summary>
     /// Validates invocation target matches or is valid prefix of capability target
-    /// Per spec: suffix MUST start with '/' or '?' if no '?', or '&' if '?' present
+    /// Per spec: suffix MUST start with slash or question mark if no query exists,
+    /// or ampersand when the capability target already contains a query.
     /// </summary>
     private bool IsValidInvocationTarget(string invocationTarget, string capabilityTarget)
     {

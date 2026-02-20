@@ -4,6 +4,25 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <PackageId>ZcapLd.Core</PackageId>
+    <Version>0.1.0</Version>
+    <Authors>Moises E Jaramillo</Authors>
+    <Description>.NET implementation of W3C ZCAP-LD for creating, delegating, and verifying authorization capabilities.</Description>
+    <PackageTags>zcap;zcap-ld;authorization;capability;did;linked-data;wallet</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>PACKAGE_README.md</PackageReadmeFile>
+    <PackageProjectUrl>https://github.com/moisesja/zcap-dotnet</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/moisesja/zcap-dotnet</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);1591</NoWarn>
+    <Deterministic>true</Deterministic>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <IncludeSourceRevisionInInformationalVersion>true</IncludeSourceRevisionInInformationalVersion>
+    <ContinuousIntegrationBuild Condition="'$(GITHUB_ACTIONS)' == 'true'">true</ContinuousIntegrationBuild>
   </PropertyGroup>
 
   <ItemGroup>
@@ -21,6 +40,14 @@
 
     <!-- Base58 multibase encoding -->
     <PackageReference Include="SimpleBase" Version="4.0.0" />
+
+    <!-- Embed source and commit metadata for debugging/open-source distribution -->
+    <PackageReference Include="Microsoft.SourceLink.GitHub" Version="8.0.0" PrivateAssets="All" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="PACKAGE_README.md" Pack="true" PackagePath="\" />
+    <None Include="../../LICENSE" Pack="true" PackagePath="\" Visible="false" />
   </ItemGroup>
 
 </Project>

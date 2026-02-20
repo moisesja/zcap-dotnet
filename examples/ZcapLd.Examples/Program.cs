@@ -29,7 +29,7 @@ var rootCapability = await capabilityService.CreateRootCapabilityAsync(
 Console.WriteLine($"Root Capability ID: {rootCapability.Id}");
 Console.WriteLine($"Controller: {rootCapability.Controller}");
 Console.WriteLine($"Invocation Target: {rootCapability.InvocationTarget}");
-Console.WriteLine($"Allowed Actions: {string.Join(", ", rootCapability.AllowedAction)}");
+Console.WriteLine($"Root Allowed Actions: {(rootCapability.AllowedAction.Length == 0 ? "(none by design)" : string.Join(", ", rootCapability.AllowedAction))}");
 Console.WriteLine($"Has Proof: {rootCapability.Proof != null}"); // Root capabilities have no proof
 Console.WriteLine();
 
@@ -139,11 +139,18 @@ Console.WriteLine("-------------------------------------");
 var davidDid = "did:key:z6MkDavid";
 signingService.GenerateAndRegisterKeyPair(davidDid);
 
-// Create a capability with expiration and usage count caveats
-var caveatCapability = await capabilityService.CreateRootCapabilityAsync(
+// Root first, then delegate with expiration and usage count caveats
+var caveatRoot = await capabilityService.CreateRootCapabilityAsync(
     controller: davidDid,
     invocationTarget: "https://api.example.com/data",
+    allowedActions: new[] { "query", "read" }
+);
+
+var caveatCapability = await capabilityService.DelegateCapabilityAsync(
+    parentCapability: caveatRoot,
+    newController: davidDid,
     allowedActions: new[] { "query" },
+    expires: DateTime.UtcNow.AddDays(1),
     caveats: new Caveat[]
     {
         new ExpirationCaveat
@@ -194,19 +201,28 @@ Console.WriteLine("Example 6: Attenuation Enforcement");
 Console.WriteLine("-----------------------------------");
 
 var eveDid = "did:key:z6MkEve";
+var restrictedDid = "did:key:z6MkRestricted";
 signingService.GenerateAndRegisterKeyPair(eveDid);
+signingService.GenerateAndRegisterKeyPair(restrictedDid);
 
-// Create root with broad permissions
-var broadCapability = await capabilityService.CreateRootCapabilityAsync(
+// Create root, then delegated parent with broad permissions
+var attenuationRoot = await capabilityService.CreateRootCapabilityAsync(
     controller: eveDid,
     invocationTarget: "https://api.example.com/resources",
     allowedActions: new[] { "read", "write", "delete", "admin" }
 );
 
+var broadCapability = await capabilityService.DelegateCapabilityAsync(
+    parentCapability: attenuationRoot,
+    newController: eveDid,
+    allowedActions: new[] { "read", "write", "delete", "admin" },
+    expires: DateTime.UtcNow.AddDays(30)
+);
+
 // Delegate with restricted target and actions
 var restrictedCapability = await capabilityService.DelegateCapabilityAsync(
     parentCapability: broadCapability,
-    newController: "did:key:z6MkRestricted",
+    newController: restrictedDid,
     allowedActions: new[] { "read" }, // Significantly attenuated
     expires: DateTime.UtcNow.AddDays(7)
 );
@@ -256,13 +272,22 @@ var sensitiveDoc = await capabilityService.CreateRootCapabilityAsync(
     allowedActions: new[] { "read", "write", "share", "delete" }
 );
 
+// Root controller creates an explicit delegated authority with full business actions.
+var adminAuthority = await capabilityService.DelegateCapabilityAsync(
+    parentCapability: sensitiveDoc,
+    newController: companyAdminDid,
+    allowedActions: new[] { "read", "write", "share", "delete" },
+    expires: DateTime.UtcNow.AddDays(180)
+);
+
 Console.WriteLine("Company Admin creates root capability for Q4 financials");
 Console.WriteLine($"  Capability: {sensitiveDoc.Id}");
-Console.WriteLine($"  Actions: {string.Join(", ", sensitiveDoc.AllowedAction)}");
+Console.WriteLine($"  Root Actions: {(sensitiveDoc.AllowedAction.Length == 0 ? "(none by design)" : string.Join(", ", sensitiveDoc.AllowedAction))}");
+Console.WriteLine($"  Admin Authority Actions: {string.Join(", ", adminAuthority.AllowedAction)}");
 
 // Admin delegates to Manager with sharing capability for 90 days
 var managerAccess = await capabilityService.DelegateCapabilityAsync(
-    parentCapability: sensitiveDoc,
+    parentCapability: adminAuthority,
     newController: managerDid,
     allowedActions: new[] { "read", "share" },
     expires: DateTime.UtcNow.AddDays(90)
