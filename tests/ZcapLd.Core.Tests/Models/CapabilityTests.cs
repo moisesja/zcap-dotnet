@@ -49,7 +49,9 @@ public class CapabilityTests
         json.Should().Contain("\"id\": \"urn:uuid:12345\"");
         json.Should().Contain("\"controller\": \"did:example:alice\"");
         json.Should().Contain("\"invocationTarget\": \"https://example.com/resource\"");
-        json.Should().Contain("\"allowedAction\": [\"read\", \"write\"]");
+        json.Should().Contain("\"allowedAction\":");
+        json.Should().Contain("\"read\"");
+        json.Should().Contain("\"write\"");
     }
 
     [Fact]

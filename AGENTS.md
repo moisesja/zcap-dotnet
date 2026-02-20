@@ -4,7 +4,7 @@ This file provides instructions for AI agents and human contributors working in 
 
 ## Project Overview
 
-W3C’s ZCAP-LD (Authorization Capabilities for Linked Data) specification defines an object-capability model where authority is granted by possessing a signed “capability” document, rather than by identity or ACLs. A ZCAP-LD capability is a JSON-LD object containing fields like id, invocationTarget, and a cryptographic proof. It can delegate authority by linking to a parent capability (parentCapability) and attaching restrictions called caveats. This model “shifts the burden of identification…to directly work with individuals’ actual capabilities” – in other words, “if you have a valid ‘capability’, you have the authorization” (akin to holding a car key). Our goal is to build a .NET 9 library (for use in-process or via gRPC) that can create, sign, delegate, invoke, and verify ZCAP-LD capabilities for digital wallet agents (using Trinsic for DID/key management). Below are the key requirements and design points.
+W3C's ZCAP-LD (Authorization Capabilities for Linked Data) specification defines an object-capability model where authority is granted by possessing a signed "capability" document, rather than by identity or ACLs. A ZCAP-LD capability is a JSON-LD object containing fields like id, invocationTarget, and a cryptographic proof. It can delegate authority by linking to a parent capability (parentCapability) and attaching restrictions called caveats. This model "shifts the burden of identification…to directly work with individuals' actual capabilities" – in other words, "if you have a valid 'capability', you have the authorization" (akin to holding a car key). Our goal is to build a .NET 10 library (for use in-process or via gRPC) that can create, sign, delegate, invoke, and verify ZCAP-LD capabilities for digital wallet agents (using Trinsic for DID/key management). Below are the key requirements and design points.
 
 ## Key Requirements and Design
 
@@ -22,7 +22,7 @@ W3C’s ZCAP-LD (Authorization Capabilities for Linked Data) specification defin
 
 - Architecture (In-Process vs gRPC): Since signing uses private keys, implementing this logic in-process (within the same application or service) is simplest. However, you may optionally expose the functionality over gRPC or HTTP for remote agents. For a library, ensure that signing and verification functions are thread-safe and do not persist private keys beyond needed scope. If exposing via gRPC, design service methods like CreateCapability(), DelegateCapability(), VerifyInvocation().
 
-- WASM/Interop Support: (Optional) .NET 8/9 supports building WebAssembly via WASI. The spec use-case hints at cross-environment usage (e.g. Python or JS agents). Consider structuring code for AOT compilation: avoid heavy native dependencies, and test with .NET 9’s wasi-experimental workload. This would allow consuming the library as a Wasm module in other languages. For now, focus on core functionality; WASM/Trinity integration can be added later.
+- WASM/Interop Support: (Optional) .NET 10 supports building WebAssembly via WASI. The spec use-case hints at cross-environment usage (e.g. Python or JS agents). Consider structuring code for AOT compilation: avoid heavy native dependencies, and test with .NET 10's wasi-experimental workload. This would allow consuming the library as a Wasm module in other languages. For now, focus on core functionality; WASM/Trinity integration can be added later.
 
 ## Project Structure
 
