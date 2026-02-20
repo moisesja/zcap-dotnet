@@ -35,4 +35,11 @@ public interface ISigningService
     /// <param name="did">The DID to resolve</param>
     /// <returns>The verification method URI</returns>
     Task<string> GetVerificationMethodAsync(string did);
+
+    /// <summary>
+    /// Gets the public key for a registered DID
+    /// </summary>
+    /// <param name="did">The DID to get the public key for</param>
+    /// <returns>The public key bytes</returns>
+    byte[] GetPublicKey(string did);
 }

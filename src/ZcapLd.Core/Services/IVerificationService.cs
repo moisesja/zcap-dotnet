@@ -35,4 +35,21 @@ public interface IVerificationService
     /// <param name="did">The DID to resolve</param>
     /// <returns>The public key bytes</returns>
     Task<byte[]> ResolvePublicKeyAsync(string did);
+
+    /// <summary>
+    /// Revokes a capability by ID
+    /// COMPLIANCE FIX: MUST-21, SHOULD-07 - Revocation support
+    /// </summary>
+    /// <param name="capabilityId">The ID of the capability to revoke</param>
+    /// <param name="revokerDid">The DID of the entity performing the revocation</param>
+    /// <returns>True if revocation was successful</returns>
+    Task<bool> RevokeCapabilityAsync(string capabilityId, string revokerDid);
+
+    /// <summary>
+    /// Checks if a capability has been revoked
+    /// COMPLIANCE FIX: MUST-21 - Check revocation status
+    /// </summary>
+    /// <param name="capabilityId">The ID of the capability to check</param>
+    /// <returns>True if the capability has been revoked</returns>
+    Task<bool> IsCapabilityRevokedAsync(string capabilityId);
 }

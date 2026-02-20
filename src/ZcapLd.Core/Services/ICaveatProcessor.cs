@@ -29,4 +29,13 @@ public interface ICaveatProcessor
     /// <param name="childCaveats">The child capability's caveats</param>
     /// <returns>True if child caveats are valid</returns>
     Task<bool> ValidateCaveatCompatibilityAsync(Caveat[] parentCaveats, Caveat[] childCaveats);
+
+    /// <summary>
+    /// Evaluates all caveats from a complete capability chain
+    /// SECURITY: This ensures ALL inherited caveats are checked, preventing caveat bypass
+    /// </summary>
+    /// <param name="capabilityChain">The complete capability chain from root to leaf</param>
+    /// <param name="context">The invocation context</param>
+    /// <returns>True if all caveats in the chain are satisfied</returns>
+    Task<bool> EvaluateCapabilityChainCaveatsAsync(Capability[] capabilityChain, InvocationContext context);
 }

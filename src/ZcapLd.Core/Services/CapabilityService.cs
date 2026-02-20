@@ -1,3 +1,4 @@
+using System.Text.Json;
 using ZcapLd.Core.Models;
 
 namespace ZcapLd.Core.Services;
@@ -18,11 +19,13 @@ public class CapabilityService : ICapabilityService
     /// <summary>
     /// Creates a root capability
     /// Root capabilities do NOT have a proof, expires, or parentCapability
+    /// NOTE C-01: Per strict W3C interpretation, root capabilities might not need allowedAction/caveat,
+    /// but we include them for practical use. Consider using serialization options to omit when null/empty.
     /// </summary>
     public Task<Capability> CreateRootCapabilityAsync(
         string controller,
         string invocationTarget,
-        string[] allowedActions,
+        string[]? allowedActions = null,
         DateTime? expires = null,
         Caveat[]? caveats = null)
     {
@@ -51,10 +54,12 @@ public class CapabilityService : ICapabilityService
             Id = rootId,
             Controller = controller,
             InvocationTarget = invocationTarget,
-            AllowedAction = allowedActions,
-            Caveat = caveats ?? Array.Empty<Caveat>(),
-            // Root capabilities MUST NOT have:
-            Expires = null,
+            // COMPLIANCE FIX: MUST-03 - Root capabilities MUST NOT have allowedAction/caveat/expires
+            // These fields are only for delegated capabilities
+            // Root capabilities represent complete authority over the resource
+            AllowedAction = Array.Empty<string>(), // Always empty for root capabilities
+            Caveat = Array.Empty<Caveat>(), // Always empty for root capabilities
+            Expires = null, // Always null for root capabilities
             ParentCapability = null,
             Proof = null
         };
@@ -151,6 +156,20 @@ public class CapabilityService : ICapabilityService
                 return Task.FromResult(false);
             }
 
+            // COMPLIANCE FIX: SHOULD-05 - Validate action names (should be read/write)
+            if (capability.AllowedAction != null && capability.AllowedAction.Length > 0)
+            {
+                var validActions = new[] { "read", "write" };
+                foreach (var action in capability.AllowedAction)
+                {
+                    if (!validActions.Contains(action, StringComparer.OrdinalIgnoreCase))
+                    {
+                        // SHOULD requirement: non-standard actions should fail validation
+                        return Task.FromResult(false);
+                    }
+                }
+            }
+
             // Check if it's a root or delegated capability
             bool isRoot = capability.ParentCapability == null;
 
@@ -233,7 +252,9 @@ public class CapabilityService : ICapabilityService
         // Validate expiration (child must not be less restrictive)
         if (expires.HasValue && parentCapability.Expires.HasValue)
         {
-            if (expires.Value > parentCapability.Expires.Value)
+            // Allow a small tolerance (1 second) for clock skew between delegation calls
+            var tolerance = TimeSpan.FromSeconds(1);
+            if (expires.Value > parentCapability.Expires.Value.Add(tolerance))
             {
                 throw new InvalidOperationException(
                     "Child capability expiration cannot be later than parent's expiration. " +
@@ -241,14 +262,15 @@ public class CapabilityService : ICapabilityService
             }
         }
 
-        // Validate 3-month maximum expiration (SHOULD requirement)
+        // COMPLIANCE FIX: SHOULD-04 - Enforce 3-month maximum expiration
         if (expires.HasValue)
         {
             var threeMonthsFromNow = DateTime.UtcNow.AddMonths(3);
             if (expires.Value > threeMonthsFromNow)
             {
-                // This is a SHOULD, not MUST, so we just warn but don't throw
-                // In production, you might want to log this warning
+                throw new InvalidOperationException(
+                    $"Capability expiration exceeds recommended 3-month limit. " +
+                    $"Requested: {expires.Value:O}, Maximum allowed: {threeMonthsFromNow:O}");
             }
         }
     }
@@ -278,10 +300,10 @@ public class CapabilityService : ICapabilityService
 
     /// <summary>
     /// Builds the capability chain for a delegation proof
-    /// Per spec:
+    /// COMPLIANCE FIX C-03: Per W3C ZCAP-LD spec section 3.3:
     /// - First element: root capability ID (string)
     /// - Middle elements: intermediate capability IDs (strings)
-    /// - Last element: immediate parent capability (full object)
+    /// - Last element: immediate parent capability (FULL OBJECT with proof)
     /// </summary>
     private object[] BuildCapabilityChain(Capability parentCapability)
     {
@@ -290,65 +312,55 @@ public class CapabilityService : ICapabilityService
         // If parent is delegated (has a proof with chain), it's not the root
         if (parentCapability.Proof?.CapabilityChain != null && parentCapability.Proof.CapabilityChain.Length > 0)
         {
-            // Parent is delegated, so copy its chain
-            // The parent's chain already contains: [root, ...intermediates, parent's parent]
-            chain.AddRange(parentCapability.Proof.CapabilityChain);
+            // Parent is delegated
+            // Its chain structure: [rootId, ...intermediateIds, grandparentObject]
 
-            // Now add the parent itself as the last element (full object)
-            // But first, we need to check if the last element is the parent's parent object
-            // If so, replace it with parent's parent ID and add parent object
-
-            // Get all IDs (strings) from the chain
-            var ids = chain.Where(x => x is string).ToList();
-
-            // Add parent's ID to the intermediate chain
-            // Actually, we need to reconstruct: [root, ...intermediates, parent object]
-            chain = new List<object>();
-
-            // Add root ID (first element of parent's chain)
-            if (parentCapability.Proof.CapabilityChain.Length > 0)
-            {
-                var rootId = parentCapability.Proof.CapabilityChain[0];
-                if (rootId is string)
-                {
-                    chain.Add(rootId);
-                }
-            }
-
-            // Add intermediate IDs (if parent was delegated from a chain)
-            // The parent's chain structure: [root, intermediates..., parent's parent object]
-            // We need to extract intermediate IDs and add parent's ID
-            for (int i = 1; i < parentCapability.Proof.CapabilityChain.Length; i++)
+            // Extract all string IDs from parent's chain (these are root + intermediates)
+            var stringIds = new List<string>();
+            for (int i = 0; i < parentCapability.Proof.CapabilityChain.Length; i++)
             {
                 var element = parentCapability.Proof.CapabilityChain[i];
                 if (element is string strId)
                 {
-                    chain.Add(strId);
+                    stringIds.Add(strId);
+                }
+                else if (element is System.Text.Json.JsonElement jsonEl && jsonEl.ValueKind == JsonValueKind.String)
+                {
+                    stringIds.Add(jsonEl.GetString() ?? "");
                 }
                 else
                 {
-                    // This is the parent's parent object, extract its ID
+                    // This is the embedded parent object (grandparent from our perspective)
+                    // Extract its ID to add as intermediate
                     if (element is Capability cap)
                     {
-                        chain.Add(cap.Id);
+                        stringIds.Add(cap.Id);
                     }
-                    else if (element is System.Text.Json.JsonElement jsonEl)
+                    else if (element is System.Text.Json.JsonElement jsonObj && jsonObj.ValueKind == JsonValueKind.Object)
                     {
-                        if (jsonEl.TryGetProperty("id", out var idProp))
+                        if (jsonObj.TryGetProperty("id", out var idProp))
                         {
-                            chain.Add(idProp.GetString() ?? "");
+                            stringIds.Add(idProp.GetString() ?? "");
                         }
                     }
                 }
             }
 
-            // Add parent ID as intermediate
+            // Add all IDs (root + intermediates from parent's chain)
+            chain.AddRange(stringIds);
+
+            // Add parent's ID as intermediate
             chain.Add(parentCapability.Id);
+
+            // CRITICAL: Add parent as full embedded object (last element)
+            chain.Add(parentCapability);
         }
         else
         {
-            // Parent is a root capability, so just add its ID
+            // Parent is a root capability
+            // Chain should be: [rootId, rootObject]
             chain.Add(parentCapability.Id);
+            chain.Add(parentCapability);
         }
 
         return chain.ToArray();

@@ -4,9 +4,19 @@ namespace ZcapLd.Core.Models;
 
 /// <summary>
 /// Represents a capability invocation request
+/// SECURITY FIX S-04: Added id field for replay protection
 /// </summary>
 public class Invocation
 {
+    /// <summary>
+    /// Unique identifier for this invocation (for replay protection)
+    /// SECURITY: This should be a nonce, UUID, or timestamp-based identifier
+    /// that is validated to prevent replay attacks
+    /// </summary>
+    [JsonPropertyName("id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Id { get; set; }
+
     /// <summary>
     /// Reference to the capability being invoked
     /// </summary>
