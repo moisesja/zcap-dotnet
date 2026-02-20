@@ -87,7 +87,6 @@ var isValid = await verifier.VerifyInvocationAsync(invocation, delegated);
 
 - Architecture: [`architecture.md`](architecture.md)
 - Contributing: [`CONTRIBUTING.md`](CONTRIBUTING.md)
-- Contributors: [`contributors.md`](contributors.md)
 - NuGet Release Runbook: [`docs/NUGET-RELEASE.md`](docs/NUGET-RELEASE.md)
 - MIT License: [`LICENSE`](LICENSE)
 
