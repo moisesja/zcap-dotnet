@@ -1,5 +1,4 @@
 using ZcapLd.Core.Models;
-using System.Text.Json;
 
 namespace ZcapLd.Core.Cryptography;
 

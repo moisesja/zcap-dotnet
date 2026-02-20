@@ -42,4 +42,26 @@ public class Proof
     /// </summary>
     [JsonPropertyName("proofValue")]
     public string ProofValue { get; set; } = string.Empty;
+
+    /// <summary>
+    /// The capability being invoked (for invocation proofs)
+    /// Can be a string (root capability ID) or object (delegated capability)
+    /// </summary>
+    [JsonPropertyName("capability")]
+    [JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public object? Capability { get; set; }
+
+    /// <summary>
+    /// The invocation target (for invocation proofs)
+    /// </summary>
+    [JsonPropertyName("invocationTarget")]
+    [JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? InvocationTarget { get; set; }
+
+    /// <summary>
+    /// The capability action being invoked (for invocation proofs)
+    /// </summary>
+    [JsonPropertyName("capabilityAction")]
+    [JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? CapabilityAction { get; set; }
 }

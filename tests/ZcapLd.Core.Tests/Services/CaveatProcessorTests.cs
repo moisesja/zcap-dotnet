@@ -1,0 +1,780 @@
+using FluentAssertions;
+using Xunit;
+using ZcapLd.Core.Exceptions;
+using ZcapLd.Core.Models;
+using ZcapLd.Core.Services;
+
+namespace ZcapLd.Core.Tests.Services;
+
+public class CaveatProcessorTests
+{
+    private readonly CaveatProcessor _caveatProcessor;
+    private readonly SigningService _signingService;
+    private readonly CapabilityService _capabilityService;
+
+    public CaveatProcessorTests()
+    {
+        _caveatProcessor = new CaveatProcessor();
+        _signingService = new SigningService();
+        _capabilityService = new CapabilityService(_signingService);
+    }
+
+    #region Caveat Evaluation Tests
+
+    [Fact]
+    public async Task EvaluateCaveats_WithNoCaveats_ShouldReturnTrue()
+    {
+        // Arrange
+        var capability = new Capability
+        {
+            Id = "urn:zcap:root:test",
+            Controller = "did:key:z6MkTest",
+            InvocationTarget = "https://example.com/resource",
+            AllowedAction = new[] { "read" },
+            Caveat = Array.Empty<Caveat>()
+        };
+
+        var context = new InvocationContext
+        {
+            InvocationTime = DateTime.UtcNow,
+            RequestedAction = "read",
+            TargetResource = "https://example.com/resource"
+        };
+
+        // Act
+        var result = await _caveatProcessor.EvaluateCaveatsAsync(capability, context);
+
+        // Assert
+        result.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task EvaluateCaveats_WithSatisfiedExpirationCaveat_ShouldReturnTrue()
+    {
+        // Arrange
+        var caveat = new ExpirationCaveat
+        {
+            Expires = DateTime.UtcNow.AddDays(1) // Not expired
+        };
+
+        var capability = new Capability
+        {
+            Id = "urn:zcap:root:test",
+            Controller = "did:key:z6MkTest",
+            InvocationTarget = "https://example.com/resource",
+            AllowedAction = new[] { "read" },
+            Caveat = new Caveat[] { caveat }
+        };
+
+        var context = new InvocationContext
+        {
+            InvocationTime = DateTime.UtcNow,
+            RequestedAction = "read",
+            TargetResource = "https://example.com/resource"
+        };
+
+        // Act
+        var result = await _caveatProcessor.EvaluateCaveatsAsync(capability, context);
+
+        // Assert
+        result.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task EvaluateCaveats_WithExpiredCaveat_ShouldReturnFalse()
+    {
+        // Arrange
+        var caveat = new ExpirationCaveat
+        {
+            Expires = DateTime.UtcNow.AddDays(-1) // Expired
+        };
+
+        var capability = new Capability
+        {
+            Id = "urn:zcap:root:test",
+            Controller = "did:key:z6MkTest",
+            InvocationTarget = "https://example.com/resource",
+            AllowedAction = new[] { "read" },
+            Caveat = new Caveat[] { caveat }
+        };
+
+        var context = new InvocationContext
+        {
+            InvocationTime = DateTime.UtcNow,
+            RequestedAction = "read",
+            TargetResource = "https://example.com/resource"
+        };
+
+        // Act
+        var result = await _caveatProcessor.EvaluateCaveatsAsync(capability, context);
+
+        // Assert
+        result.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task EvaluateCaveats_WithSatisfiedUsageCountCaveat_ShouldReturnTrue()
+    {
+        // Arrange
+        var caveat = new UsageCountCaveat
+        {
+            MaxUses = 10,
+            CurrentUses = 5 // Still has uses left
+        };
+
+        var capability = new Capability
+        {
+            Id = "urn:zcap:root:test",
+            Controller = "did:key:z6MkTest",
+            InvocationTarget = "https://example.com/resource",
+            AllowedAction = new[] { "read" },
+            Caveat = new Caveat[] { caveat }
+        };
+
+        var context = new InvocationContext
+        {
+            InvocationTime = DateTime.UtcNow,
+            RequestedAction = "read",
+            TargetResource = "https://example.com/resource"
+        };
+
+        // Act
+        var result = await _caveatProcessor.EvaluateCaveatsAsync(capability, context);
+
+        // Assert
+        result.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task EvaluateCaveats_WithExceededUsageCount_ShouldReturnFalse()
+    {
+        // Arrange
+        var caveat = new UsageCountCaveat
+        {
+            MaxUses = 10,
+            CurrentUses = 10 // Reached limit
+        };
+
+        var capability = new Capability
+        {
+            Id = "urn:zcap:root:test",
+            Controller = "did:key:z6MkTest",
+            InvocationTarget = "https://example.com/resource",
+            AllowedAction = new[] { "read" },
+            Caveat = new Caveat[] { caveat }
+        };
+
+        var context = new InvocationContext
+        {
+            InvocationTime = DateTime.UtcNow,
+            RequestedAction = "read",
+            TargetResource = "https://example.com/resource"
+        };
+
+        // Act
+        var result = await _caveatProcessor.EvaluateCaveatsAsync(capability, context);
+
+        // Assert
+        result.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task EvaluateCaveats_WithMultipleSatisfiedCaveats_ShouldReturnTrue()
+    {
+        // Arrange
+        var expirationCaveat = new ExpirationCaveat
+        {
+            Expires = DateTime.UtcNow.AddDays(1)
+        };
+
+        var usageCaveat = new UsageCountCaveat
+        {
+            MaxUses = 10,
+            CurrentUses = 5
+        };
+
+        var capability = new Capability
+        {
+            Id = "urn:zcap:root:test",
+            Controller = "did:key:z6MkTest",
+            InvocationTarget = "https://example.com/resource",
+            AllowedAction = new[] { "read" },
+            Caveat = new Caveat[] { expirationCaveat, usageCaveat }
+        };
+
+        var context = new InvocationContext
+        {
+            InvocationTime = DateTime.UtcNow,
+            RequestedAction = "read",
+            TargetResource = "https://example.com/resource"
+        };
+
+        // Act
+        var result = await _caveatProcessor.EvaluateCaveatsAsync(capability, context);
+
+        // Assert
+        result.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task EvaluateCaveats_WithOneFailedCaveat_ShouldReturnFalse()
+    {
+        // Arrange
+        var expirationCaveat = new ExpirationCaveat
+        {
+            Expires = DateTime.UtcNow.AddDays(-1) // Expired
+        };
+
+        var usageCaveat = new UsageCountCaveat
+        {
+            MaxUses = 10,
+            CurrentUses = 5 // Still valid
+        };
+
+        var capability = new Capability
+        {
+            Id = "urn:zcap:root:test",
+            Controller = "did:key:z6MkTest",
+            InvocationTarget = "https://example.com/resource",
+            AllowedAction = new[] { "read" },
+            Caveat = new Caveat[] { expirationCaveat, usageCaveat }
+        };
+
+        var context = new InvocationContext
+        {
+            InvocationTime = DateTime.UtcNow,
+            RequestedAction = "read",
+            TargetResource = "https://example.com/resource"
+        };
+
+        // Act
+        var result = await _caveatProcessor.EvaluateCaveatsAsync(capability, context);
+
+        // Assert
+        result.Should().BeFalse(); // One failed caveat fails the whole evaluation
+    }
+
+    [Fact]
+    public async Task EvaluateCaveats_WithNullCapability_ShouldThrow()
+    {
+        // Arrange
+        var context = new InvocationContext();
+
+        // Act & Assert
+        var act = async () => await _caveatProcessor.EvaluateCaveatsAsync(null!, context);
+        await act.Should().ThrowAsync<ArgumentNullException>();
+    }
+
+    [Fact]
+    public async Task EvaluateCaveats_WithNullContext_ShouldThrow()
+    {
+        // Arrange
+        var capability = new Capability();
+
+        // Act & Assert
+        var act = async () => await _caveatProcessor.EvaluateCaveatsAsync(capability, null!);
+        await act.Should().ThrowAsync<ArgumentNullException>();
+    }
+
+    #endregion
+
+    #region Caveat Merging Tests
+
+    [Fact]
+    public async Task MergeCaveats_WithSingleCapability_ShouldReturnItsCaveats()
+    {
+        // Arrange
+        var caveat1 = new ExpirationCaveat { Expires = DateTime.UtcNow.AddDays(1) };
+        var caveat2 = new UsageCountCaveat { MaxUses = 10, CurrentUses = 0 };
+
+        var capability = new Capability
+        {
+            Id = "urn:zcap:root:test",
+            Caveat = new Caveat[] { caveat1, caveat2 }
+        };
+
+        // Act
+        var mergedCaveats = await _caveatProcessor.MergeCaveatsAsync(new[] { capability });
+
+        // Assert
+        mergedCaveats.Should().HaveCount(2);
+        mergedCaveats.Should().Contain(c => c.Type == "Expiration");
+        mergedCaveats.Should().Contain(c => c.Type == "UsageCount");
+    }
+
+    [Fact]
+    public async Task MergeCaveats_WithMultipleCapabilities_ShouldMergeAllCaveats()
+    {
+        // Arrange
+        var capability1 = new Capability
+        {
+            Id = "urn:zcap:root:test",
+            Caveat = new Caveat[]
+            {
+                new ExpirationCaveat { Expires = DateTime.UtcNow.AddDays(1) }
+            }
+        };
+
+        var capability2 = new Capability
+        {
+            Id = "urn:uuid:test1",
+            Caveat = new Caveat[]
+            {
+                new UsageCountCaveat { MaxUses = 10, CurrentUses = 0 }
+            }
+        };
+
+        var capability3 = new Capability
+        {
+            Id = "urn:uuid:test2",
+            Caveat = new Caveat[]
+            {
+                new ExpirationCaveat { Expires = DateTime.UtcNow.AddDays(2) }
+            }
+        };
+
+        // Act
+        var mergedCaveats = await _caveatProcessor.MergeCaveatsAsync(
+            new[] { capability1, capability2, capability3 });
+
+        // Assert
+        mergedCaveats.Should().HaveCount(3);
+        mergedCaveats.Count(c => c.Type == "Expiration").Should().Be(2);
+        mergedCaveats.Count(c => c.Type == "UsageCount").Should().Be(1);
+    }
+
+    [Fact]
+    public async Task MergeCaveats_WithNoCaveats_ShouldReturnEmptyArray()
+    {
+        // Arrange
+        var capability1 = new Capability
+        {
+            Id = "urn:zcap:root:test",
+            Caveat = Array.Empty<Caveat>()
+        };
+
+        var capability2 = new Capability
+        {
+            Id = "urn:uuid:test1",
+            Caveat = Array.Empty<Caveat>()
+        };
+
+        // Act
+        var mergedCaveats = await _caveatProcessor.MergeCaveatsAsync(new[] { capability1, capability2 });
+
+        // Assert
+        mergedCaveats.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task MergeCaveats_WithNullChain_ShouldThrow()
+    {
+        // Act & Assert
+        var act = async () => await _caveatProcessor.MergeCaveatsAsync(null!);
+        await act.Should().ThrowAsync<ArgumentException>();
+    }
+
+    [Fact]
+    public async Task MergeCaveats_WithEmptyChain_ShouldThrow()
+    {
+        // Act & Assert
+        var act = async () => await _caveatProcessor.MergeCaveatsAsync(Array.Empty<Capability>());
+        await act.Should().ThrowAsync<ArgumentException>();
+    }
+
+    #endregion
+
+    #region Caveat Compatibility Validation Tests
+
+    [Fact]
+    public async Task ValidateCaveatCompatibility_WithNoCaveats_ShouldReturnTrue()
+    {
+        // Arrange
+        var parentCaveats = Array.Empty<Caveat>();
+        var childCaveats = Array.Empty<Caveat>();
+
+        // Act
+        var result = await _caveatProcessor.ValidateCaveatCompatibilityAsync(parentCaveats, childCaveats);
+
+        // Assert
+        result.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task ValidateCaveatCompatibility_ChildAddsNewCaveat_ShouldReturnTrue()
+    {
+        // Arrange
+        var parentCaveats = new Caveat[]
+        {
+            new ExpirationCaveat { Expires = DateTime.UtcNow.AddDays(10) }
+        };
+
+        var childCaveats = new Caveat[]
+        {
+            new UsageCountCaveat { MaxUses = 5, CurrentUses = 0 } // New caveat
+        };
+
+        // Act
+        var result = await _caveatProcessor.ValidateCaveatCompatibilityAsync(parentCaveats, childCaveats);
+
+        // Assert
+        result.Should().BeTrue(); // Child can add new restrictions
+    }
+
+    [Fact]
+    public async Task ValidateCaveatCompatibility_ChildMoreRestrictiveExpiration_ShouldReturnTrue()
+    {
+        // Arrange
+        var parentCaveats = new Caveat[]
+        {
+            new ExpirationCaveat { Expires = DateTime.UtcNow.AddDays(10) }
+        };
+
+        var childCaveats = new Caveat[]
+        {
+            new ExpirationCaveat { Expires = DateTime.UtcNow.AddDays(5) } // More restrictive
+        };
+
+        // Act
+        var result = await _caveatProcessor.ValidateCaveatCompatibilityAsync(parentCaveats, childCaveats);
+
+        // Assert
+        result.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task ValidateCaveatCompatibility_ChildLessRestrictiveExpiration_ShouldReturnFalse()
+    {
+        // Arrange
+        var parentCaveats = new Caveat[]
+        {
+            new ExpirationCaveat { Expires = DateTime.UtcNow.AddDays(5) }
+        };
+
+        var childCaveats = new Caveat[]
+        {
+            new ExpirationCaveat { Expires = DateTime.UtcNow.AddDays(10) } // Less restrictive
+        };
+
+        // Act
+        var result = await _caveatProcessor.ValidateCaveatCompatibilityAsync(parentCaveats, childCaveats);
+
+        // Assert
+        result.Should().BeFalse(); // Child cannot be less restrictive
+    }
+
+    [Fact]
+    public async Task ValidateCaveatCompatibility_ChildMoreRestrictiveUsageCount_ShouldReturnTrue()
+    {
+        // Arrange
+        var parentCaveats = new Caveat[]
+        {
+            new UsageCountCaveat { MaxUses = 10, CurrentUses = 0 }
+        };
+
+        var childCaveats = new Caveat[]
+        {
+            new UsageCountCaveat { MaxUses = 5, CurrentUses = 0 } // More restrictive
+        };
+
+        // Act
+        var result = await _caveatProcessor.ValidateCaveatCompatibilityAsync(parentCaveats, childCaveats);
+
+        // Assert
+        result.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task ValidateCaveatCompatibility_ChildLessRestrictiveUsageCount_ShouldReturnFalse()
+    {
+        // Arrange
+        var parentCaveats = new Caveat[]
+        {
+            new UsageCountCaveat { MaxUses = 5, CurrentUses = 0 }
+        };
+
+        var childCaveats = new Caveat[]
+        {
+            new UsageCountCaveat { MaxUses = 10, CurrentUses = 0 } // Less restrictive
+        };
+
+        // Act
+        var result = await _caveatProcessor.ValidateCaveatCompatibilityAsync(parentCaveats, childCaveats);
+
+        // Assert
+        result.Should().BeFalse(); // Child cannot be less restrictive
+    }
+
+    [Fact]
+    public async Task ValidateCaveatCompatibility_WithNullParentCaveats_ShouldHandleGracefully()
+    {
+        // Arrange
+        var childCaveats = new Caveat[]
+        {
+            new ExpirationCaveat { Expires = DateTime.UtcNow.AddDays(5) }
+        };
+
+        // Act
+        var result = await _caveatProcessor.ValidateCaveatCompatibilityAsync(null, childCaveats);
+
+        // Assert
+        result.Should().BeTrue(); // No parent caveats means child can add any
+    }
+
+    [Fact]
+    public async Task ValidateCaveatCompatibility_WithNullChildCaveats_ShouldHandleGracefully()
+    {
+        // Arrange
+        var parentCaveats = new Caveat[]
+        {
+            new ExpirationCaveat { Expires = DateTime.UtcNow.AddDays(5) }
+        };
+
+        // Act
+        var result = await _caveatProcessor.ValidateCaveatCompatibilityAsync(parentCaveats, null);
+
+        // Assert
+        result.Should().BeTrue(); // Child inherits parent caveats implicitly
+    }
+
+    #endregion
+
+    #region Capability Chain Caveat Evaluation Tests
+
+    [Fact]
+    public async Task EvaluateCapabilityChainCaveats_WithValidChain_ShouldReturnTrue()
+    {
+        // Arrange
+        var controllerDid = "did:key:z6MkController";
+        _signingService.GenerateAndRegisterKeyPair(controllerDid);
+
+        var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
+            controllerDid,
+            "https://example.com/resource",
+            new[] { "read" },
+            caveats: new Caveat[]
+            {
+                new ExpirationCaveat { Expires = DateTime.UtcNow.AddDays(10) }
+            });
+
+        var delegatedCapability = await _capabilityService.DelegateCapabilityAsync(
+            rootCapability,
+            "did:key:z6MkChild",
+            new[] { "read" },
+            DateTime.UtcNow.AddDays(5),
+            new Caveat[]
+            {
+                new UsageCountCaveat { MaxUses = 10, CurrentUses = 0 }
+            });
+
+        var chain = new[] { rootCapability, delegatedCapability };
+
+        var context = new InvocationContext
+        {
+            InvocationTime = DateTime.UtcNow,
+            RequestedAction = "read",
+            TargetResource = "https://example.com/resource"
+        };
+
+        // Act
+        var result = await _caveatProcessor.EvaluateCapabilityChainCaveatsAsync(chain, context);
+
+        // Assert
+        result.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task EvaluateCapabilityChainCaveats_WithExpiredCaveat_ShouldReturnFalse()
+    {
+        // Arrange
+        var controllerDid = "did:key:z6MkController";
+        _signingService.GenerateAndRegisterKeyPair(controllerDid);
+
+        var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
+            controllerDid,
+            "https://example.com/resource",
+            new[] { "read" },
+            caveats: new Caveat[]
+            {
+                new ExpirationCaveat { Expires = DateTime.UtcNow.AddDays(-1) } // Expired
+            });
+
+        var chain = new[] { rootCapability };
+
+        var context = new InvocationContext
+        {
+            InvocationTime = DateTime.UtcNow,
+            RequestedAction = "read",
+            TargetResource = "https://example.com/resource"
+        };
+
+        // Act
+        var result = await _caveatProcessor.EvaluateCapabilityChainCaveatsAsync(chain, context);
+
+        // Assert
+        result.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task EvaluateCapabilityChainCaveats_WithNullChain_ShouldThrow()
+    {
+        // Arrange
+        var context = new InvocationContext();
+
+        // Act & Assert
+        var act = async () => await _caveatProcessor.EvaluateCapabilityChainCaveatsAsync(null!, context);
+        await act.Should().ThrowAsync<ArgumentException>();
+    }
+
+    [Fact]
+    public async Task EvaluateCapabilityChainCaveats_WithNullContext_ShouldThrow()
+    {
+        // Arrange
+        var capability = await _capabilityService.CreateRootCapabilityAsync(
+            "did:key:z6MkTest",
+            "https://example.com/resource",
+            new[] { "read" });
+
+        var chain = new[] { capability };
+
+        // Act & Assert
+        var act = async () => await _caveatProcessor.EvaluateCapabilityChainCaveatsAsync(chain, null!);
+        await act.Should().ThrowAsync<ArgumentNullException>();
+    }
+
+    #endregion
+
+    #region ExpirationCaveat Tests
+
+    [Fact]
+    public void ExpirationCaveat_NotExpired_ShouldBeSatisfied()
+    {
+        // Arrange
+        var caveat = new ExpirationCaveat
+        {
+            Expires = DateTime.UtcNow.AddHours(1)
+        };
+
+        var context = new InvocationContext
+        {
+            InvocationTime = DateTime.UtcNow
+        };
+
+        // Act
+        var result = caveat.IsSatisfied(context);
+
+        // Assert
+        result.Should().BeTrue();
+    }
+
+    [Fact]
+    public void ExpirationCaveat_Expired_ShouldNotBeSatisfied()
+    {
+        // Arrange
+        var caveat = new ExpirationCaveat
+        {
+            Expires = DateTime.UtcNow.AddHours(-1)
+        };
+
+        var context = new InvocationContext
+        {
+            InvocationTime = DateTime.UtcNow
+        };
+
+        // Act
+        var result = caveat.IsSatisfied(context);
+
+        // Assert
+        result.Should().BeFalse();
+    }
+
+    [Fact]
+    public void ExpirationCaveat_Type_ShouldBeExpiration()
+    {
+        // Arrange
+        var caveat = new ExpirationCaveat
+        {
+            Expires = DateTime.UtcNow.AddDays(1)
+        };
+
+        // Act & Assert
+        caveat.Type.Should().Be("Expiration");
+    }
+
+    #endregion
+
+    #region UsageCountCaveat Tests
+
+    [Fact]
+    public void UsageCountCaveat_UnderLimit_ShouldBeSatisfied()
+    {
+        // Arrange
+        var caveat = new UsageCountCaveat
+        {
+            MaxUses = 10,
+            CurrentUses = 5
+        };
+
+        var context = new InvocationContext();
+
+        // Act
+        var result = caveat.IsSatisfied(context);
+
+        // Assert
+        result.Should().BeTrue();
+    }
+
+    [Fact]
+    public void UsageCountCaveat_AtLimit_ShouldNotBeSatisfied()
+    {
+        // Arrange
+        var caveat = new UsageCountCaveat
+        {
+            MaxUses = 10,
+            CurrentUses = 10
+        };
+
+        var context = new InvocationContext();
+
+        // Act
+        var result = caveat.IsSatisfied(context);
+
+        // Assert
+        result.Should().BeFalse();
+    }
+
+    [Fact]
+    public void UsageCountCaveat_OverLimit_ShouldNotBeSatisfied()
+    {
+        // Arrange
+        var caveat = new UsageCountCaveat
+        {
+            MaxUses = 10,
+            CurrentUses = 15
+        };
+
+        var context = new InvocationContext();
+
+        // Act
+        var result = caveat.IsSatisfied(context);
+
+        // Assert
+        result.Should().BeFalse();
+    }
+
+    [Fact]
+    public void UsageCountCaveat_Type_ShouldBeUsageCount()
+    {
+        // Arrange
+        var caveat = new UsageCountCaveat
+        {
+            MaxUses = 10,
+            CurrentUses = 0
+        };
+
+        // Act & Assert
+        caveat.Type.Should().Be("UsageCount");
+    }
+
+    #endregion
+}
