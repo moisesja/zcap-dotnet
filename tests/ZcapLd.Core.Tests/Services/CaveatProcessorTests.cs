@@ -3,6 +3,7 @@ using Xunit;
 using ZcapLd.Core.Exceptions;
 using ZcapLd.Core.Models;
 using ZcapLd.Core.Services;
+using ZcapLd.Core.Tests.Helpers;
 
 namespace ZcapLd.Core.Tests.Services;
 
@@ -17,7 +18,7 @@ public class CaveatProcessorTests
     {
         _caveatProcessor = new CaveatProcessor();
         _didProvider = new InMemoryDidProvider();
-        _signingService = new SigningService(_didProvider);
+        _signingService = new SigningService(_didProvider, _didProvider);
         _capabilityService = new CapabilityService(_signingService);
     }
 

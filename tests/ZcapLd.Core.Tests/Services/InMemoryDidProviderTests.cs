@@ -2,7 +2,7 @@ using FluentAssertions;
 using Xunit;
 using ZcapLd.Core.Cryptography;
 using ZcapLd.Core.Exceptions;
-using ZcapLd.Core.Services;
+using ZcapLd.Core.Tests.Helpers;
 
 namespace ZcapLd.Core.Tests.Services;
 
@@ -97,7 +97,7 @@ public class InMemoryDidProviderTests
         var resolvedKey = await _provider.ResolvePublicKeyAsync(did);
 
         // Assert
-        resolvedKey.Should().Equal(expectedPublicKey);
+        resolvedKey.PublicKeyBytes.Should().Equal(expectedPublicKey);
     }
 
     [Fact]
@@ -111,7 +111,7 @@ public class InMemoryDidProviderTests
         var resolvedKey = await _provider.ResolvePublicKeyAsync($"{did}#z6MkTest");
 
         // Assert
-        resolvedKey.Should().Equal(expectedPublicKey);
+        resolvedKey.PublicKeyBytes.Should().Equal(expectedPublicKey);
     }
 
     [Fact]
@@ -125,7 +125,7 @@ public class InMemoryDidProviderTests
 
         // Assert
         resolvedKey.Should().NotBeNull();
-        resolvedKey.Should().HaveCount(32); // Ed25519 public keys are 32 bytes
+        resolvedKey.PublicKeyBytes.Should().HaveCount(32); // Ed25519 public keys are 32 bytes
     }
 
     [Fact]
@@ -308,7 +308,7 @@ public class InMemoryDidProviderTests
 
         // Assert
         publicKey.Should().NotBeNull();
-        publicKey.Should().HaveCount(32);
+        publicKey.PublicKeyBytes.Should().HaveCount(32);
     }
 
     [Fact]

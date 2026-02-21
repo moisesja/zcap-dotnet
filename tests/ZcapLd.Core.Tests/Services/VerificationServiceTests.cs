@@ -3,6 +3,7 @@ using Xunit;
 using ZcapLd.Core.Exceptions;
 using ZcapLd.Core.Models;
 using ZcapLd.Core.Services;
+using ZcapLd.Core.Tests.Helpers;
 
 namespace ZcapLd.Core.Tests.Services;
 
@@ -17,7 +18,7 @@ public class VerificationServiceTests
     public VerificationServiceTests()
     {
         _didProvider = new InMemoryDidProvider();
-        _signingService = new SigningService(_didProvider);
+        _signingService = new SigningService(_didProvider, _didProvider);
         _caveatProcessor = new CaveatProcessor();
         _verificationService = new VerificationService(_didProvider, _caveatProcessor);
         _capabilityService = new CapabilityService(_signingService);
@@ -636,7 +637,7 @@ public class VerificationServiceTests
 
         // Assert
         resolvedKey.Should().NotBeNull();
-        resolvedKey.Should().HaveCount(32); // Ed25519 public keys are 32 bytes
+        resolvedKey.PublicKeyBytes.Should().HaveCount(32); // Ed25519 public keys are 32 bytes
     }
 
     [Fact]

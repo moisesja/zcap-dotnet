@@ -2,6 +2,7 @@ using FluentAssertions;
 using Xunit;
 using ZcapLd.Core.Models;
 using ZcapLd.Core.Services;
+using ZcapLd.Core.Tests.Helpers;
 
 namespace ZcapLd.Core.Tests.Integration;
 
@@ -20,7 +21,7 @@ public class EndToEndTests
     public EndToEndTests()
     {
         _didProvider = new InMemoryDidProvider();
-        _signingService = new SigningService(_didProvider);
+        _signingService = new SigningService(_didProvider, _didProvider);
         _caveatProcessor = new CaveatProcessor();
         _verificationService = new VerificationService(_didProvider, _caveatProcessor);
         _capabilityService = new CapabilityService(_signingService);

@@ -13,7 +13,7 @@ public class SignatureVerifier
     /// <param name="capability">The capability to verify</param>
     /// <param name="publicKey">The public key for verification</param>
     /// <returns>True if signature is valid</returns>
-    public static bool VerifyCapabilitySignature(Capability capability, byte[] publicKey)
+    public static bool VerifyCapabilitySignature(Capability capability, byte[] publicKey, ICryptoSuite suite)
     {
         if (capability.Proof == null)
             return false;
@@ -41,7 +41,7 @@ public class SignatureVerifier
             var signature = Ed25519Signer.DecodeSignature(capability.Proof.ProofValue);
 
             // Verify the signature
-            return Ed25519Signer.Verify(canonicalizedData, signature, publicKey);
+            return suite.Verify(canonicalizedData, signature, publicKey);
         }
         catch
         {
@@ -50,12 +50,13 @@ public class SignatureVerifier
     }
 
     /// <summary>
-    /// Verifies an invocation signature
+    /// Verifies an invocation signature using the specified crypto suite.
     /// </summary>
     /// <param name="invocation">The invocation to verify</param>
     /// <param name="publicKey">The public key for verification</param>
+    /// <param name="suite">The crypto suite to use for verification</param>
     /// <returns>True if signature is valid</returns>
-    public static bool VerifyInvocationSignature(Invocation invocation, byte[] publicKey)
+    public static bool VerifyInvocationSignature(Invocation invocation, byte[] publicKey, ICryptoSuite suite)
     {
         if (invocation.Proof == null)
             return false;
@@ -78,7 +79,7 @@ public class SignatureVerifier
             var signature = Ed25519Signer.DecodeSignature(invocation.Proof.ProofValue);
 
             // Verify the signature
-            return Ed25519Signer.Verify(canonicalizedData, signature, publicKey);
+            return suite.Verify(canonicalizedData, signature, publicKey);
         }
         catch
         {

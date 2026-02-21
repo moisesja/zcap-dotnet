@@ -18,7 +18,7 @@ W3C's ZCAP-LD (Authorization Capabilities for Linked Data) specification defines
 
 - Caveat Support: Implement handling of caveats (restrictions). The spec notes that each capability may add restrictions via a caveat property, and that child capabilities inherit all caveats of their parents. For example, one could add a time-based caveat (e.g. ValidUntil) or an action-limiting caveat. At minimum, design a Caveat class or interface so common types (timestamp checks, count limits, etc.) can be enforced at invocation time. When verifying a delegated capability, ensure that all caveats from the root through to the leaf are evaluated and honored. (For a minimal implementation, you can start by supporting a simple expiration or true/false caveat and expand later.)
 
-- Digital Identity Integration: Use the Trinsic SDK for DID wallet functionality. In practice, capabilities will be issued by entities (e.g. users or services) with DIDs and keypairs managed by Trinsic. Your code should interface with Trinsic (or any DID library) to fetch a DID document, extract the public key (verificationMethod) for signature verification, or to sign data with a private key. For example, you may call Trinsic APIs to get the public key for a DID used in controller or verificationMethod. In code, this may be abstracted as functions like ResolvePublicKey(did) and SignWithPrivateKey(data, did). (Details depend on the Trinsic SDK’s capabilities.)
+- Digital Identity Integration: In practice, capabilities will be issued by entities (e.g. users or services) with DIDs and keypairs managed by Trinsic. Your code should plan for implementors to provide their own DID managing library to fetch a DID document, extract the public key (verificationMethod) for signature verification, or to sign data with a private key. For example, you may call Trinsic APIs to get the public key for a DID used in controller or verificationMethod. In code, this may be abstracted as functions like ResolvePublicKey(did) and SignWithPrivateKey(data, did).
 
 - Architecture (In-Process vs gRPC): Since signing uses private keys, implementing this logic in-process (within the same application or service) is simplest. However, you may optionally expose the functionality over gRPC or HTTP for remote agents. For a library, ensure that signing and verification functions are thread-safe and do not persist private keys beyond needed scope. If exposing via gRPC, design service methods like CreateCapability(), DelegateCapability(), VerifyInvocation().
 
@@ -96,7 +96,7 @@ The project aims to implement W3C ZCAP-LD specification for .NET 10. Key archite
 
 # Task Management
 
-1. **Plan First**: Write plan to `tasks/todo.md` with checkable items
+1. **Plan First**: Write plan to `tasks/todo{timestamp}.md` with checkable items
 2. **Verify Plan**: Check in before starting implementation
 3. **Track Progress**: Mark items complete as you go
 4. **Explain Changes**: High-level summary at each step

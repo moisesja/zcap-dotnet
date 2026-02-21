@@ -6,29 +6,70 @@ using ZcapLd.Core.Models;
 namespace ZcapLd.Core.Services;
 
 /// <summary>
-/// Service for verifying ZCAP-LD capabilities and invocations
-/// Implements W3C ZCAP-LD specification verification requirements
+/// Service for verifying ZCAP-LD capabilities and invocations.
+/// Implements W3C ZCAP-LD specification verification requirements.
+/// Only requires an <see cref="IDidResolver"/> — no private key access needed.
 /// </summary>
 public class VerificationService : IVerificationService
 {
-    private readonly IDidProvider _didProvider;
+    private readonly IDidResolver _didResolver;
     private readonly ICaveatProcessor _caveatProcessor;
+    private readonly ICryptoSuiteProvider _suiteProvider;
     private readonly IRevocationService _revocationService;
     private const int MaxChainLength = 10; // Per spec: SHOULD limit to 10
 
-    public VerificationService(IDidProvider didProvider, ICaveatProcessor caveatProcessor)
-        : this(didProvider, caveatProcessor, new RevocationService(new InMemoryRevocationStore()))
+    /// <summary>
+    /// Backward-compatible constructor (Ed25519 only).
+    /// </summary>
+    public VerificationService(IDidResolver didResolver, ICaveatProcessor caveatProcessor)
+        : this(didResolver, caveatProcessor, CreateDefaultSuiteProvider(),
+               new RevocationService(new InMemoryRevocationStore()))
     {
     }
 
+    /// <summary>
+    /// Backward-compatible constructor with custom revocation service (Ed25519 only).
+    /// </summary>
     public VerificationService(
-        IDidProvider didProvider,
+        IDidResolver didResolver,
         ICaveatProcessor caveatProcessor,
         IRevocationService revocationService)
+        : this(didResolver, caveatProcessor, CreateDefaultSuiteProvider(), revocationService)
     {
-        _didProvider = didProvider ?? throw new ArgumentNullException(nameof(didProvider));
+    }
+
+    /// <summary>
+    /// Constructor with explicit crypto suite provider.
+    /// </summary>
+    public VerificationService(
+        IDidResolver didResolver,
+        ICaveatProcessor caveatProcessor,
+        ICryptoSuiteProvider suiteProvider)
+        : this(didResolver, caveatProcessor, suiteProvider,
+               new RevocationService(new InMemoryRevocationStore()))
+    {
+    }
+
+    /// <summary>
+    /// Full constructor with all dependencies.
+    /// </summary>
+    public VerificationService(
+        IDidResolver didResolver,
+        ICaveatProcessor caveatProcessor,
+        ICryptoSuiteProvider suiteProvider,
+        IRevocationService revocationService)
+    {
+        _didResolver = didResolver ?? throw new ArgumentNullException(nameof(didResolver));
         _caveatProcessor = caveatProcessor ?? throw new ArgumentNullException(nameof(caveatProcessor));
+        _suiteProvider = suiteProvider ?? throw new ArgumentNullException(nameof(suiteProvider));
         _revocationService = revocationService ?? throw new ArgumentNullException(nameof(revocationService));
+    }
+
+    private static ICryptoSuiteProvider CreateDefaultSuiteProvider()
+    {
+        var provider = new CryptoSuiteProvider();
+        provider.Register(new Ed25519CryptoSuite());
+        return provider;
     }
 
     /// <summary>
@@ -107,8 +148,11 @@ public class VerificationService : IVerificationService
             return false;
         }
 
-        // Get the public key for verification
-        var publicKey = await ResolvePublicKeyAsync(capability.Proof.VerificationMethod);
+        // Get the public key and look up the crypto suite for this proof type
+        var resolvedKey = await _didResolver.ResolvePublicKeyAsync(capability.Proof.VerificationMethod);
+        var suite = _suiteProvider.GetByProofType(capability.Proof.Type)
+            ?? throw new CapabilityValidationException(
+                $"Unsupported proof type: {capability.Proof.Type}");
 
         // Serialize the capability without the proof
         var capabilityWithoutProof = new Capability
@@ -129,7 +173,7 @@ public class VerificationService : IVerificationService
         var canonicalBytes = Ed25519Signer.CanonicalizeDocument(capabilityWithoutProof);
         var signatureBytes = Ed25519Signer.DecodeSignature(capability.Proof.ProofValue);
 
-        return Ed25519Signer.Verify(canonicalBytes, signatureBytes, publicKey);
+        return suite.Verify(canonicalBytes, signatureBytes, resolvedKey.PublicKeyBytes);
     }
 
     /// <summary>
@@ -171,7 +215,10 @@ public class VerificationService : IVerificationService
                 return false;
 
             // 5. Verify the invocation signature
-            var publicKey = await ResolvePublicKeyAsync(invocation.Proof.VerificationMethod);
+            var resolvedKey = await _didResolver.ResolvePublicKeyAsync(invocation.Proof.VerificationMethod);
+            var suite = _suiteProvider.GetByProofType(invocation.Proof.Type)
+                ?? throw new CapabilityValidationException(
+                    $"Unsupported proof type: {invocation.Proof.Type}");
 
             var invocationWithoutProof = new
             {
@@ -183,7 +230,7 @@ public class VerificationService : IVerificationService
             var canonicalBytes = Ed25519Signer.CanonicalizeDocument(invocationWithoutProof);
             var signatureBytes = Ed25519Signer.DecodeSignature(invocation.Proof.ProofValue);
 
-            if (!Ed25519Signer.Verify(canonicalBytes, signatureBytes, publicKey))
+            if (!suite.Verify(canonicalBytes, signatureBytes, resolvedKey.PublicKeyBytes))
                 return false;
 
             // 6. Verify the controller is authorized
@@ -280,14 +327,14 @@ public class VerificationService : IVerificationService
 
     /// <summary>
     /// Resolves a DID to its public key for verification.
-    /// Delegates to the configured <see cref="IDidProvider"/>.
+    /// Delegates to the configured <see cref="IDidResolver"/>.
     /// </summary>
-    public async Task<byte[]> ResolvePublicKeyAsync(string did)
+    public async Task<ResolvedKey> ResolvePublicKeyAsync(string did)
     {
         if (string.IsNullOrEmpty(did))
             throw new ArgumentException("DID cannot be null or empty", nameof(did));
 
-        return await _didProvider.ResolvePublicKeyAsync(did);
+        return await _didResolver.ResolvePublicKeyAsync(did);
     }
 
     /// <summary>

@@ -4,16 +4,19 @@ using ZcapLd.Core.Models;
 namespace ZcapLd.Core.Services;
 
 /// <summary>
-/// Assembles ZCAP-LD cryptographic proofs by canonicalizing documents and
-/// delegating signing to an <see cref="IDidProvider"/>.
+/// Assembles ZCAP-LD cryptographic proofs by canonicalizing documents,
+/// delegating signing to an <see cref="IDidSigner"/> and DID resolution
+/// to an <see cref="IDidResolver"/>.
 /// </summary>
 public class SigningService : ISigningService
 {
-    private readonly IDidProvider _didProvider;
+    private readonly IDidSigner _signer;
+    private readonly IDidResolver _resolver;
 
-    public SigningService(IDidProvider didProvider)
+    public SigningService(IDidSigner signer, IDidResolver resolver)
     {
-        _didProvider = didProvider ?? throw new ArgumentNullException(nameof(didProvider));
+        _signer = signer ?? throw new ArgumentNullException(nameof(signer));
+        _resolver = resolver ?? throw new ArgumentNullException(nameof(resolver));
     }
 
     /// <summary>
@@ -52,11 +55,11 @@ public class SigningService : ISigningService
 
         // Canonicalize and sign via provider
         var canonicalBytes = Ed25519Signer.CanonicalizeDocument(capabilityWithoutProof);
-        var result = await _didProvider.SignAsync(signerDid, canonicalBytes);
+        var result = await _signer.SignAsync(signerDid, canonicalBytes);
         var proofValue = Ed25519Signer.EncodeSignature(result.Signature);
 
         // Get verification method
-        var verificationMethod = await _didProvider.GetVerificationMethodAsync(signerDid);
+        var verificationMethod = await _resolver.GetVerificationMethodAsync(signerDid);
 
         // Create the proof
         var proof = new Proof
@@ -93,11 +96,11 @@ public class SigningService : ISigningService
 
         // Canonicalize and sign via provider
         var canonicalBytes = Ed25519Signer.CanonicalizeDocument(invocationWithoutProof);
-        var result = await _didProvider.SignAsync(signerDid, canonicalBytes);
+        var result = await _signer.SignAsync(signerDid, canonicalBytes);
         var proofValue = Ed25519Signer.EncodeSignature(result.Signature);
 
         // Get verification method
-        var verificationMethod = await _didProvider.GetVerificationMethodAsync(signerDid);
+        var verificationMethod = await _resolver.GetVerificationMethodAsync(signerDid);
 
         // COMPLIANCE FIX C-05: Create the invocation proof with required fields
         // Per spec, invocation proofs MUST include capability, invocationTarget, and capabilityAction

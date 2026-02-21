@@ -4,7 +4,8 @@ namespace ZcapLd.Core.Services;
 
 /// <summary>
 /// Service for assembling ZCAP-LD cryptographic proofs.
-/// Delegates signing and DID resolution to an <see cref="IDidProvider"/>.
+/// Delegates signing to an <see cref="IDidSigner"/> and DID resolution
+/// to an <see cref="IDidResolver"/>.
 /// </summary>
 public interface ISigningService
 {

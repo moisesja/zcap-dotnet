@@ -1,13 +1,16 @@
 using ZcapLd.Core.Models;
 using ZcapLd.Core.Services;
+using ZcapLd.Examples;
 
 Console.WriteLine("===========================================");
 Console.WriteLine("W3C ZCAP-LD .NET Implementation Examples");
 Console.WriteLine("===========================================\n");
 
 // Initialize services
+// In production, replace InMemoryDidProvider with your HSM/Key Vault-backed implementations
+// of IDidSigner and IDidResolver.
 var didProvider = new InMemoryDidProvider();
-var signingService = new SigningService(didProvider);
+var signingService = new SigningService(didProvider, didProvider);
 var capabilityService = new CapabilityService(signingService);
 var caveatProcessor = new CaveatProcessor();
 var verificationService = new VerificationService(didProvider, caveatProcessor);

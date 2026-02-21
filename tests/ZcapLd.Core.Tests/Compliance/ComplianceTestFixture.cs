@@ -1,4 +1,5 @@
 using ZcapLd.Core.Services;
+using ZcapLd.Core.Tests.Helpers;
 
 namespace ZcapLd.Core.Tests.Compliance;
 
@@ -13,7 +14,7 @@ internal sealed class ComplianceTestFixture
     public ComplianceTestFixture()
     {
         DidProvider = new InMemoryDidProvider();
-        SigningService = new SigningService(DidProvider);
+        SigningService = new SigningService(DidProvider, DidProvider);
         CaveatProcessor = new CaveatProcessor();
         CapabilityService = new CapabilityService(SigningService);
         VerificationService = new VerificationService(DidProvider, CaveatProcessor);
