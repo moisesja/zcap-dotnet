@@ -1,3 +1,33 @@
+# Revocation Endpoints SQLite Demo - 2026-02-21 (Codex)
+
+## Scope
+
+Create a runnable demonstration that uses `ZcapLd.AspNetCore` revocation endpoints backed by a SQLite persistence implementation.
+
+## Plan
+
+- [x] Add a new ASP.NET example project under `examples/` for revocation endpoints
+- [x] Implement a concrete `SqliteRevocationStore` that implements `IRevocationStore`
+- [x] Wire the demo app to `AddZcapRevocationSupport(...)` and `MapZcapRevocationEndpoints(...)`
+- [x] Add quick usage instructions (curl examples) in the demo output/docs
+- [x] Add the demo project to `ZcapLd.sln` and validate build/test
+
+## Verification Log
+
+- [x] `dotnet restore examples/ZcapLd.RevocationEndpointsDemo/ZcapLd.RevocationEndpointsDemo.csproj`: restore succeeded
+- [x] `dotnet build examples/ZcapLd.RevocationEndpointsDemo/ZcapLd.RevocationEndpointsDemo.csproj -c Release --no-restore`: build succeeded
+- [x] `dotnet test tests/ZcapLd.Core.Tests/ZcapLd.Core.Tests.csproj -c Release`: `Failed: 0, Passed: 162, Total: 162`
+- [x] Local end-to-end smoke check: `dotnet run` + `curl POST/GET /zcaps/revocations/{capabilityId}` returned expected `isRevoked: true` payloads
+- [x] `dotnet build ZcapLd.sln -c Release --no-restore`: solution build succeeded with new demo project included
+
+## Review
+
+- Added `examples/ZcapLd.RevocationEndpointsDemo` as a runnable ASP.NET demonstration for revocation endpoints using a SQLite-backed `IRevocationStore`.
+- Implemented `SqliteRevocationStore` with schema bootstrap, upsert/read/delete operations, metadata JSON handling, and ISO-8601 timestamp persistence.
+- Added demo usage guidance and curl examples in `examples/ZcapLd.RevocationEndpointsDemo/README.md` and linked the revocation integration guide to this runnable example.
+
+---
+
 # Developer Docs Revocation Guide Update - 2026-02-21 (Codex)
 
 ## Scope

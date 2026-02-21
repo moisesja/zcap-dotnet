@@ -41,6 +41,10 @@ Default endpoint contract:
 - `POST /zcaps/revocations/{*capabilityId}`: create/update revocation record
 - `GET /zcaps/revocations/{*capabilityId}`: query revocation status
 
+Runnable demo:
+
+- `examples/ZcapLd.RevocationEndpointsDemo/README.md`
+
 ## 2. Expose Revocation in Other Ways
 
 `ZcapLd.Core` is transport-agnostic. You can expose revocation using any application boundary by depending on `IRevocationService`:

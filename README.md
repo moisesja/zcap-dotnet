@@ -135,6 +135,7 @@ Full developer guide: [`docs/REVOCATION-INTEGRATION.md`](docs/REVOCATION-INTEGRA
 - `src/ZcapLd.AspNetCore`: optional ASP.NET endpoint adapter package
 - `tests/ZcapLd.Core.Tests`: unit, integration, and compliance tests
 - `examples/ZcapLd.Examples`: console examples
+- `examples/ZcapLd.RevocationEndpointsDemo`: ASP.NET revocation endpoints demo wired to SQLite
 - `docs`: implementation/security notes
 
 ## Developer Docs
