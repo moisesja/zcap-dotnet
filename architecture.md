@@ -30,6 +30,8 @@ Primary assembly: `src/ZcapLd.Core`.
 - `ISigningService`: sign capability and invocation documents
 - `IVerificationService`: verify proof/chain/invocation, resolve keys, revocation API
 - `ICaveatProcessor`: caveat merge/compatibility/evaluation
+- `IRevocationStore`: pluggable persistence contract for revocation records
+- `IRevocationService`: revocation orchestration (record + lookup + expiry pruning on read)
 
 ### Service Implementations (`src/ZcapLd.Core/Services`)
 
@@ -46,6 +48,11 @@ Primary assembly: `src/ZcapLd.Core`.
   - Verifies capability chains
   - Verifies invocation proof + action/target + caveats
   - Handles DID key resolution and revocation checks
+- `RevocationService`
+  - Persists revocation records via `IRevocationStore`
+  - Applies retention/expiry behavior for revocation lookups
+- `InMemoryRevocationStore`
+  - Default development/testing revocation persistence
 - `CaveatProcessor`
   - Evaluates caveat predicates
   - Merges inherited caveats across chain
@@ -109,6 +116,46 @@ Implement new caveat types by extending `Caveat` and adding compatibility/evalua
 
 `VerificationService.ResolvePublicKeyAsync` can be replaced/extended to call a DID resolver and enforce verification-method relationship checks.
 
+### Revocation Storage
+
+Implement `IRevocationStore` to persist revocation records in any backend:
+
+- SQL/NoSQL databases
+- Blockchain/smart contract clients
+- Oracle bridges / remote trust infrastructure
+- Distributed cache layers
+
+### ASP.NET Revocation Endpoints
+
+For ASP.NET hosts, use `ZcapLd.AspNetCore` to expose revocation APIs quickly:
+
+- Register revocation services via `AddZcapRevocationSupport(...)`
+- Expose routes via `MapZcapRevocationEndpoints(...)`
+- Default route prefix is `/zcaps/revocations`
+
+### Alternative Revocation Exposure Patterns
+
+The core library does not require ASP.NET. Revocation can be exposed through:
+
+- gRPC service methods
+- queue/topic consumers
+- background workers
+- CLI/admin tooling
+- smart-contract relayers/oracles
+
+These patterns should call `IRevocationService` so transport logic stays separate from revocation domain logic.
+
+### Persistence Strategy Configuration
+
+Recommended persistence profiles:
+
+- Development: `InMemoryRevocationStore`
+- Centralized production: database-backed `IRevocationStore`
+- Decentralized production: contract/oracle-backed `IRevocationStore`
+- High scale: hybrid cache + durable backing store
+
+Reference implementation guide: `docs/REVOCATION-INTEGRATION.md`.
+
 ### Remote Invocation Interface
 
 Library is in-process first. Service methods are interface-driven and can be wrapped by gRPC/HTTP without changing core models.
@@ -117,7 +164,7 @@ Library is in-process first. Service methods are interface-driven and can be wra
 
 - Full RDF Dataset Canonicalization (URDNA2015) is not yet implemented.
 - Proof metadata binding follows current implementation behavior and should be reviewed for strict Data Integrity interoperability requirements.
-- Revocation storage is in-memory by default.
+- No default distributed revocation backend is shipped; consumers provide their own `IRevocationStore` for production.
 
 ## Thread Safety
 

@@ -549,6 +549,76 @@ public class VerificationServiceTests
 
     #endregion
 
+    #region Revocation Tests
+
+    [Fact]
+    public async Task VerifyCapabilityChain_WithRevokedLeaf_ShouldReturnFalse()
+    {
+        // Arrange
+        var rootControllerDid = "did:key:z6MkRootController";
+        var delegatedControllerDid = "did:key:z6MkDelegatedController";
+        _signingService.GenerateAndRegisterKeyPair(rootControllerDid);
+        _signingService.GenerateAndRegisterKeyPair(delegatedControllerDid);
+
+        var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
+            rootControllerDid,
+            "https://example.com/resource",
+            new[] { "read", "write" });
+
+        var delegatedCapability = await _capabilityService.DelegateCapabilityAsync(
+            rootCapability,
+            delegatedControllerDid,
+            new[] { "read" },
+            DateTime.UtcNow.AddDays(5));
+
+        await _verificationService.RevokeCapabilityAsync(delegatedCapability.Id, rootControllerDid);
+
+        // Act
+        var result = await _verificationService.VerifyCapabilityChainAsync(delegatedCapability);
+
+        // Assert
+        result.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task VerifyInvocation_WithRevokedCapability_ShouldReturnFalse()
+    {
+        // Arrange
+        var rootControllerDid = "did:key:z6MkRootController";
+        var delegatedControllerDid = "did:key:z6MkDelegatedController";
+        _signingService.GenerateAndRegisterKeyPair(rootControllerDid);
+        _signingService.GenerateAndRegisterKeyPair(delegatedControllerDid);
+
+        var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
+            rootControllerDid,
+            "https://example.com/resource",
+            new[] { "read", "write" });
+
+        var delegatedCapability = await _capabilityService.DelegateCapabilityAsync(
+            rootCapability,
+            delegatedControllerDid,
+            new[] { "read" },
+            DateTime.UtcNow.AddDays(5));
+
+        var invocation = new Invocation
+        {
+            Capability = delegatedCapability.Id,
+            CapabilityAction = "read",
+            InvocationTarget = delegatedCapability.InvocationTarget
+        };
+        invocation.Proof = await _signingService.SignInvocationAsync(invocation, delegatedControllerDid);
+
+        await _verificationService.RevokeCapabilityAsync(delegatedCapability.Id, rootControllerDid);
+
+        // Act
+        var result = await _verificationService.VerifyInvocationAsync(invocation, delegatedCapability);
+
+        // Assert
+        result.Should().BeFalse();
+    }
+
+    #endregion
+
     #region DID Resolution Tests
 
     [Fact]

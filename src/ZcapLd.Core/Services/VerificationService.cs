@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Text.Json;
 using ZcapLd.Core.Cryptography;
 using ZcapLd.Core.Exceptions;
@@ -14,17 +13,22 @@ public class VerificationService : IVerificationService
 {
     private readonly ISigningService _signingService;
     private readonly ICaveatProcessor _caveatProcessor;
+    private readonly IRevocationService _revocationService;
     private const int MaxChainLength = 10; // Per spec: SHOULD limit to 10
 
-    // COMPLIANCE FIX: MUST-21, SHOULD-07 - Revocation storage
-    // Store revoked capability IDs with their expiration times
-    // In production, this should be persisted to a database
-    private readonly ConcurrentDictionary<string, DateTime?> _revokedCapabilities = new();
-
     public VerificationService(ISigningService signingService, ICaveatProcessor caveatProcessor)
+        : this(signingService, caveatProcessor, new RevocationService(new InMemoryRevocationStore()))
+    {
+    }
+
+    public VerificationService(
+        ISigningService signingService,
+        ICaveatProcessor caveatProcessor,
+        IRevocationService revocationService)
     {
         _signingService = signingService ?? throw new ArgumentNullException(nameof(signingService));
         _caveatProcessor = caveatProcessor ?? throw new ArgumentNullException(nameof(caveatProcessor));
+        _revocationService = revocationService ?? throw new ArgumentNullException(nameof(revocationService));
     }
 
     /// <summary>
@@ -34,6 +38,11 @@ public class VerificationService : IVerificationService
     {
         if (capability == null)
             throw new ArgumentNullException(nameof(capability));
+
+        if (await IsCapabilityRevokedAsync(capability.Id))
+        {
+            return false;
+        }
 
         // Root capabilities have no proof
         if (string.IsNullOrEmpty(capability.ParentCapability))
@@ -220,7 +229,16 @@ public class VerificationService : IVerificationService
                 return false;
             }
 
-            // 2. Verify each link in the chain
+            // 2. Revocation check for all capabilities in the chain.
+            foreach (var chainCapability in chain)
+            {
+                if (await IsCapabilityRevokedAsync(chainCapability.Id))
+                {
+                    return false;
+                }
+            }
+
+            // 3. Verify each link in the chain
             for (int i = 1; i < chain.Count; i++)
             {
                 var parent = chain[i - 1];
@@ -246,7 +264,7 @@ public class VerificationService : IVerificationService
                     return false;
             }
 
-            // 3. Verify root capability (should have no proof)
+            // 4. Verify root capability (should have no proof)
             var root = chain[0];
             if (root.Proof != null)
                 return false;
@@ -589,17 +607,7 @@ public class VerificationService : IVerificationService
         if (string.IsNullOrEmpty(revokerDid))
             throw new ArgumentException("Revoker DID cannot be null or empty", nameof(revokerDid));
 
-        // In production, you would:
-        // 1. Verify the revoker is authorized (root controller or delegator)
-        // 2. Get the capability's expiration from storage/chain
-        // 3. Store revocation in persistent storage (database)
-        // 4. Publish revocation to revocation list endpoint
-
-        // For now, we store with no expiration (indefinite revocation)
-        // In production, you should retrieve the capability's expiration and use that
-        _revokedCapabilities.TryAdd(capabilityId, null);
-
-        return Task.FromResult(true);
+        return RevokeCapabilityCoreAsync(capabilityId, revokerDid);
     }
 
     /// <summary>
@@ -611,19 +619,17 @@ public class VerificationService : IVerificationService
         if (string.IsNullOrEmpty(capabilityId))
             return Task.FromResult(false);
 
-        // Check if capability is in revocation store
-        if (_revokedCapabilities.TryGetValue(capabilityId, out var expiration))
+        return _revocationService.IsRevokedAsync(capabilityId);
+    }
+
+    private async Task<bool> RevokeCapabilityCoreAsync(string capabilityId, string revokerDid)
+    {
+        await _revocationService.RevokeAsync(new RevocationRequest
         {
-            // If expiration is set and has passed, remove from revocation store
-            if (expiration.HasValue && expiration.Value < DateTime.UtcNow)
-            {
-                _revokedCapabilities.TryRemove(capabilityId, out _);
-                return Task.FromResult(false);
-            }
+            CapabilityId = capabilityId,
+            RevokedBy = revokerDid
+        });
 
-            return Task.FromResult(true);
-        }
-
-        return Task.FromResult(false);
+        return true;
     }
 }

@@ -1,68 +1,81 @@
 # NuGet Release Runbook
 
-This project publishes `ZcapLd.Core` to NuGet.org via GitHub Actions.
+This monorepo publishes two packages to NuGet.org:
+
+- `ZcapLd.Core`
+- `ZcapLd.AspNetCore` (optional endpoint adapter)
+
+Related developer docs:
+
+- `docs/REVOCATION-INTEGRATION.md` (endpoint setup, transport options, persistence strategies)
+- `docs/MONOREPO-PIPELINES.md` (CI/CD package boundaries)
 
 ## One-Time Setup
 
-1. Create a NuGet.org API key with push permissions for `ZcapLd.Core`.
-2. In GitHub repository settings, add secret:
-   - `NUGET_API_KEY`
+1. Create NuGet.org API keys with push permissions.
+2. In GitHub repository settings, configure secrets:
+   - `NUGET_API_KEY_CORE` (preferred for core releases)
+   - `NUGET_API_KEY_ASPNET` (preferred for ASP.NET adapter releases)
+   - `NUGET_API_KEY` (optional shared fallback)
 3. Ensure default branch is `main`.
 
-## CI Validation
+## CI Workflows
 
-Workflow: `.github/workflows/ci.yml`
+- Core CI: `.github/workflows/ci-core.yml`
+- ASP.NET adapter CI: `.github/workflows/ci-aspnet.yml`
 
-Runs on:
+Both run on push/PR with path filters and can be run manually.
 
-- Push to `main`
-- Pull requests targeting `main`
-- Manual dispatch
+## Release Workflows
 
-Steps:
+### Core Package Release
 
-1. Restore
-2. Build (Release)
-3. Test
-4. Pack
-5. Upload package artifacts
+- Workflow: `.github/workflows/release-core-nuget.yml`
+- Trigger tag format: `core-vMAJOR.MINOR.PATCH`
 
-## Publish Workflow
-
-Workflow: `.github/workflows/release-nuget.yml`
-
-### Tag-Based Release
+Example:
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag core-v0.2.0
+git push origin core-v0.2.0
 ```
 
-The workflow resolves version `0.1.0`, runs build/test/pack, and publishes `.nupkg` and `.snupkg`.
+### ASP.NET Adapter Release
 
-### Manual Release
+- Workflow: `.github/workflows/release-aspnet-nuget.yml`
+- Trigger tag format: `aspnet-vMAJOR.MINOR.PATCH`
 
-Run `release-nuget` from GitHub Actions UI with `version` input (e.g., `0.1.1`).
+Example:
+
+```bash
+git tag aspnet-v0.2.0
+git push origin aspnet-v0.2.0
+```
+
+### Manual Releases
+
+Both release workflows support `workflow_dispatch` with a required `version` input.
 
 ## Local Preflight
 
 ```bash
-dotnet test ZcapLd.sln
+dotnet test tests/ZcapLd.Core.Tests/ZcapLd.Core.Tests.csproj
 dotnet pack src/ZcapLd.Core/ZcapLd.Core.csproj -c Release
+dotnet pack src/ZcapLd.AspNetCore/ZcapLd.AspNetCore.csproj -c Release
 ```
 
-## Versioning
+## Versioning Strategy
 
-- Repository uses SemVer tags: `vMAJOR.MINOR.PATCH`
-- `csproj` holds default development version
-- Release workflow overrides package version from tag/input
+- Tags are package-scoped (`core-v*`, `aspnet-v*`) to support independent release flow.
+- Each `.csproj` keeps a default development version.
+- Release workflows override package versions from tag/input at pack time.
 
 ## Troubleshooting
 
-- `NUGET_API_KEY secret is not configured`: add secret in repository settings.
-- `skip duplicate` messages are non-fatal when re-running same version.
-- If package metadata validation fails, inspect generated artifact with:
+- `Neither NUGET_API_KEY_* nor NUGET_API_KEY is configured`: configure package-specific secret (or shared fallback).
+- `skip duplicate` on push is non-fatal when retrying the same version.
+- Inspect package integrity with:
 
 ```bash
-dotnet nuget verify artifacts/*.nupkg
+dotnet nuget verify artifacts/**/*.nupkg
 ```

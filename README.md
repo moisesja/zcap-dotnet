@@ -2,7 +2,8 @@
 
 A .NET 10 implementation of the [W3C ZCAP-LD](https://w3c-ccg.github.io/zcap-spec/) authorization capability model.
 
-[![CI](https://github.com/moisesja/zcap-dotnet/actions/workflows/ci.yml/badge.svg)](https://github.com/moisesja/zcap-dotnet/actions/workflows/ci.yml)
+[![CI Core](https://github.com/moisesja/zcap-dotnet/actions/workflows/ci-core.yml/badge.svg)](https://github.com/moisesja/zcap-dotnet/actions/workflows/ci-core.yml)
+[![CI ASP.NET](https://github.com/moisesja/zcap-dotnet/actions/workflows/ci-aspnet.yml/badge.svg)](https://github.com/moisesja/zcap-dotnet/actions/workflows/ci-aspnet.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 ## Why This Library
@@ -15,12 +16,14 @@ This library provides:
 - Delegation-chain verification
 - Invocation signing and verification
 - Caveat processing (expiration and usage count)
+- Revocation persistence with pluggable storage backends
 - Ed25519 signatures with multibase encoding
 
 ## Install
 
 ```bash
 dotnet add package ZcapLd.Core
+dotnet add package ZcapLd.AspNetCore # Optional endpoint adapter
 ```
 
 ## Quick Start
@@ -67,6 +70,56 @@ invocation.Proof = await signing.SignInvocationAsync(invocation, leafDid);
 var isValid = await verifier.VerifyInvocationAsync(invocation, delegated);
 ```
 
+## Revocation Extensibility
+
+The core package is storage-agnostic for revocation.
+
+- `IRevocationStore`: plug in your own backend (database, contract gateway, oracle bridge, cache)
+- `IRevocationService`: orchestration for persistence and expiry-aware lookups
+- `VerificationService`: checks revocation status during capability/invocation verification
+
+Optional ASP.NET endpoint rails are provided by `ZcapLd.AspNetCore`:
+
+```csharp
+using ZcapLd.AspNetCore.DependencyInjection;
+using ZcapLd.AspNetCore.Endpoints;
+
+var builder = WebApplication.CreateBuilder(args);
+builder.Services.AddZcapRevocationSupport(); // Or AddZcapRevocationSupport<MyStore>()
+
+var app = builder.Build();
+app.MapZcapRevocationEndpoints(); // /zcaps/revocations/{*capabilityId}
+app.Run();
+```
+
+### Setup Revocation Endpoints with ASP.NET
+
+Use `ZcapLd.AspNetCore` when your runtime is ASP.NET and you want ready-made minimal API rails:
+
+- Register services via `AddZcapRevocationSupport(...)`
+- Map routes via `MapZcapRevocationEndpoints(...)`
+- Override route prefix when needed (for example `/wallet/revocations`)
+
+### Expose Revocation in Other Ways
+
+If you do not want ASP.NET endpoints, call `IRevocationService` from your own transport layer:
+
+- gRPC handler
+- message consumer
+- admin CLI
+- worker-triggered orchestration
+
+### Persistence Strategy Options
+
+Configure storage via `IRevocationStore`:
+
+- `InMemoryRevocationStore` for local development/testing
+- database-backed custom stores for centralized persistence
+- smart-contract/oracle-backed stores for decentralized persistence
+- hybrid cache + durable store composites for high-throughput workloads
+
+Full developer guide: [`docs/REVOCATION-INTEGRATION.md`](docs/REVOCATION-INTEGRATION.md)
+
 ## Root vs Delegated Semantics
 
 - Root capability:
@@ -79,6 +132,7 @@ var isValid = await verifier.VerifyInvocationAsync(invocation, delegated);
 ## Project Layout
 
 - `src/ZcapLd.Core`: library code
+- `src/ZcapLd.AspNetCore`: optional ASP.NET endpoint adapter package
 - `tests/ZcapLd.Core.Tests`: unit, integration, and compliance tests
 - `examples/ZcapLd.Examples`: console examples
 - `docs`: implementation/security notes
@@ -86,8 +140,10 @@ var isValid = await verifier.VerifyInvocationAsync(invocation, delegated);
 ## Developer Docs
 
 - Architecture: [`architecture.md`](architecture.md)
+- Revocation Integration: [`docs/REVOCATION-INTEGRATION.md`](docs/REVOCATION-INTEGRATION.md)
 - Contributing: [`CONTRIBUTING.md`](CONTRIBUTING.md)
 - NuGet Release Runbook: [`docs/NUGET-RELEASE.md`](docs/NUGET-RELEASE.md)
+- Monorepo Pipelines: [`docs/MONOREPO-PIPELINES.md`](docs/MONOREPO-PIPELINES.md)
 - MIT License: [`LICENSE`](LICENSE)
 
 ## Local Development
@@ -97,16 +153,18 @@ dotnet restore
 dotnet build ZcapLd.sln
 dotnet test ZcapLd.sln
 dotnet pack src/ZcapLd.Core/ZcapLd.Core.csproj -c Release
+dotnet pack src/ZcapLd.AspNetCore/ZcapLd.AspNetCore.csproj -c Release
 ```
 
 ## CI/CD
 
-- CI workflow: `.github/workflows/ci.yml`
-  - restore, build, test, pack
-  - uploads `.nupkg` / `.snupkg` artifacts
-- Publish workflow: `.github/workflows/release-nuget.yml`
-  - publishes on `v*.*.*` tags
-  - requires repository secret: `NUGET_API_KEY`
+- Core CI: `.github/workflows/ci-core.yml`
+- ASP.NET Adapter CI: `.github/workflows/ci-aspnet.yml`
+- Core publish: `.github/workflows/release-core-nuget.yml` on `core-v*.*.*` tags
+- ASP.NET adapter publish: `.github/workflows/release-aspnet-nuget.yml` on `aspnet-v*.*.*` tags
+- Secrets:
+  - Core: `NUGET_API_KEY_CORE` (fallback `NUGET_API_KEY`)
+  - ASP.NET adapter: `NUGET_API_KEY_ASPNET` (fallback `NUGET_API_KEY`)
 
 ## Security and Production Notes
 

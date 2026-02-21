@@ -15,6 +15,7 @@ dotnet add package ZcapLd.Core
 - Invocation signing and verification
 - Delegation chain verification
 - Caveat support (expiration and usage count)
+- Revocation service abstractions with pluggable storage (`IRevocationStore`)
 - Ed25519 signatures with multibase encoding
 
 ## Quick Example
@@ -61,6 +62,34 @@ invocation.Proof = await signing.SignInvocationAsync(invocation, leafDid);
 var isValid = await verifier.VerifyInvocationAsync(invocation, delegated);
 ```
 
+## Revocation Backend Plug-In
+
+`ZcapLd.Core` provides:
+
+- `IRevocationStore` for storage providers
+- `IRevocationService` for revocation workflow orchestration
+- `InMemoryRevocationStore` as the default implementation
+
+## Exposing Revocation Without ASP.NET
+
+`ZcapLd.Core` is transport-agnostic. You can expose revocation through:
+
+- gRPC APIs
+- message consumers
+- worker services
+- CLI/admin operations
+
+In all cases, call `IRevocationService` from your transport/application layer.
+
+## Persistence Strategies
+
+Use `IRevocationStore` to plug in your persistence model:
+
+- In-memory (`InMemoryRevocationStore`) for local development
+- SQL/NoSQL-backed custom stores
+- Smart-contract/oracle-backed stores
+- Hybrid cache + durable stores
+
 ## Notes
 
 - This package is designed for in-process usage.
@@ -71,4 +100,5 @@ var isValid = await verifier.VerifyInvocationAsync(invocation, delegated);
 
 - Repository: https://github.com/moisesja/zcap-dotnet
 - Architecture: `architecture.md`
+- Revocation Guide: `docs/REVOCATION-INTEGRATION.md`
 - Contributing: `CONTRIBUTING.md`

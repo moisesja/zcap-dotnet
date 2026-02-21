@@ -1,3 +1,66 @@
+# Developer Docs Revocation Guide Update - 2026-02-21 (Codex)
+
+## Scope
+
+Update developer-facing documentation to include clear revocation integration guidance:
+
+- How to set up revocation endpoints with `ZcapLd.AspNetCore`
+- How to expose revocation without the ASP.NET adapter
+- How to configure different persistence strategies for revocation registries
+
+## Plan
+
+- [x] Add a dedicated revocation integration guide under `docs/`
+- [x] Update root `README.md` with links and quick-start snippets for the three revocation documentation sections
+- [x] Update `architecture.md` with explicit endpoint exposure patterns and persistence strategy guidance
+- [x] Update package docs (`src/ZcapLd.Core/PACKAGE_README.md`, `src/ZcapLd.AspNetCore/PACKAGE_README.md`) with the new revocation sections
+- [x] Update `CONTRIBUTING.md` and release docs references to remain consistent with monorepo dual-package workflows
+- [x] Verify documentation consistency and capture completion notes
+
+## Verification Log
+
+- [x] `rg -n "ci\\.yml|release-nuget\\.yml|git tag v|v<major>|NUGET_API_KEY\\b|revocacion|revocation integration|REVOCATION-INTEGRATION" ...`: validated updated references and new guide links across developer docs
+
+## Review
+
+- Added `docs/REVOCATION-INTEGRATION.md` with explicit sections on ASP.NET endpoint setup, non-ASP.NET exposure patterns, and persistence strategy configuration.
+- Updated developer-facing docs (`README.md`, `architecture.md`, package readmes, `CONTRIBUTING.md`) to include and reference the new revocation integration guidance.
+- Aligned contributor release guidance with monorepo package-scoped release tags and package-specific NuGet API key conventions.
+
+---
+
+# Revocation Extensibility + ASP.NET Adapter Plan - 2026-02-20 (Codex)
+
+## Scope
+
+Implement persistent, pluggable revocation support in `ZcapLd.Core`, add optional ASP.NET endpoint rails in a new adapter package, and split monorepo CI/CD so each package has independent pipelines.
+
+## Plan
+
+- [x] Add revocation core abstractions and default in-memory implementation in `src/ZcapLd.Core`
+- [x] Integrate revocation checks into verification flows and route existing revocation API methods through the new service
+- [x] Add/adjust tests to cover revocation persistence and verification behavior
+- [x] Create `src/ZcapLd.AspNetCore` package with endpoint mapping and DI registration extensions
+- [x] Add monorepo package docs and update root docs/readme for dual-package usage
+- [x] Split GitHub Actions into per-package CI and CD workflows (core vs ASP.NET adapter)
+- [x] Run full build/test/pack validation and capture results
+
+## Verification Log
+
+- [x] `dotnet test ZcapLd.sln`: `Failed: 0, Passed: 162, Total: 162`
+- [x] `dotnet build src/ZcapLd.AspNetCore/ZcapLd.AspNetCore.csproj`: `Build succeeded`
+- [x] `dotnet pack src/ZcapLd.Core/ZcapLd.Core.csproj -c Release -o artifacts/core`: generated `.nupkg` and `.snupkg`
+- [x] `dotnet pack src/ZcapLd.AspNetCore/ZcapLd.AspNetCore.csproj -c Release -o artifacts/aspnet`: generated `.nupkg` and `.snupkg`
+
+## Review
+
+- Implemented pluggable revocation storage contracts (`IRevocationStore`, `IRevocationService`) with a default in-memory backend and expiry-aware revocation lookups.
+- Wired revocation checks into capability proof/chain/invocation verification paths to actively deny revoked capabilities.
+- Added optional ASP.NET adapter package with DI rails and minimal API endpoints for revocation submit/status workflows.
+- Migrated repository CI/CD to monorepo package pipelines with path filters and package-specific tag-based NuGet release workflows.
+
+---
+
 # OSS NuGet Readiness Plan - 2026-02-20 (Codex)
 
 ## Scope

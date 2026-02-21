@@ -1,0 +1,100 @@
+name: release-aspnet-nuget
+
+on:
+  push:
+    tags:
+      - 'aspnet-v*.*.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'ASP.NET adapter package version (for example 0.2.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  publish-aspnet:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Resolve version
+        id: version
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            VERSION="${GITHUB_REF_NAME#aspnet-v}"
+          else
+            VERSION="${{ inputs.version }}"
+          fi
+
+          if [[ -z "$VERSION" ]]; then
+            echo "Version is empty."
+            exit 1
+          fi
+
+          echo "package_version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Resolved ASP.NET adapter package version: $VERSION"
+
+      - name: Restore
+        run: |
+          dotnet restore src/ZcapLd.Core/ZcapLd.Core.csproj
+          dotnet restore src/ZcapLd.AspNetCore/ZcapLd.AspNetCore.csproj
+          dotnet restore tests/ZcapLd.Core.Tests/ZcapLd.Core.Tests.csproj
+
+      - name: Build
+        run: |
+          dotnet build src/ZcapLd.Core/ZcapLd.Core.csproj --configuration Release --no-restore -p:Version=${{ steps.version.outputs.package_version }}
+          dotnet build src/ZcapLd.AspNetCore/ZcapLd.AspNetCore.csproj --configuration Release --no-restore -p:Version=${{ steps.version.outputs.package_version }}
+          dotnet build tests/ZcapLd.Core.Tests/ZcapLd.Core.Tests.csproj --configuration Release --no-restore
+
+      - name: Test
+        run: dotnet test tests/ZcapLd.Core.Tests/ZcapLd.Core.Tests.csproj --configuration Release --no-build --verbosity normal
+
+      - name: Pack ASP.NET adapter package
+        run: |
+          dotnet pack src/ZcapLd.AspNetCore/ZcapLd.AspNetCore.csproj \
+            --configuration Release \
+            --no-build \
+            -p:Version=${{ steps.version.outputs.package_version }} \
+            -o artifacts/aspnet
+
+      - name: Upload ASP.NET adapter package artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: aspnet-nuget-release-${{ steps.version.outputs.package_version }}
+          path: |
+            artifacts/aspnet/*.nupkg
+            artifacts/aspnet/*.snupkg
+          if-no-files-found: error
+
+      - name: Resolve NuGet API key
+        id: apikey
+        shell: bash
+        run: |
+          API_KEY="${{ secrets.NUGET_API_KEY_ASPNET }}"
+          if [[ -z "$API_KEY" ]]; then
+            API_KEY="${{ secrets.NUGET_API_KEY }}"
+          fi
+
+          if [[ -z "$API_KEY" ]]; then
+            echo "Neither NUGET_API_KEY_ASPNET nor NUGET_API_KEY is configured."
+            exit 1
+          fi
+
+          echo "api_key=$API_KEY" >> "$GITHUB_OUTPUT"
+
+      - name: Publish ASP.NET adapter package to NuGet.org
+        run: dotnet nuget push "artifacts/aspnet/ZcapLd.AspNetCore.*.nupkg" --api-key "${{ steps.apikey.outputs.api_key }}" --source "https://api.nuget.org/v3/index.json" --skip-duplicate
+
+      - name: Publish ASP.NET adapter symbols to NuGet.org
+        run: dotnet nuget push "artifacts/aspnet/ZcapLd.AspNetCore.*.snupkg" --api-key "${{ steps.apikey.outputs.api_key }}" --source "https://api.nuget.org/v3/index.json" --skip-duplicate
