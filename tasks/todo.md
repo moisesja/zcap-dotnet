@@ -50,3 +50,61 @@ Split `IDidProvider` into two interfaces following ISP:
 ## Review
 
 Split `IDidProvider` into `IDidResolver` (public key resolution) and `IDidSigner` (signing operations) following Interface Segregation Principle. Removed insecure `InMemoryDidProvider` from the core NuGet package. Core now ships `DidKeyResolver` for did:key resolution and `CompositeDidResolver` for routing across DID methods. No default signer ships — consumers must provide their own backed by a secure key management system. ASP.NET DI extensions updated with `AddZcapDidSigner<T>()` and `AddZcapDidResolver<T>()` methods.
+
+---
+
+# Pluggable Crypto Suite Abstraction - 2026-02-21
+
+## Motivation
+
+DID methods (did:key, did:web) and signature algorithms (Ed25519, P-256, secp256k1) are orthogonal. Previously, `DidKeyResolver` only understood the `0xed01` multicodec prefix (Ed25519), and `VerificationService`/`SigningService` hardcoded `Ed25519Signer` static calls for verification. This locked consumers into Ed25519.
+
+## Design
+
+Three orthogonal abstractions:
+
+- **`ICryptoSuite`** — algorithm-specific sign/verify, proof type, key type, multicodec prefix, public key length
+- **`ICryptoSuiteProvider`** — registry for lookup by proof type or multicodec prefix
+- **`ResolvedKey`** — record carrying key bytes + key type from resolver to verification service
+
+## Plan
+
+### Phase 1: New types
+- [x] Create `ICryptoSuite.cs` — pluggable algorithm interface
+- [x] Create `ICryptoSuiteProvider.cs` — registry interface
+- [x] Create `CryptoSuiteProvider.cs` — default implementation (ConcurrentDictionary + List)
+- [x] Create `Ed25519CryptoSuite.cs` — thin adapter wrapping `Ed25519Signer`
+- [x] Create `ResolvedKey.cs` — `record ResolvedKey(byte[] PublicKeyBytes, string KeyType)`
+
+### Phase 2: Update interfaces
+- [x] `IDidResolver.ResolvePublicKeyAsync` returns `Task<ResolvedKey>` (was `Task<byte[]>`)
+- [x] `IVerificationService.ResolvePublicKeyAsync` returns `Task<ResolvedKey>`
+
+### Phase 3: Update implementations
+- [x] `DidKeyResolver` — new `ICryptoSuiteProvider` constructor + multicodec prefix lookup
+- [x] `CompositeDidResolver` — return type change
+- [x] `VerificationService` — `ICryptoSuiteProvider` dependency + suite dispatch by proof type
+- [x] `SignatureVerifier` — `ICryptoSuite` parameter for verify methods
+
+### Phase 4: Update consumers
+- [x] `InMemoryDidProvider` (tests + examples) — return `ResolvedKey`
+- [x] Test assertion fixes (`CapabilityServiceTests`, `InMemoryDidProviderTests`, `VerificationServiceTests`)
+- [x] ASP.NET DI extensions — register `Ed25519CryptoSuite`, `ICryptoSuiteProvider`, `AddZcapCryptoSuite<T>()`
+
+### Phase 5: New tests
+- [x] `CryptoSuiteProviderTests.cs` — 7 tests (registration, lookup, null handling, replacement)
+- [x] `Ed25519CryptoSuiteTests.cs` — 6 tests (properties, sign/verify, wrong key)
+
+### Phase 6: Verify
+- [x] Build solution — 0 errors, 0 warnings
+- [x] Run full test suite — **Failed: 0, Passed: 203, Total: 203**
+
+### Phase 7: Documentation
+- [x] Update `README.md` — feature list, Quick Start, security notes
+- [x] Update `ARCHITECTURE.md` — service interfaces, crypto section, extensibility
+- [x] Update `src/ZcapLd.Core/PACKAGE_README.md` — Quick Start, features, notes
+- [x] Update `docs/IMPLEMENTATION-COMPLETE.md` — project structure, code examples, compliance, future enhancements
+
+## Review
+
+Added pluggable crypto suite abstraction (`ICryptoSuite`, `ICryptoSuiteProvider`, `CryptoSuiteProvider`, `Ed25519CryptoSuite`) and `ResolvedKey` record. DID methods and signature algorithms are now fully orthogonal — `DidKeyResolver` decodes any registered multicodec prefix, and `VerificationService` dispatches verification to the correct suite by proof type. All backward-compatible: parameterless constructors default to Ed25519. ASP.NET DI extended with `AddZcapCryptoSuite<T>()`. 203 tests passing.

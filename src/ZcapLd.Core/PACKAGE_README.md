@@ -16,32 +16,38 @@ dotnet add package ZcapLd.Core
 - Delegation chain verification
 - Caveat support (expiration and usage count)
 - Revocation service abstractions with pluggable storage (`IRevocationStore`)
-- Ed25519 signatures with multibase encoding
+- Pluggable crypto suites (Ed25519 included, P-256/secp256k1 extensible)
+- Multibase signature encoding
 
 ## Quick Example
 
 ```csharp
+using ZcapLd.Core.Cryptography;
 using ZcapLd.Core.Models;
 using ZcapLd.Core.Services;
 
-var signing = new SigningService();
-var capabilities = new CapabilityService(signing);
-var verifier = new VerificationService(signing, new CaveatProcessor());
+// Wire up services — in production, replace InMemoryDidProvider with your
+// IDidSigner (HSM/Key Vault) and IDidResolver implementations.
+var didProvider = new InMemoryDidProvider(); // test helper: IDidSigner + IDidResolver
+var signingService = new SigningService(didProvider, didProvider);
+var capabilityService = new CapabilityService(signingService);
+var caveatProcessor = new CaveatProcessor();
+var verificationService = new VerificationService(didProvider, caveatProcessor);
 
 var rootDid = "did:key:z6MkRoot";
 var leafDid = "did:key:z6MkLeaf";
 
-signing.GenerateAndRegisterKeyPair(rootDid);
-signing.GenerateAndRegisterKeyPair(leafDid);
+didProvider.GenerateAndRegisterKeyPair(rootDid);
+didProvider.GenerateAndRegisterKeyPair(leafDid);
 
 // Root capabilities only define root authority metadata.
-var root = await capabilities.CreateRootCapabilityAsync(
+var root = await capabilityService.CreateRootCapabilityAsync(
     rootDid,
     "https://api.example.com/documents",
     new[] { "read", "write" });
 
 // Restrictions (actions, caveats, expiry) are enforced on delegated capabilities.
-var delegated = await capabilities.DelegateCapabilityAsync(
+var delegated = await capabilityService.DelegateCapabilityAsync(
     root,
     leafDid,
     new[] { "read" },
@@ -58,8 +64,8 @@ var invocation = new Invocation
     InvocationTarget = "https://api.example.com/documents/abc"
 };
 
-invocation.Proof = await signing.SignInvocationAsync(invocation, leafDid);
-var isValid = await verifier.VerifyInvocationAsync(invocation, delegated);
+invocation.Proof = await signingService.SignInvocationAsync(invocation, leafDid);
+var isValid = await verificationService.VerifyInvocationAsync(invocation, delegated);
 ```
 
 ## Revocation Backend Plug-In
@@ -93,7 +99,8 @@ Use `IRevocationStore` to plug in your persistence model:
 ## Notes
 
 - This package is designed for in-process usage.
-- For production, use secure key management (HSM/KMS/Key Vault) instead of in-memory keys.
+- No default `IDidSigner` ships in the core package — consumers must provide their own (HSM/KMS/Key Vault).
+- The `ICryptoSuite` abstraction supports pluggable algorithms; Ed25519 is registered by default.
 - Data integrity processing currently uses deterministic JSON canonicalization rather than full RDF Dataset Canonicalization.
 
 ## Documentation

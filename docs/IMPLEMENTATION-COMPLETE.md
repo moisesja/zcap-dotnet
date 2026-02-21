@@ -76,21 +76,28 @@ TOTAL                        128    ✅ All Passing
 zcap-dotnet/
 ├── src/ZcapLd.Core/
 │   ├── Cryptography/
-│   │   ├── Ed25519Signer.cs          ✅ Real signing/verification
-│   │   ├── JsonCanonicalizer.cs      ✅ RFC 8785 canonicalization
-│   │   └── SignatureVerifier.cs      ✅ Proof verification
+│   │   ├── ICryptoSuite.cs            ✅ Pluggable algorithm interface
+│   │   ├── ICryptoSuiteProvider.cs    ✅ Suite registry interface
+│   │   ├── CryptoSuiteProvider.cs     ✅ Default registry implementation
+│   │   ├── Ed25519CryptoSuite.cs      ✅ Ed25519 suite adapter
+│   │   ├── Ed25519Signer.cs           ✅ Low-level Ed25519 + multibase
+│   │   ├── JsonCanonicalizer.cs       ✅ RFC 8785 canonicalization
+│   │   └── SignatureVerifier.cs       ✅ Proof verification
 │   ├── Models/
 │   │   ├── Capability.cs             ✅ Root & delegated
 │   │   ├── Proof.cs                  ✅ Delegation & invocation
 │   │   ├── Invocation.cs             ✅ Invocation requests
 │   │   ├── Caveat.cs                 ✅ Expiration & usage count
-│   │   └── InvocationContext.cs      ✅ Context for evaluation
+│   │   ├── InvocationContext.cs      ✅ Context for evaluation
+│   │   └── ResolvedKey.cs            ✅ Key bytes + key type record
 │   ├── Services/
 │   │   ├── CapabilityService.cs      ✅ Create & delegate
-│   │   ├── SigningService.cs         ✅ Proof creation
-│   │   ├── VerificationService.cs    ✅ Chain & invocation verify
+│   │   ├── SigningService.cs         ✅ Proof creation (IDidSigner + IDidResolver)
+│   │   ├── VerificationService.cs    ✅ Chain & invocation verify (ICryptoSuiteProvider)
 │   │   ├── CaveatProcessor.cs        ✅ Caveat evaluation
-│   │   └── I*Service.cs              ✅ All interfaces
+│   │   ├── DidKeyResolver.cs         ✅ did:key DID resolution
+│   │   ├── CompositeDidResolver.cs   ✅ Multi-method DID routing
+│   │   └── I*Service.cs              ✅ All interfaces (IDidResolver, IDidSigner, etc.)
 │   └── Exceptions/
 │       └── ZcapLdExceptions.cs       ✅ Typed exceptions
 ├── tests/ZcapLd.Core.Tests/
@@ -122,32 +129,35 @@ zcap-dotnet/
 ### Phase 1: Core Cryptography ✅
 
 **Implemented:**
+- **ICryptoSuite / ICryptoSuiteProvider** — pluggable algorithm abstraction
+  - `ICryptoSuite`: proof type, key type, multicodec prefix, sign/verify
+  - `ICryptoSuiteProvider`: registry for lookup by proof type or multicodec prefix
+  - `Ed25519CryptoSuite`: thin adapter wrapping `Ed25519Signer`
 - **Ed25519Signer** using NSec.Cryptography library
   - Real Ed25519 signing and verification
   - Multibase encoding (base58-btc with 'z' prefix)
   - Key pair generation
   - Public key extraction
   - JSON signing/verification helpers
-
 - **JsonCanonicalizer** for deterministic JSON
   - Property sorting for canonical output
   - Proof field removal for verification
   - Support for complex nested objects
   - UTF-8 encoding
 
-**Tests:** 34 tests covering all cryptographic operations
+**Tests:** 34+ tests covering all cryptographic operations (including suite provider and Ed25519 suite tests)
 
 **Key Features:**
 ```csharp
-// Generate key pair
-var (privateKey, publicKey) = Ed25519Signer.GenerateKeyPair();
+// Pluggable crypto suite registration
+var provider = new CryptoSuiteProvider();
+provider.Register(new Ed25519CryptoSuite());    // built-in
+provider.Register(new P256CryptoSuite());       // user-provided
 
-// Sign and encode
-var signature = Ed25519Signer.SignJson(capability, privateKey);
-// Returns: "z3t9BCQyF21MDVYmLKc9zbL..." (multibase)
-
-// Verify
-bool isValid = Ed25519Signer.VerifyJson(capability, signature, publicKey);
+// Suite dispatch by proof type
+var suite = provider.GetByProofType("Ed25519Signature2020");
+var signature = suite.Sign(data, privateKey);
+bool isValid = suite.Verify(data, signature, publicKey);
 ```
 
 ---
@@ -158,8 +168,8 @@ bool isValid = Ed25519Signer.VerifyJson(capability, signature, publicKey);
 - **SigningService** for creating proofs
   - Delegation proofs with Ed25519Signature2020
   - Invocation proofs
-  - Key management for DIDs
-  - Verification method URI generation
+  - Delegates signing to user-provided `IDidSigner`
+  - Resolves verification methods via `IDidResolver`
 
 - **CapabilityService** enhancements
   - Root capability creation (urn:zcap:root:...)
@@ -347,13 +357,13 @@ Based on the [W3C ZCAP-LD Specification Requirements](./ZCAP-LD-SPECIFICATION-RE
 - [x] Verify invocation proof signature
 - [x] Check invocation target and action
 
-#### Security (5/6) ✅ 83%
+#### Security (6/6) ✅ 100%
 - [x] No network requests during chain verification
 - [x] Enforce chain length limit (10)
 - [x] Thread-safe implementation (async/await)
 - [x] Enforce expiration for delegated capabilities
 - [x] Validate attenuation (no authority expansion)
-- [ ] Revocation system (future enhancement)
+- [x] Revocation system (`IRevocationService` / `IRevocationStore`)
 
 #### JSON-LD/Canonicalization (3/4) ✅ 75%
 - [x] Canonicalize documents before signing (RFC 8785)
@@ -361,9 +371,9 @@ Based on the [W3C ZCAP-LD Specification Requirements](./ZCAP-LD-SPECIFICATION-RE
 - [x] Preserve exact JSON structure
 - [ ] Full URDNA2015 RDF canonicalization (using simplified JSON canon)
 
-**Overall Compliance: 44/46 = 95.7%** ✅
+**Overall Compliance: 45/46 = 97.8%** ✅
 
-*Note: Revocation and full URDNA2015 are marked for future enhancement. Current implementation uses RFC 8785 JSON canonicalization which is sufficient for most ZCAP-LD use cases.*
+*Note: Full URDNA2015 canonicalization is marked for future enhancement. Current implementation uses RFC 8785 JSON canonicalization which is sufficient for most ZCAP-LD use cases.*
 
 ---
 
@@ -376,7 +386,8 @@ Based on the [W3C ZCAP-LD Specification Requirements](./ZCAP-LD-SPECIFICATION-RE
 - Delegation without central server
 
 ### 2. Cryptographic Proofs ✅
-- Ed25519 digital signatures
+- Pluggable crypto suites (`ICryptoSuite` / `ICryptoSuiteProvider`)
+- Ed25519 included via `Ed25519CryptoSuite`; P-256/secp256k1 extensible
 - Multibase encoding (base58-btc)
 - Data Integrity proof format
 - Deterministic JSON canonicalization
@@ -416,15 +427,16 @@ Based on the [W3C ZCAP-LD Specification Requirements](./ZCAP-LD-SPECIFICATION-RE
 using ZcapLd.Core.Services;
 using ZcapLd.Core.Models;
 
-// Setup services
-var signingService = new SigningService();
-var capabilityService = new CapabilityService();
+// Setup services — InMemoryDidProvider is a test helper (IDidSigner + IDidResolver).
+// In production, provide your own IDidSigner (HSM/Key Vault) and IDidResolver.
+var didProvider = new InMemoryDidProvider();
+var signingService = new SigningService(didProvider, didProvider);
+var capabilityService = new CapabilityService(signingService);
 var caveatProcessor = new CaveatProcessor();
-var verificationService = new VerificationService(signingService, caveatProcessor);
+var verificationService = new VerificationService(didProvider, caveatProcessor);
 
 // Alice creates a root capability
-var (alicePrivate, alicePublic) = Ed25519Signer.GenerateKeyPair();
-signingService.RegisterKey("did:key:alice", alicePrivate);
+didProvider.GenerateAndRegisterKeyPair("did:key:alice");
 
 var rootCapability = await capabilityService.CreateRootCapabilityAsync(
     controller: "did:key:alice",
@@ -433,16 +445,13 @@ var rootCapability = await capabilityService.CreateRootCapabilityAsync(
 );
 
 // Alice delegates to Bob with reduced permissions
-var (bobPrivate, bobPublic) = Ed25519Signer.GenerateKeyPair();
-signingService.RegisterKey("did:key:bob", bobPrivate);
+didProvider.GenerateAndRegisterKeyPair("did:key:bob");
 
 var bobCapability = await capabilityService.DelegateCapabilityAsync(
     parentCapability: rootCapability,
     newController: "did:key:bob",
     allowedActions: new[] { "read" }, // Attenuated: only read, no write/delete
-    expires: DateTime.UtcNow.AddDays(7),
-    signingService: signingService,
-    parentController: "did:key:alice"
+    expires: DateTime.UtcNow.AddDays(7)
 );
 
 // Verify the delegation chain
@@ -500,9 +509,7 @@ var bobCap = await capabilityService.DelegateCapabilityAsync(
     parentCapability: root,
     newController: "did:key:bob",
     allowedActions: new[] { "read", "write" }, // No share
-    expires: DateTime.UtcNow.AddDays(30),
-    signingService: signingService,
-    parentController: "did:key:alice"
+    expires: DateTime.UtcNow.AddDays(30)
 );
 
 // Carol gets capability from Bob
@@ -510,9 +517,7 @@ var carolCap = await capabilityService.DelegateCapabilityAsync(
     parentCapability: bobCap,
     newController: "did:key:carol",
     allowedActions: new[] { "read" }, // Only read
-    expires: DateTime.UtcNow.AddDays(7), // Less than Bob's 30 days
-    signingService: signingService,
-    parentController: "did:key:bob"
+    expires: DateTime.UtcNow.AddDays(7) // Less than Bob's 30 days
 );
 
 // Verify complete chain: root → Bob → Carol
@@ -654,27 +659,38 @@ Total tests: 128
 
 ## 🔮 Future Enhancements
 
+### Recently Completed
+
+1. **Revocation System** ✅
+   - `IRevocationService` / `IRevocationStore` abstractions
+   - `InMemoryRevocationStore` for development
+   - `VerificationService` checks revocation status
+   - ASP.NET endpoint adapter (`ZcapLd.AspNetCore`)
+
+2. **Pluggable Crypto Suites** ✅
+   - `ICryptoSuite` / `ICryptoSuiteProvider` abstraction
+   - `Ed25519CryptoSuite` built-in adapter
+   - `VerificationService` dispatches to correct suite by proof type
+   - `DidKeyResolver` decodes any registered multicodec prefix
+   - `ResolvedKey` record carries key bytes + key type
+   - ASP.NET DI: `AddZcapCryptoSuite<T>()` for registering additional suites
+
 ### Planned (Next Phase)
 
-1. **Revocation System** ⏱️
-   - Revocation list storage
-   - Revocation endpoint (`/zcaps/revocations`)
-   - Revocation checking during verification
-
-2. **Full URDNA2015 Canonicalization** ⏱️
+3. **Full URDNA2015 Canonicalization** ⏱️
    - RDF Dataset Canonicalization
    - JSON-LD processing
    - Enhanced interoperability
 
-3. **HTTP Signature Invocation Method** ⏱️
+4. **HTTP Signature Invocation Method** ⏱️
    - HTTP header-based invocation
    - Signature header parsing
    - gzip compression support
 
-4. **Additional Signature Types** ⏱️
-   - Ed25519Signature2018 (legacy)
-   - RsaSignature2016 (legacy)
-   - ECDSA support
+5. **Concrete Additional Crypto Suites** ⏱️
+   - P-256 (`ICryptoSuite` implementation)
+   - secp256k1 (`ICryptoSuite` implementation)
+   - Ed25519Signature2018 (legacy compatibility)
 
 ### Possible (Future)
 
@@ -831,7 +847,7 @@ Starting from a **15-20% complete** codebase with **stub implementations** and *
 
 | Aspect | Before | After |
 |--------|--------|-------|
-| **Cryptography** | Stubs (security risk) | Real Ed25519 (NSec) |
+| **Cryptography** | Stubs (security risk) | Pluggable suites (Ed25519 via NSec) |
 | **Tests** | 9 basic tests | 128 comprehensive tests |
 | **Delegation** | No proof creation | Full spec compliance |
 | **Verification** | Not implemented | Complete algorithm |

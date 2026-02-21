@@ -29,6 +29,8 @@ Primary assembly: `src/ZcapLd.Core`.
 - `ICapabilityService`: create/delegate/validate capabilities
 - `ISigningService`: sign capability and invocation documents
 - `IVerificationService`: verify proof/chain/invocation, resolve keys, revocation API
+- `IDidResolver`: resolve DIDs to public keys (returns `ResolvedKey` with key type); implementations: `DidKeyResolver`, `CompositeDidResolver`
+- `IDidSigner`: sign data using a DID's private key; no default implementation in core — consumers provide their own
 - `ICaveatProcessor`: caveat merge/compatibility/evaluation
 - `IRevocationStore`: pluggable persistence contract for revocation records
 - `IRevocationService`: revocation orchestration (record + lookup + expiry pruning on read)
@@ -41,13 +43,14 @@ Primary assembly: `src/ZcapLd.Core`.
   - Applies attenuation checks during delegation
   - Builds proof `capabilityChain` payload
 - `SigningService`
-  - Manages key registration for local/dev use
+  - Canonicalizes documents and delegates signing to `IDidSigner`
   - Produces delegation and invocation proofs
+  - Resolves verification method URIs via `IDidResolver`
 - `VerificationService`
-  - Verifies delegation proofs
+  - Verifies delegation proofs using `ICryptoSuiteProvider` to dispatch to the correct algorithm
   - Verifies capability chains
   - Verifies invocation proof + action/target + caveats
-  - Handles DID key resolution and revocation checks
+  - Resolves public keys via `IDidResolver` and revocation checks
 - `RevocationService`
   - Persists revocation records via `IRevocationStore`
   - Applies retention/expiry behavior for revocation lookups
@@ -60,9 +63,12 @@ Primary assembly: `src/ZcapLd.Core`.
 
 ### Crypto (`src/ZcapLd.Core/Cryptography`)
 
-- `Ed25519Signer`: Ed25519 sign/verify + multibase encode/decode
-- `JsonCanonicalizer`: deterministic JSON canonicalization
-- `SignatureVerifier`: helper wrapper for signature checks
+- `ICryptoSuite`: algorithm-specific sign/verify interface (proof type, key type, multicodec prefix)
+- `ICryptoSuiteProvider` / `CryptoSuiteProvider`: registry for looking up suites by proof type or multicodec prefix
+- `Ed25519CryptoSuite`: Ed25519 suite wrapping `Ed25519Signer` static methods
+- `Ed25519Signer`: low-level Ed25519 sign/verify + multibase encode/decode (static utility)
+- `JsonCanonicalizer`: deterministic JSON canonicalization (RFC 8785)
+- `SignatureVerifier`: helper wrapper for signature checks (accepts `ICryptoSuite`)
 
 ### Exceptions (`src/ZcapLd.Core/Exceptions`)
 
@@ -98,15 +104,19 @@ Primary assembly: `src/ZcapLd.Core`.
 
 ## Key Management Model
 
-Current default `SigningService` key storage is in-process memory for development/testing.
+`SigningService` delegates all signing to a user-provided `IDidSigner` and all key resolution to `IDidResolver`. No default signer ships in the core package.
 
 Production recommendation:
 
-- Replace `SigningService` with a secure key backend adapter
-- Use KMS/HSM/Key Vault signing operations
-- Avoid long-lived plaintext key material in process memory
+- Implement `IDidSigner` backed by your HSM/KMS/Key Vault
+- Use `DidKeyResolver` (or `CompositeDidResolver`) for public key resolution
+- Avoid plaintext key material — `InMemoryDidProvider` is for tests/examples only
 
 ## Extensibility Points
+
+### Custom Crypto Suites
+
+Implement `ICryptoSuite` for new signature algorithms (P-256, secp256k1, etc.) and register via `CryptoSuiteProvider.Register()` or `AddZcapCryptoSuite<T>()` in ASP.NET DI. The `DidKeyResolver` automatically decodes any registered multicodec prefix, and `VerificationService` dispatches verification to the correct suite based on `proof.type`.
 
 ### Custom Caveats
 
@@ -114,7 +124,7 @@ Implement new caveat types by extending `Caveat` and adding compatibility/evalua
 
 ### DID Resolution
 
-`VerificationService.ResolvePublicKeyAsync` can be replaced/extended to call a DID resolver and enforce verification-method relationship checks.
+Implement `IDidResolver` for additional DID methods (did:web, did:ion, etc.) and register them in `CompositeDidResolver`. The resolver returns `ResolvedKey(byte[] PublicKeyBytes, string KeyType)` so the verification service knows which crypto suite to use.
 
 ### Revocation Storage
 
@@ -168,5 +178,6 @@ Library is in-process first. Service methods are interface-driven and can be wra
 
 ## Thread Safety
 
-- Key store uses `ConcurrentDictionary`.
-- Service instances are safe for concurrent read-heavy usage under current in-memory model.
+- `CryptoSuiteProvider` uses `ConcurrentDictionary` for proof-type lookup; suite registration is expected at startup.
+- Service instances are stateless and safe for concurrent usage.
+- `InMemoryDidProvider` (test helper) uses `ConcurrentDictionary` for key storage.
