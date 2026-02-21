@@ -7,12 +7,14 @@ namespace ZcapLd.Core.Tests.Services;
 
 public class CapabilityServiceTests
 {
+    private readonly InMemoryDidProvider _didProvider;
     private readonly SigningService _signingService;
     private readonly CapabilityService _capabilityService;
 
     public CapabilityServiceTests()
     {
-        _signingService = new SigningService();
+        _didProvider = new InMemoryDidProvider();
+        _signingService = new SigningService(_didProvider);
         _capabilityService = new CapabilityService(_signingService);
     }
 
@@ -88,7 +90,7 @@ public class CapabilityServiceTests
         var allowedActions = new[] { "read", "write" };
 
         // Register key for parent controller
-        var (privateKey, publicKey) = _signingService.GenerateAndRegisterKeyPair(parentController);
+        var (privateKey, publicKey) = _didProvider.GenerateAndRegisterKeyPair(parentController);
 
         // Create root capability
         var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
@@ -137,7 +139,7 @@ public class CapabilityServiceTests
         var newController = "did:key:z6MkChild";
         var invocationTarget = "https://example.com/foo";
 
-        _signingService.GenerateAndRegisterKeyPair(parentController);
+        _didProvider.GenerateAndRegisterKeyPair(parentController);
 
         var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
             parentController,
@@ -169,7 +171,7 @@ public class CapabilityServiceTests
         var newController = "did:key:z6MkChild";
         var invocationTarget = "https://example.com/foo";
 
-        _signingService.GenerateAndRegisterKeyPair(parentController);
+        _didProvider.GenerateAndRegisterKeyPair(parentController);
 
         var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
             parentController,
@@ -203,7 +205,7 @@ public class CapabilityServiceTests
         var newController = "did:key:z6MkChild";
         var invocationTarget = "https://example.com/foo";
 
-        _signingService.GenerateAndRegisterKeyPair(parentController);
+        _didProvider.GenerateAndRegisterKeyPair(parentController);
 
         var parentCaveat = new ExpirationCaveat
         {
@@ -251,8 +253,8 @@ public class CapabilityServiceTests
         var controller3 = "did:key:z6MkController3";
         var invocationTarget = "https://example.com/foo";
 
-        _signingService.GenerateAndRegisterKeyPair(controller1);
-        _signingService.GenerateAndRegisterKeyPair(controller2);
+        _didProvider.GenerateAndRegisterKeyPair(controller1);
+        _didProvider.GenerateAndRegisterKeyPair(controller2);
 
         // Create root capability
         var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
@@ -311,7 +313,7 @@ public class CapabilityServiceTests
     {
         // Arrange
         var parentController = "did:key:z6MkParent";
-        _signingService.GenerateAndRegisterKeyPair(parentController);
+        _didProvider.GenerateAndRegisterKeyPair(parentController);
 
         var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
             parentController,
@@ -402,7 +404,7 @@ public class CapabilityServiceTests
     {
         // Arrange
         var parentController = "did:key:z6MkParent";
-        _signingService.GenerateAndRegisterKeyPair(parentController);
+        _didProvider.GenerateAndRegisterKeyPair(parentController);
 
         var parentExpires = DateTime.UtcNow.AddDays(10);
 
@@ -429,31 +431,31 @@ public class CapabilityServiceTests
     }
 
     [Fact]
-    public void SigningService_GenerateAndRegisterKeyPair_ShouldCreateValidKeys()
+    public async Task DidProvider_GenerateAndRegisterKeyPair_ShouldCreateValidKeys()
     {
         // Arrange
         var did = "did:key:z6MkTest";
 
         // Act
-        var (privateKey, publicKey) = _signingService.GenerateAndRegisterKeyPair(did);
+        var (privateKey, publicKey) = _didProvider.GenerateAndRegisterKeyPair(did);
 
         // Assert
         privateKey.Should().HaveCount(32);
         publicKey.Should().HaveCount(32);
 
-        // Should be able to get the public key later
-        var retrievedPublicKey = _signingService.GetPublicKey(did);
-        retrievedPublicKey.Should().Equal(publicKey);
+        // Should be able to resolve the public key later
+        var resolvedPublicKey = await _didProvider.ResolvePublicKeyAsync(did);
+        resolvedPublicKey.Should().Equal(publicKey);
     }
 
     [Fact]
-    public async Task SigningService_GetVerificationMethod_ForDidKey_ShouldReturnValidFormat()
+    public async Task DidProvider_GetVerificationMethod_ForDidKey_ShouldReturnValidFormat()
     {
         // Arrange
         var did = "did:key:z6MkExample1234";
 
         // Act
-        var verificationMethod = await _signingService.GetVerificationMethodAsync(did);
+        var verificationMethod = await _didProvider.GetVerificationMethodAsync(did);
 
         // Assert
         verificationMethod.Should().StartWith(did);

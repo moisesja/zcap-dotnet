@@ -6,10 +6,11 @@ Console.WriteLine("W3C ZCAP-LD .NET Implementation Examples");
 Console.WriteLine("===========================================\n");
 
 // Initialize services
-var signingService = new SigningService();
+var didProvider = new InMemoryDidProvider();
+var signingService = new SigningService(didProvider);
 var capabilityService = new CapabilityService(signingService);
 var caveatProcessor = new CaveatProcessor();
-var verificationService = new VerificationService(signingService, caveatProcessor);
+var verificationService = new VerificationService(didProvider, caveatProcessor);
 
 // ===================================================
 // Example 1: Create a Root Capability
@@ -18,7 +19,7 @@ Console.WriteLine("Example 1: Creating a Root Capability");
 Console.WriteLine("--------------------------------------");
 
 var aliceDid = "did:key:z6MkAlice";
-signingService.GenerateAndRegisterKeyPair(aliceDid);
+didProvider.GenerateAndRegisterKeyPair(aliceDid);
 
 var rootCapability = await capabilityService.CreateRootCapabilityAsync(
     controller: aliceDid,
@@ -40,7 +41,7 @@ Console.WriteLine("Example 2: Single-Level Delegation");
 Console.WriteLine("-----------------------------------");
 
 var bobDid = "did:key:z6MkBob";
-signingService.GenerateAndRegisterKeyPair(bobDid);
+didProvider.GenerateAndRegisterKeyPair(bobDid);
 
 // Alice delegates to Bob with attenuated permissions (only read and write, no delete)
 var bobCapability = await capabilityService.DelegateCapabilityAsync(
@@ -67,7 +68,7 @@ Console.WriteLine("Example 3: Multi-Level Delegation Chain");
 Console.WriteLine("----------------------------------------");
 
 var carolDid = "did:key:z6MkCarol";
-signingService.GenerateAndRegisterKeyPair(carolDid);
+didProvider.GenerateAndRegisterKeyPair(carolDid);
 
 // Bob delegates to Carol with even more restricted permissions (only read)
 var carolCapability = await capabilityService.DelegateCapabilityAsync(
@@ -137,7 +138,7 @@ Console.WriteLine("Example 5: Capabilities with Caveats");
 Console.WriteLine("-------------------------------------");
 
 var davidDid = "did:key:z6MkDavid";
-signingService.GenerateAndRegisterKeyPair(davidDid);
+didProvider.GenerateAndRegisterKeyPair(davidDid);
 
 // Root first, then delegate with expiration and usage count caveats
 var caveatRoot = await capabilityService.CreateRootCapabilityAsync(
@@ -202,8 +203,8 @@ Console.WriteLine("-----------------------------------");
 
 var eveDid = "did:key:z6MkEve";
 var restrictedDid = "did:key:z6MkRestricted";
-signingService.GenerateAndRegisterKeyPair(eveDid);
-signingService.GenerateAndRegisterKeyPair(restrictedDid);
+didProvider.GenerateAndRegisterKeyPair(eveDid);
+didProvider.GenerateAndRegisterKeyPair(restrictedDid);
 
 // Create root, then delegated parent with broad permissions
 var attenuationRoot = await capabilityService.CreateRootCapabilityAsync(
@@ -261,9 +262,9 @@ var companyAdminDid = "did:key:z6MkCompanyAdmin";
 var managerDid = "did:key:z6MkManager";
 var employeeDid = "did:key:z6MkEmployee";
 
-signingService.GenerateAndRegisterKeyPair(companyAdminDid);
-signingService.GenerateAndRegisterKeyPair(managerDid);
-signingService.GenerateAndRegisterKeyPair(employeeDid);
+didProvider.GenerateAndRegisterKeyPair(companyAdminDid);
+didProvider.GenerateAndRegisterKeyPair(managerDid);
+didProvider.GenerateAndRegisterKeyPair(employeeDid);
 
 // Admin creates root capability for sensitive document
 var sensitiveDoc = await capabilityService.CreateRootCapabilityAsync(

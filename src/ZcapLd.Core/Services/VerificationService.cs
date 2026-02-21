@@ -11,22 +11,22 @@ namespace ZcapLd.Core.Services;
 /// </summary>
 public class VerificationService : IVerificationService
 {
-    private readonly ISigningService _signingService;
+    private readonly IDidProvider _didProvider;
     private readonly ICaveatProcessor _caveatProcessor;
     private readonly IRevocationService _revocationService;
     private const int MaxChainLength = 10; // Per spec: SHOULD limit to 10
 
-    public VerificationService(ISigningService signingService, ICaveatProcessor caveatProcessor)
-        : this(signingService, caveatProcessor, new RevocationService(new InMemoryRevocationStore()))
+    public VerificationService(IDidProvider didProvider, ICaveatProcessor caveatProcessor)
+        : this(didProvider, caveatProcessor, new RevocationService(new InMemoryRevocationStore()))
     {
     }
 
     public VerificationService(
-        ISigningService signingService,
+        IDidProvider didProvider,
         ICaveatProcessor caveatProcessor,
         IRevocationService revocationService)
     {
-        _signingService = signingService ?? throw new ArgumentNullException(nameof(signingService));
+        _didProvider = didProvider ?? throw new ArgumentNullException(nameof(didProvider));
         _caveatProcessor = caveatProcessor ?? throw new ArgumentNullException(nameof(caveatProcessor));
         _revocationService = revocationService ?? throw new ArgumentNullException(nameof(revocationService));
     }
@@ -279,121 +279,15 @@ public class VerificationService : IVerificationService
     }
 
     /// <summary>
-    /// Resolves a DID to its public key for verification
-    /// SECURITY: Non-recursive implementation to prevent stack overflow DoS attacks
+    /// Resolves a DID to its public key for verification.
+    /// Delegates to the configured <see cref="IDidProvider"/>.
     /// </summary>
     public async Task<byte[]> ResolvePublicKeyAsync(string did)
     {
         if (string.IsNullOrEmpty(did))
             throw new ArgumentException("DID cannot be null or empty", nameof(did));
 
-        // SECURITY FIX S-01: Non-recursive DID resolution with explicit depth limit
-        const int maxResolutionDepth = 3;
-        int depth = 0;
-        string currentDid = did;
-
-        while (depth < maxResolutionDepth)
-        {
-            // Try to resolve via signing service first (for registered test keys)
-            // This should only happen once (depth 0)
-            if (depth == 0)
-            {
-                try
-                {
-                    // Try to get the actual public key from the signing service
-                    // This allows tests and real implementations to register keys
-                    var baseDid = currentDid.Split('#')[0];
-                    var publicKey = _signingService.GetPublicKey(baseDid);
-                    return publicKey;
-                }
-                catch (InvalidOperationException)
-                {
-                    // Key not registered in signing service, continue with other methods
-                }
-            }
-
-            // For did:key format, extract the public key directly
-            if (currentDid.StartsWith("did:key:"))
-            {
-                // Format: did:key:z{multibase-encoded-public-key}#z{multibase-encoded-public-key}
-                // Or just: did:key:z{multibase-encoded-public-key}
-                // Extract the key after "did:key:" and before any fragment
-                var keyPart = currentDid.Replace("did:key:", "").Split('#')[0];
-
-                if (!keyPart.StartsWith("z"))
-                {
-                    throw new CapabilityValidationException(
-                        $"Invalid did:key format (must start with 'z'): {currentDid}");
-                }
-
-                try
-                {
-                    // Decode multibase (base58-btc)
-                    var decoded = Ed25519Signer.DecodeSignature(keyPart);
-
-                    // For Ed25519, the decoded value includes a multicodec prefix
-                    // 0xed01 for Ed25519 public key, so we skip the first 2 bytes
-                    if (decoded.Length >= 34 && decoded[0] == 0xed && decoded[1] == 0x01)
-                    {
-                        return decoded.Skip(2).ToArray();
-                    }
-
-                    // If it's exactly 32 bytes, it's already the raw public key
-                    if (decoded.Length == 32)
-                    {
-                        return decoded;
-                    }
-
-                    throw new CapabilityValidationException(
-                        $"Invalid did:key decoded length: {decoded.Length} bytes for {currentDid}");
-                }
-                catch (CapabilityValidationException)
-                {
-                    throw; // Re-throw our own exceptions
-                }
-                catch (Exception ex)
-                {
-                    throw new CapabilityValidationException(
-                        $"Failed to decode did:key public key: {currentDid}", ex);
-                }
-            }
-
-            // For other DID methods, try to resolve via signing service
-            if (depth == 0)
-            {
-                try
-                {
-                    var verificationMethod = await _signingService.GetVerificationMethodAsync(currentDid);
-
-                    // If verification method is the same as current DID, we're in a loop
-                    if (verificationMethod == currentDid)
-                    {
-                        throw new CapabilityValidationException(
-                            $"DID resolution loop detected for: {currentDid}");
-                    }
-
-                    currentDid = verificationMethod;
-                    depth++;
-                    continue;
-                }
-                catch (InvalidOperationException)
-                {
-                    // Signing service doesn't have this key registered
-                    throw new CapabilityValidationException(
-                        $"Unable to resolve public key for DID: {currentDid}. " +
-                        $"DID method not supported or key not registered.");
-                }
-            }
-
-            // If we get here at depth > 0, we have an unsupported DID method
-            throw new CapabilityValidationException(
-                $"Unsupported DID method or invalid DID format: {currentDid}");
-        }
-
-        // Exceeded max resolution depth
-        throw new CapabilityValidationException(
-            $"DID resolution exceeded maximum depth ({maxResolutionDepth}). " +
-            $"Possible circular reference starting from: {did}");
+        return await _didProvider.ResolvePublicKeyAsync(did);
     }
 
     /// <summary>

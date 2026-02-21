@@ -3,7 +3,8 @@ using ZcapLd.Core.Models;
 namespace ZcapLd.Core.Services;
 
 /// <summary>
-/// Service for cryptographic signing operations
+/// Service for assembling ZCAP-LD cryptographic proofs.
+/// Delegates signing and DID resolution to an <see cref="IDidProvider"/>.
 /// </summary>
 public interface ISigningService
 {
@@ -28,18 +29,4 @@ public interface ISigningService
     /// <param name="signerDid">The DID of the signer</param>
     /// <returns>The signed proof</returns>
     Task<Proof> SignInvocationAsync(Invocation invocation, string signerDid);
-
-    /// <summary>
-    /// Gets the verification method URI for a DID
-    /// </summary>
-    /// <param name="did">The DID to resolve</param>
-    /// <returns>The verification method URI</returns>
-    Task<string> GetVerificationMethodAsync(string did);
-
-    /// <summary>
-    /// Gets the public key for a registered DID
-    /// </summary>
-    /// <param name="did">The DID to get the public key for</param>
-    /// <returns>The public key bytes</returns>
-    byte[] GetPublicKey(string did);
 }

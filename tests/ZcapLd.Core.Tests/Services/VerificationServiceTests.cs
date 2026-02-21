@@ -8,6 +8,7 @@ namespace ZcapLd.Core.Tests.Services;
 
 public class VerificationServiceTests
 {
+    private readonly InMemoryDidProvider _didProvider;
     private readonly SigningService _signingService;
     private readonly CapabilityService _capabilityService;
     private readonly CaveatProcessor _caveatProcessor;
@@ -15,9 +16,10 @@ public class VerificationServiceTests
 
     public VerificationServiceTests()
     {
-        _signingService = new SigningService();
+        _didProvider = new InMemoryDidProvider();
+        _signingService = new SigningService(_didProvider);
         _caveatProcessor = new CaveatProcessor();
-        _verificationService = new VerificationService(_signingService, _caveatProcessor);
+        _verificationService = new VerificationService(_didProvider, _caveatProcessor);
         _capabilityService = new CapabilityService(_signingService);
     }
 
@@ -44,7 +46,7 @@ public class VerificationServiceTests
     {
         // Arrange
         var parentDid = "did:key:z6MkParent";
-        _signingService.GenerateAndRegisterKeyPair(parentDid);
+        _didProvider.GenerateAndRegisterKeyPair(parentDid);
 
         var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
             parentDid,
@@ -114,7 +116,7 @@ public class VerificationServiceTests
     {
         // Arrange
         var parentDid = "did:key:z6MkParent";
-        _signingService.GenerateAndRegisterKeyPair(parentDid);
+        _didProvider.GenerateAndRegisterKeyPair(parentDid);
 
         var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
             parentDid,
@@ -146,7 +148,7 @@ public class VerificationServiceTests
     {
         // Arrange
         var parentDid = "did:key:z6MkParent";
-        _signingService.GenerateAndRegisterKeyPair(parentDid);
+        _didProvider.GenerateAndRegisterKeyPair(parentDid);
 
         var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
             parentDid,
@@ -174,9 +176,9 @@ public class VerificationServiceTests
         var controller2 = "did:key:z6MkController2";
         var controller3 = "did:key:z6MkController3";
 
-        _signingService.GenerateAndRegisterKeyPair(controller1);
-        _signingService.GenerateAndRegisterKeyPair(controller2);
-        _signingService.GenerateAndRegisterKeyPair(controller3);
+        _didProvider.GenerateAndRegisterKeyPair(controller1);
+        _didProvider.GenerateAndRegisterKeyPair(controller2);
+        _didProvider.GenerateAndRegisterKeyPair(controller3);
 
         // Create root
         var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
@@ -214,7 +216,7 @@ public class VerificationServiceTests
         {
             var did = $"did:key:z6MkController{i}";
             controllers.Add(did);
-            _signingService.GenerateAndRegisterKeyPair(did);
+            _didProvider.GenerateAndRegisterKeyPair(did);
         }
 
         var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
@@ -244,7 +246,7 @@ public class VerificationServiceTests
     {
         // Arrange
         var parentDid = "did:key:z6MkParent";
-        _signingService.GenerateAndRegisterKeyPair(parentDid);
+        _didProvider.GenerateAndRegisterKeyPair(parentDid);
 
         var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
             parentDid,
@@ -274,7 +276,7 @@ public class VerificationServiceTests
     {
         // Arrange
         var parentDid = "did:key:z6MkParent";
-        _signingService.GenerateAndRegisterKeyPair(parentDid);
+        _didProvider.GenerateAndRegisterKeyPair(parentDid);
 
         var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
             parentDid,
@@ -300,7 +302,7 @@ public class VerificationServiceTests
     {
         // Arrange
         var parentDid = "did:key:z6MkParent";
-        _signingService.GenerateAndRegisterKeyPair(parentDid);
+        _didProvider.GenerateAndRegisterKeyPair(parentDid);
 
         var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
             parentDid,
@@ -332,7 +334,7 @@ public class VerificationServiceTests
     {
         // Arrange
         var controllerDid = "did:key:z6MkController";
-        _signingService.GenerateAndRegisterKeyPair(controllerDid);
+        _didProvider.GenerateAndRegisterKeyPair(controllerDid);
 
         var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
             controllerDid,
@@ -362,8 +364,8 @@ public class VerificationServiceTests
         // Arrange
         var rootControllerDid = "did:key:z6MkRootController";
         var delegatedControllerDid = "did:key:z6MkDelegatedController";
-        _signingService.GenerateAndRegisterKeyPair(rootControllerDid);
-        _signingService.GenerateAndRegisterKeyPair(delegatedControllerDid);
+        _didProvider.GenerateAndRegisterKeyPair(rootControllerDid);
+        _didProvider.GenerateAndRegisterKeyPair(delegatedControllerDid);
 
         var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
             rootControllerDid,
@@ -397,7 +399,7 @@ public class VerificationServiceTests
     {
         // Arrange
         var controllerDid = "did:key:z6MkController";
-        _signingService.GenerateAndRegisterKeyPair(controllerDid);
+        _didProvider.GenerateAndRegisterKeyPair(controllerDid);
 
         var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
             controllerDid,
@@ -425,7 +427,7 @@ public class VerificationServiceTests
     {
         // Arrange
         var controllerDid = "did:key:z6MkController";
-        _signingService.GenerateAndRegisterKeyPair(controllerDid);
+        _didProvider.GenerateAndRegisterKeyPair(controllerDid);
 
         var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
             controllerDid,
@@ -454,7 +456,7 @@ public class VerificationServiceTests
     {
         // Arrange
         var controllerDid = "did:key:z6MkController";
-        _signingService.GenerateAndRegisterKeyPair(controllerDid);
+        _didProvider.GenerateAndRegisterKeyPair(controllerDid);
 
         var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
             controllerDid,
@@ -481,7 +483,7 @@ public class VerificationServiceTests
     {
         // Arrange
         var controllerDid = "did:key:z6MkController";
-        _signingService.GenerateAndRegisterKeyPair(controllerDid);
+        _didProvider.GenerateAndRegisterKeyPair(controllerDid);
 
         var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
             controllerDid,
@@ -511,8 +513,8 @@ public class VerificationServiceTests
         // Arrange
         var rootControllerDid = "did:key:z6MkRootController";
         var delegatedControllerDid = "did:key:z6MkDelegatedController";
-        _signingService.GenerateAndRegisterKeyPair(rootControllerDid);
-        _signingService.GenerateAndRegisterKeyPair(delegatedControllerDid);
+        _didProvider.GenerateAndRegisterKeyPair(rootControllerDid);
+        _didProvider.GenerateAndRegisterKeyPair(delegatedControllerDid);
 
         var expiredCaveat = new ExpirationCaveat
         {
@@ -557,8 +559,8 @@ public class VerificationServiceTests
         // Arrange
         var rootControllerDid = "did:key:z6MkRootController";
         var delegatedControllerDid = "did:key:z6MkDelegatedController";
-        _signingService.GenerateAndRegisterKeyPair(rootControllerDid);
-        _signingService.GenerateAndRegisterKeyPair(delegatedControllerDid);
+        _didProvider.GenerateAndRegisterKeyPair(rootControllerDid);
+        _didProvider.GenerateAndRegisterKeyPair(delegatedControllerDid);
 
         var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
             rootControllerDid,
@@ -586,8 +588,8 @@ public class VerificationServiceTests
         // Arrange
         var rootControllerDid = "did:key:z6MkRootController";
         var delegatedControllerDid = "did:key:z6MkDelegatedController";
-        _signingService.GenerateAndRegisterKeyPair(rootControllerDid);
-        _signingService.GenerateAndRegisterKeyPair(delegatedControllerDid);
+        _didProvider.GenerateAndRegisterKeyPair(rootControllerDid);
+        _didProvider.GenerateAndRegisterKeyPair(delegatedControllerDid);
 
         var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
             rootControllerDid,
@@ -626,8 +628,8 @@ public class VerificationServiceTests
     {
         // Arrange
         var did = "did:key:z6MkTest";
-        var (privateKey, publicKey) = _signingService.GenerateAndRegisterKeyPair(did);
-        var verificationMethod = await _signingService.GetVerificationMethodAsync(did);
+        var (privateKey, publicKey) = _didProvider.GenerateAndRegisterKeyPair(did);
+        var verificationMethod = await _didProvider.GetVerificationMethodAsync(did);
 
         // Act
         var resolvedKey = await _verificationService.ResolvePublicKeyAsync(verificationMethod);
