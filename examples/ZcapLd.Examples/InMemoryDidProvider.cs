@@ -46,6 +46,7 @@ public class InMemoryDidProvider : IDidSigner, IDidResolver
 
     public void GenerateAndRegisterKeyPair(string did)
     {
+        // Notice that is is unsecured. Make sure to use a secure key management solution in production.
         var (privateKey, _) = Ed25519Signer.GenerateKeyPair();
         _keyStore[did] = privateKey;
     }

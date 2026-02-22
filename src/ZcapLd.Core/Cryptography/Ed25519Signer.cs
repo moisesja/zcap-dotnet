@@ -34,9 +34,7 @@ public static class Ed25519Signer
             using var key = Key.Import(Ed25519, privateKeyBytes, KeyBlobFormat.RawPrivateKey);
 
             // Sign the data
-            var signature = Ed25519.Sign(key, data);
-
-            return signature;
+            return Ed25519.Sign(key, data);
         }
         catch (Exception ex)
         {
