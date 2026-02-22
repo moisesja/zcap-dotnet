@@ -52,7 +52,7 @@ public class DidKeyResolver : IDidResolver
 
         try
         {
-            var decoded = Ed25519Signer.DecodeSignature(keyPart);
+            var decoded = MultibaseCodec.Decode(keyPart);
 
             // Look up suite by multicodec prefix
             var suite = _suiteProvider.GetByMulticodecPrefix(decoded);
@@ -105,6 +105,7 @@ public class DidKeyResolver : IDidResolver
     {
         var provider = new CryptoSuiteProvider();
         provider.Register(new Ed25519CryptoSuite());
+        provider.Register(new P256CryptoSuite());
         return provider;
     }
 }

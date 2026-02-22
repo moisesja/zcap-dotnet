@@ -55,4 +55,15 @@ public class CryptoSuiteProvider : ICryptoSuiteProvider
 
         return null;
     }
+
+    public ICryptoSuite? GetByKeyType(string keyType)
+    {
+        if (string.IsNullOrEmpty(keyType))
+            return null;
+
+        lock (_lock)
+        {
+            return _suites.FirstOrDefault(s => s.KeyType == keyType);
+        }
+    }
 }

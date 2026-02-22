@@ -125,7 +125,7 @@ public class Ed25519SignerTests
         var signature = Ed25519Signer.Sign(data, privateKey);
 
         // Act
-        var encoded = Ed25519Signer.EncodeSignature(signature);
+        var encoded = MultibaseCodec.Encode(signature);
 
         // Assert
         encoded.Should().NotBeNullOrEmpty();
@@ -140,10 +140,10 @@ public class Ed25519SignerTests
         var (privateKey, _) = Ed25519Signer.GenerateKeyPair();
         var data = System.Text.Encoding.UTF8.GetBytes("Test message");
         var originalSignature = Ed25519Signer.Sign(data, privateKey);
-        var encoded = Ed25519Signer.EncodeSignature(originalSignature);
+        var encoded = MultibaseCodec.Encode(originalSignature);
 
         // Act
-        var decoded = Ed25519Signer.DecodeSignature(encoded);
+        var decoded = MultibaseCodec.Decode(encoded);
 
         // Assert
         decoded.Should().Equal(originalSignature);
@@ -158,8 +158,8 @@ public class Ed25519SignerTests
         var signature = Ed25519Signer.Sign(data, privateKey);
 
         // Act
-        var encoded = Ed25519Signer.EncodeSignature(signature);
-        var decoded = Ed25519Signer.DecodeSignature(encoded);
+        var encoded = MultibaseCodec.Encode(signature);
+        var decoded = MultibaseCodec.Decode(encoded);
 
         // Assert
         decoded.Should().Equal(signature);
@@ -176,7 +176,7 @@ public class Ed25519SignerTests
         var invalidEncoded = "a1234567890"; // Wrong prefix (should be 'z')
 
         // Act & Assert
-        var act = () => Ed25519Signer.DecodeSignature(invalidEncoded);
+        var act = () => MultibaseCodec.Decode(invalidEncoded);
         act.Should().Throw<ZcapLd.Core.Exceptions.CryptographicException>();
     }
 
@@ -192,8 +192,8 @@ public class Ed25519SignerTests
         };
 
         // Act
-        var canonical1 = Ed25519Signer.CanonicalizeDocument(document);
-        var canonical2 = Ed25519Signer.CanonicalizeDocument(document);
+        var canonical1 = MultibaseCodec.CanonicalizeDocument(document);
+        var canonical2 = MultibaseCodec.CanonicalizeDocument(document);
 
         // Assert
         canonical1.Should().Equal(canonical2);

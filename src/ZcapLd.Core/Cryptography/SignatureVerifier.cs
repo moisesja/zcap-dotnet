@@ -35,10 +35,10 @@ public class SignatureVerifier
             };
 
             // Canonicalize the document
-            var canonicalizedData = Ed25519Signer.CanonicalizeDocument(capabilityForVerification);
+            var canonicalizedData = MultibaseCodec.CanonicalizeDocument(capabilityForVerification);
 
             // Decode the signature
-            var signature = Ed25519Signer.DecodeSignature(capability.Proof.ProofValue);
+            var signature = MultibaseCodec.Decode(capability.Proof.ProofValue);
 
             // Verify the signature
             return suite.Verify(canonicalizedData, signature, publicKey);
@@ -73,10 +73,10 @@ public class SignatureVerifier
             };
 
             // Canonicalize the document
-            var canonicalizedData = Ed25519Signer.CanonicalizeDocument(invocationForVerification);
+            var canonicalizedData = MultibaseCodec.CanonicalizeDocument(invocationForVerification);
 
             // Decode the signature
-            var signature = Ed25519Signer.DecodeSignature(invocation.Proof.ProofValue);
+            var signature = MultibaseCodec.Decode(invocation.Proof.ProofValue);
 
             // Verify the signature
             return suite.Verify(canonicalizedData, signature, publicKey);

@@ -12,11 +12,32 @@ public class SigningService : ISigningService
 {
     private readonly IDidSigner _signer;
     private readonly IDidResolver _resolver;
+    private readonly ICryptoSuiteProvider _suiteProvider;
 
+    /// <summary>
+    /// Backward-compatible constructor (Ed25519 only).
+    /// </summary>
     public SigningService(IDidSigner signer, IDidResolver resolver)
+        : this(signer, resolver, CreateDefaultSuiteProvider())
+    {
+    }
+
+    /// <summary>
+    /// Full constructor with explicit crypto suite provider.
+    /// </summary>
+    public SigningService(IDidSigner signer, IDidResolver resolver, ICryptoSuiteProvider suiteProvider)
     {
         _signer = signer ?? throw new ArgumentNullException(nameof(signer));
         _resolver = resolver ?? throw new ArgumentNullException(nameof(resolver));
+        _suiteProvider = suiteProvider ?? throw new ArgumentNullException(nameof(suiteProvider));
+    }
+
+    private static ICryptoSuiteProvider CreateDefaultSuiteProvider()
+    {
+        var provider = new CryptoSuiteProvider();
+        provider.Register(new Ed25519CryptoSuite());
+        provider.Register(new P256CryptoSuite());
+        return provider;
     }
 
     /// <summary>
@@ -54,9 +75,9 @@ public class SigningService : ISigningService
         // can be modified without invalidating the signature.
 
         // Canonicalize and sign via provider
-        var canonicalBytes = Ed25519Signer.CanonicalizeDocument(capabilityWithoutProof);
+        var canonicalBytes = MultibaseCodec.CanonicalizeDocument(capabilityWithoutProof);
         var result = await _signer.SignAsync(signerDid, canonicalBytes);
-        var proofValue = Ed25519Signer.EncodeSignature(result.Signature);
+        var proofValue = MultibaseCodec.Encode(result.Signature);
 
         // Get verification method
         var verificationMethod = await _resolver.GetVerificationMethodAsync(signerDid);
@@ -95,9 +116,9 @@ public class SigningService : ISigningService
         };
 
         // Canonicalize and sign via provider
-        var canonicalBytes = Ed25519Signer.CanonicalizeDocument(invocationWithoutProof);
+        var canonicalBytes = MultibaseCodec.CanonicalizeDocument(invocationWithoutProof);
         var result = await _signer.SignAsync(signerDid, canonicalBytes);
-        var proofValue = Ed25519Signer.EncodeSignature(result.Signature);
+        var proofValue = MultibaseCodec.Encode(result.Signature);
 
         // Get verification method
         var verificationMethod = await _resolver.GetVerificationMethodAsync(signerDid);
@@ -119,5 +140,21 @@ public class SigningService : ISigningService
         };
 
         return proof;
+    }
+
+    /// <summary>
+    /// Resolves the JSON-LD security suite context URL for a signer's key type.
+    /// </summary>
+    public async Task<string> ResolveSuiteContextUrlAsync(string signerDid)
+    {
+        if (string.IsNullOrEmpty(signerDid))
+            throw new ArgumentException("Signer DID cannot be null or empty", nameof(signerDid));
+
+        var resolvedKey = await _resolver.ResolvePublicKeyAsync(signerDid);
+        var suite = _suiteProvider.GetByKeyType(resolvedKey.KeyType)
+            ?? throw new Exceptions.CryptographicException(
+                $"No crypto suite registered for key type: {resolvedKey.KeyType}");
+
+        return suite.ContextUrl;
     }
 }

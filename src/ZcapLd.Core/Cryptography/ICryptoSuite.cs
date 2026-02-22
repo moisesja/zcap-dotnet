@@ -5,7 +5,7 @@ namespace ZcapLd.Core.Cryptography;
 /// Implementations are stateless and thread-safe.
 ///
 /// Note: Canonicalization (RFC 8785) and multibase encoding/decoding are NOT
-/// algorithm-specific — they remain as shared utilities on <see cref="Ed25519Signer"/>.
+/// algorithm-specific — they live in <see cref="MultibaseCodec"/>.
 /// </summary>
 public interface ICryptoSuite
 {
@@ -29,6 +29,12 @@ public interface ICryptoSuite
     /// The expected public key length in bytes (e.g. 32 for Ed25519, 33 for compressed P-256).
     /// </summary>
     int PublicKeyLength { get; }
+
+    /// <summary>
+    /// The JSON-LD context URL for this signature suite
+    /// (e.g. "https://w3id.org/security/suites/ed25519-2020/v1").
+    /// </summary>
+    string ContextUrl { get; }
 
     /// <summary>
     /// Signs data using a raw private key.

@@ -16,7 +16,8 @@ dotnet add package ZcapLd.Core
 - Delegation chain verification
 - Caveat support (expiration and usage count)
 - Revocation service abstractions with pluggable storage (`IRevocationStore`)
-- Pluggable crypto suites (Ed25519 included, P-256/secp256k1 extensible)
+- Pluggable crypto suites (Ed25519 and P-256 included, additional curves extensible)
+- Dynamic JSON-LD context URLs per crypto suite
 - Multibase signature encoding
 
 ## Quick Example
@@ -100,7 +101,7 @@ Use `IRevocationStore` to plug in your persistence model:
 
 - This package is designed for in-process usage.
 - No default `IDidSigner` ships in the core package — consumers must provide their own (HSM/KMS/Key Vault).
-- The `ICryptoSuite` abstraction supports pluggable algorithms; Ed25519 is registered by default.
+- The `ICryptoSuite` abstraction supports pluggable algorithms; Ed25519 and P-256 are registered by default.
 - Data integrity processing currently uses deterministic JSON canonicalization rather than full RDF Dataset Canonicalization.
 
 ## Documentation

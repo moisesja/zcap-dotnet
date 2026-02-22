@@ -46,6 +46,7 @@ Primary assembly: `src/ZcapLd.Core`.
   - Canonicalizes documents and delegates signing to `IDidSigner`
   - Produces delegation and invocation proofs
   - Resolves verification method URIs via `IDidResolver`
+  - Resolves per-suite JSON-LD context URLs via `ICryptoSuiteProvider`
 - `VerificationService`
   - Verifies delegation proofs using `ICryptoSuiteProvider` to dispatch to the correct algorithm
   - Verifies capability chains
@@ -63,10 +64,13 @@ Primary assembly: `src/ZcapLd.Core`.
 
 ### Crypto (`src/ZcapLd.Core/Cryptography`)
 
-- `ICryptoSuite`: algorithm-specific sign/verify interface (proof type, key type, multicodec prefix)
-- `ICryptoSuiteProvider` / `CryptoSuiteProvider`: registry for looking up suites by proof type or multicodec prefix
+- `ICryptoSuite`: algorithm-specific sign/verify interface (proof type, key type, multicodec prefix, context URL)
+- `ICryptoSuiteProvider` / `CryptoSuiteProvider`: registry for lookup by proof type, multicodec prefix, or key type
 - `Ed25519CryptoSuite`: Ed25519 suite wrapping `Ed25519Signer` static methods
-- `Ed25519Signer`: low-level Ed25519 sign/verify + multibase encode/decode (static utility)
+- `P256CryptoSuite`: NIST P-256 (secp256r1) suite using `System.Security.Cryptography.ECDsa` (zero extra dependencies)
+- `EcPointCompression`: internal helper for P-256 compressed public key encoding/decoding
+- `MultibaseCodec`: algorithm-agnostic multibase encoding/decoding and document canonicalization
+- `Ed25519Signer`: low-level Ed25519 sign/verify (static utility)
 - `JsonCanonicalizer`: deterministic JSON canonicalization (RFC 8785)
 - `SignatureVerifier`: helper wrapper for signature checks (accepts `ICryptoSuite`)
 
@@ -116,7 +120,7 @@ Production recommendation:
 
 ### Custom Crypto Suites
 
-Implement `ICryptoSuite` for new signature algorithms (P-256, secp256k1, etc.) and register via `CryptoSuiteProvider.Register()` or `AddZcapCryptoSuite<T>()` in ASP.NET DI. The `DidKeyResolver` automatically decodes any registered multicodec prefix, and `VerificationService` dispatches verification to the correct suite based on `proof.type`.
+Implement `ICryptoSuite` for new signature algorithms and register via `CryptoSuiteProvider.Register()` or `AddZcapCryptoSuite<T>()` in ASP.NET DI. Built-in suites: `Ed25519CryptoSuite` and `P256CryptoSuite`. The `DidKeyResolver` automatically decodes any registered multicodec prefix, `VerificationService` dispatches verification by `proof.type`, and `CapabilityService` resolves the correct JSON-LD context URL per suite.
 
 ### Custom Caveats
 

@@ -17,4 +17,10 @@ public interface ICryptoSuiteProvider
     /// The prefix parameter is the raw decoded bytes (first N bytes after multibase decoding).
     /// </summary>
     ICryptoSuite? GetByMulticodecPrefix(ReadOnlySpan<byte> prefix);
+
+    /// <summary>
+    /// Looks up a crypto suite by its key type string (e.g. "Ed25519VerificationKey2020").
+    /// Used to resolve the correct suite for a DID's key material.
+    /// </summary>
+    ICryptoSuite? GetByKeyType(string keyType);
 }

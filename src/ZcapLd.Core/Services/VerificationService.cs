@@ -69,6 +69,7 @@ public class VerificationService : IVerificationService
     {
         var provider = new CryptoSuiteProvider();
         provider.Register(new Ed25519CryptoSuite());
+        provider.Register(new P256CryptoSuite());
         return provider;
     }
 
@@ -170,8 +171,8 @@ public class VerificationService : IVerificationService
 
         // TODO S-03: Full cryptographic binding of proof metadata deferred due to
         // DateTime serialization complexity. Currently verifying document only.
-        var canonicalBytes = Ed25519Signer.CanonicalizeDocument(capabilityWithoutProof);
-        var signatureBytes = Ed25519Signer.DecodeSignature(capability.Proof.ProofValue);
+        var canonicalBytes = MultibaseCodec.CanonicalizeDocument(capabilityWithoutProof);
+        var signatureBytes = MultibaseCodec.Decode(capability.Proof.ProofValue);
 
         return suite.Verify(canonicalBytes, signatureBytes, resolvedKey.PublicKeyBytes);
     }
@@ -227,8 +228,8 @@ public class VerificationService : IVerificationService
                 invocationTarget = invocation.InvocationTarget
             };
 
-            var canonicalBytes = Ed25519Signer.CanonicalizeDocument(invocationWithoutProof);
-            var signatureBytes = Ed25519Signer.DecodeSignature(invocation.Proof.ProofValue);
+            var canonicalBytes = MultibaseCodec.CanonicalizeDocument(invocationWithoutProof);
+            var signatureBytes = MultibaseCodec.Decode(invocation.Proof.ProofValue);
 
             if (!suite.Verify(canonicalBytes, signatureBytes, resolvedKey.PublicKeyBytes))
                 return false;

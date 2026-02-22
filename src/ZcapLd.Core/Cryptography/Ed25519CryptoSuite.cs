@@ -15,6 +15,8 @@ public class Ed25519CryptoSuite : ICryptoSuite
 
     public int PublicKeyLength => 32;
 
+    public string ContextUrl => "https://w3id.org/security/suites/ed25519-2020/v1";
+
     public byte[] Sign(byte[] data, byte[] privateKey)
         => Ed25519Signer.Sign(data, privateKey);
 

@@ -90,7 +90,7 @@ public class InMemoryDidProvider : IDidSigner, IDidResolver
         prefixed[1] = 0x01;
         Buffer.BlockCopy(publicKey, 0, prefixed, 2, 32);
 
-        var multibaseKey = Ed25519Signer.EncodeSignature(prefixed);
+        var multibaseKey = MultibaseCodec.Encode(prefixed);
         var did = $"did:key:{multibaseKey}";
 
         RegisterKey(did, privateKey);

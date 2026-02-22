@@ -17,7 +17,8 @@ This library provides:
 - Invocation signing and verification
 - Caveat processing (expiration and usage count)
 - Revocation persistence with pluggable storage backends
-- Pluggable crypto suites (Ed25519 included, P-256/secp256k1 extensible)
+- Pluggable crypto suites (Ed25519 and P-256 included, additional curves extensible)
+- Dynamic JSON-LD context URLs per crypto suite
 - Multibase signature encoding
 
 ## Install
@@ -178,4 +179,4 @@ dotnet pack src/ZcapLd.AspNetCore/ZcapLd.AspNetCore.csproj -c Release
 - No default `IDidSigner` ships in the core package — consumers must provide their own (HSM/KMS/Key Vault).
 - `InMemoryDidProvider` (in examples and tests) stores private keys in plaintext memory and is NOT for production use.
 - Canonicalization currently uses deterministic JSON canonicalization, not full RDF Dataset Canonicalization.
-- The `ICryptoSuite` abstraction supports pluggable algorithms; Ed25519 is registered by default.
+- The `ICryptoSuite` abstraction supports pluggable algorithms; Ed25519 and P-256 are registered by default.

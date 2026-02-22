@@ -26,6 +26,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="ZcapLd.Core.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Compile Remove="examples/**" />
     <Compile Remove="tests/**" />
     <Compile Remove="src/**" />

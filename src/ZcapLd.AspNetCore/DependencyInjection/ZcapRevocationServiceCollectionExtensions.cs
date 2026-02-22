@@ -24,8 +24,9 @@ public static class ZcapRevocationServiceCollectionExtensions
     {
         ArgumentNullException.ThrowIfNull(services);
 
-        // Register Ed25519 crypto suite by default; additional suites can be added via AddZcapCryptoSuite<T>()
+        // Register built-in crypto suites by default; additional suites can be added via AddZcapCryptoSuite<T>()
         services.TryAddEnumerable(ServiceDescriptor.Singleton<ICryptoSuite, Ed25519CryptoSuite>());
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<ICryptoSuite, P256CryptoSuite>());
 
         // Build ICryptoSuiteProvider from all registered ICryptoSuite instances
         services.TryAddSingleton<ICryptoSuiteProvider>(sp =>
@@ -42,8 +43,13 @@ public static class ZcapRevocationServiceCollectionExtensions
         services.TryAddSingleton<IDidResolver>(sp =>
             new DidKeyResolver(sp.GetRequiredService<ICryptoSuiteProvider>()));
 
+        // SigningService depends on IDidSigner + IDidResolver + ICryptoSuiteProvider.
         // No default IDidSigner — consumers must provide their own secure implementation.
-        services.TryAddSingleton<ISigningService, SigningService>();
+        services.TryAddSingleton<ISigningService>(sp =>
+            new SigningService(
+                sp.GetRequiredService<IDidSigner>(),
+                sp.GetRequiredService<IDidResolver>(),
+                sp.GetRequiredService<ICryptoSuiteProvider>()));
         services.TryAddSingleton<ICaveatProcessor, CaveatProcessor>();
         services.TryAddSingleton<ICapabilityService, CapabilityService>();
         services.TryAddSingleton<IRevocationStore, InMemoryRevocationStore>();

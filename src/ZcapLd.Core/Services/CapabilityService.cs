@@ -96,13 +96,16 @@ public class CapabilityService : ICapabilityService
         // Inherit parent caveats (children inherit ALL parent caveats)
         var inheritedCaveats = InheritCaveats(parentCapability.Caveat, caveats);
 
+        // Resolve the signer's crypto suite context URL dynamically
+        var suiteContextUrl = await _signingService.ResolveSuiteContextUrlAsync(parentCapability.Controller);
+
         // Create the delegated capability (without proof initially)
         var delegatedCapability = new Capability
         {
             Context = new object[]
             {
                 "https://w3id.org/zcap/v1",
-                "https://w3id.org/security/suites/ed25519-2020/v1"
+                suiteContextUrl
             },
             Id = $"urn:uuid:{Guid.NewGuid()}",
             Controller = newController,

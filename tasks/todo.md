@@ -108,3 +108,61 @@ Three orthogonal abstractions:
 ## Review
 
 Added pluggable crypto suite abstraction (`ICryptoSuite`, `ICryptoSuiteProvider`, `CryptoSuiteProvider`, `Ed25519CryptoSuite`) and `ResolvedKey` record. DID methods and signature algorithms are now fully orthogonal — `DidKeyResolver` decodes any registered multicodec prefix, and `VerificationService` dispatches verification to the correct suite by proof type. All backward-compatible: parameterless constructors default to Ed25519. ASP.NET DI extended with `AddZcapCryptoSuite<T>()`. 203 tests passing.
+
+---
+
+# Crypto Refinement: MultibaseCodec, Dynamic Context URL, P-256 Suite - 2026-02-21
+
+## Motivation
+
+Three deferred items from the crypto suite abstraction:
+1. Shared utilities (`CanonicalizeDocument`, `EncodeSignature`, `DecodeSignature`) lived on `Ed25519Signer` despite being algorithm-agnostic.
+2. `CapabilityService.DelegateCapabilityAsync` hardcoded the Ed25519 JSON-LD context URL — P-256 capabilities would get the wrong context.
+3. No P-256 (`ICryptoSuite`) implementation existed.
+
+## Plan
+
+### Part 1: Extract MultibaseCodec
+- [x] Create `MultibaseCodec.cs` — `Encode`, `Decode`, `CanonicalizeDocument` (algorithm-agnostic)
+- [x] Remove methods from `Ed25519Signer` (breaking change, no `[Obsolete]` wrappers)
+- [x] Update all callers: `SigningService`, `VerificationService`, `SignatureVerifier`, `DidKeyResolver`, `InMemoryDidProvider` (test helper), `Ed25519SignerTests`
+- [x] Create `MultibaseCodecTests.cs` — 10 tests
+
+### Part 2: Dynamic context URL
+- [x] Add `ContextUrl` property to `ICryptoSuite` + `Ed25519CryptoSuite`
+- [x] Add `GetByKeyType(string)` to `ICryptoSuiteProvider` + `CryptoSuiteProvider`
+- [x] Add `ResolveSuiteContextUrlAsync(string signerDid)` to `ISigningService` + `SigningService`
+- [x] Add `ICryptoSuiteProvider` dependency to `SigningService`
+- [x] Update `CapabilityService.DelegateCapabilityAsync` — dynamic context URL resolution
+- [x] Update ASP.NET DI wiring for `SigningService` with `ICryptoSuiteProvider`
+
+### Part 3: P-256 suite
+- [x] Create `EcPointCompression.cs` — internal helper for compressed EC point handling (P-256 curve equation via BigInteger)
+- [x] Create `P256CryptoSuite.cs` — full `ICryptoSuite` implementation using `System.Security.Cryptography.ECDsa` (zero new dependencies)
+- [x] Register P-256 in default providers: `DidKeyResolver`, `VerificationService`, `SigningService`
+- [x] Register P-256 in ASP.NET DI
+- [x] Create `EcPointCompressionTests.cs` — 7 tests
+- [x] Create `P256CryptoSuiteTests.cs` — 11 tests
+- [x] Add `InternalsVisibleTo` for test project access to internal helpers
+
+### Phase 4: Verify
+- [x] Build solution — 0 errors, 0 warnings (1 pre-existing doc warning)
+- [x] Run full test suite — **Failed: 0, Passed: 232, Total: 232**
+
+### Phase 5: Documentation
+- [x] Update `README.md` — feature list, security notes
+- [x] Update `ARCHITECTURE.md` — crypto section, service descriptions, extensibility
+- [x] Update `PACKAGE_README.md` — feature list, notes
+- [x] Update `tasks/todo.md`
+
+## Review
+
+Three refinements to the crypto layer:
+
+1. **MultibaseCodec extraction**: Moved algorithm-agnostic `CanonicalizeDocument`, `Encode`, and `Decode` from `Ed25519Signer` to a new `MultibaseCodec` static class. Clean breaking change — no deprecated wrappers. All 9 core callers and test/example sites updated.
+
+2. **Dynamic context URL**: Added `ContextUrl` to `ICryptoSuite`, `GetByKeyType` to `ICryptoSuiteProvider`, and `ResolveSuiteContextUrlAsync` to `ISigningService`. `CapabilityService` now resolves the correct JSON-LD security suite context URL from the signer's key type instead of hardcoding the Ed25519 URL.
+
+3. **P-256 suite**: `P256CryptoSuite` implements `ICryptoSuite` for NIST P-256 using built-in `System.Security.Cryptography.ECDsa` — zero new NuGet dependencies. Includes `EcPointCompression` for compressed public key handling (decompression via P-256 curve equation, exploiting p ≡ 3 mod 4 for efficient square root). IEEE P1363 signature format (64 bytes). Registered by default in all providers and ASP.NET DI.
+
+232 tests passing (29 new). Backward-compatible: parameterless constructors default to Ed25519 + P-256.
