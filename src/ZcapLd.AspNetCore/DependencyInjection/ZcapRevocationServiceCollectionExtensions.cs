@@ -54,14 +54,17 @@ public static class ZcapRevocationServiceCollectionExtensions
         services.TryAddSingleton<ICapabilityService, CapabilityService>();
         services.TryAddSingleton<IRevocationStore, InMemoryRevocationStore>();
         services.TryAddSingleton<IRevocationService, RevocationService>();
+        services.TryAddSingleton<INonceStore, InMemoryNonceStore>();
 
         // VerificationService depends on ICryptoSuiteProvider for proof type dispatch
+        // and INonceStore for invocation replay protection
         services.TryAddSingleton<IVerificationService>(sp =>
             new VerificationService(
                 sp.GetRequiredService<IDidResolver>(),
                 sp.GetRequiredService<ICaveatProcessor>(),
                 sp.GetRequiredService<ICryptoSuiteProvider>(),
-                sp.GetRequiredService<IRevocationService>()));
+                sp.GetRequiredService<IRevocationService>(),
+                sp.GetRequiredService<INonceStore>()));
 
         return services;
     }
@@ -133,6 +136,43 @@ public static class ZcapRevocationServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(resolverFactory);
 
         services.Replace(ServiceDescriptor.Singleton(resolverFactory));
+        return services;
+    }
+
+    /// <summary>
+    /// Registers replay protection with the default in-memory nonce store.
+    /// </summary>
+    public static IServiceCollection AddZcapReplayProtection(this IServiceCollection services)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        services.TryAddSingleton<INonceStore, InMemoryNonceStore>();
+        return services;
+    }
+
+    /// <summary>
+    /// Registers replay protection using a caller-provided nonce store type.
+    /// </summary>
+    public static IServiceCollection AddZcapReplayProtection<TNonceStore>(this IServiceCollection services)
+        where TNonceStore : class, INonceStore
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        services.Replace(ServiceDescriptor.Singleton<INonceStore, TNonceStore>());
+        return services;
+    }
+
+    /// <summary>
+    /// Registers replay protection using a caller-provided nonce store factory.
+    /// </summary>
+    public static IServiceCollection AddZcapReplayProtection(
+        this IServiceCollection services,
+        Func<IServiceProvider, INonceStore> nonceStoreFactory)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(nonceStoreFactory);
+
+        services.Replace(ServiceDescriptor.Singleton(nonceStoreFactory));
         return services;
     }
 

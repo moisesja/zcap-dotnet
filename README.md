@@ -16,6 +16,7 @@ This library provides:
 - Delegation-chain verification
 - Invocation signing and verification
 - Caveat processing (expiration and usage count)
+- Invocation replay protection with pluggable nonce stores
 - Revocation persistence with pluggable storage backends
 - Pluggable crypto suites (Ed25519 and P-256 included, additional curves extensible)
 - Dynamic JSON-LD context URLs per crypto suite

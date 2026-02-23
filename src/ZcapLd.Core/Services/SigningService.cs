@@ -108,8 +108,10 @@ public class SigningService : ISigningService
             throw new ArgumentException("Signer DID cannot be null or empty", nameof(signerDid));
 
         // Create a copy of the invocation without the proof for signing
+        // The id is included in the signed payload for replay protection (nonce binding)
         var invocationWithoutProof = new
         {
+            id = invocation.Id,
             capability = invocation.Capability,
             capabilityAction = invocation.CapabilityAction,
             invocationTarget = invocation.InvocationTarget

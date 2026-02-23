@@ -32,6 +32,7 @@ Primary assembly: `src/ZcapLd.Core`.
 - `IDidResolver`: resolve DIDs to public keys (returns `ResolvedKey` with key type); implementations: `DidKeyResolver`, `CompositeDidResolver`
 - `IDidSigner`: sign data using a DID's private key; no default implementation in core — consumers provide their own
 - `ICaveatProcessor`: caveat merge/compatibility/evaluation
+- `INonceStore`: pluggable persistence contract for invocation nonce tracking (replay protection); implementations: `InMemoryNonceStore`, `NullNonceStore` (no-op)
 - `IRevocationStore`: pluggable persistence contract for revocation records
 - `IRevocationService`: revocation orchestration (record + lookup + expiry pruning on read)
 
@@ -51,6 +52,7 @@ Primary assembly: `src/ZcapLd.Core`.
   - Verifies delegation proofs using `ICryptoSuiteProvider` to dispatch to the correct algorithm
   - Verifies capability chains
   - Verifies invocation proof + action/target + caveats
+  - Enforces invocation replay protection via `INonceStore`
   - Resolves public keys via `IDidResolver` and revocation checks
 - `RevocationService`
   - Persists revocation records via `IRevocationStore`

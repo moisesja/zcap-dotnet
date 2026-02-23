@@ -166,3 +166,43 @@ Three refinements to the crypto layer:
 3. **P-256 suite**: `P256CryptoSuite` implements `ICryptoSuite` for NIST P-256 using built-in `System.Security.Cryptography.ECDsa` — zero new NuGet dependencies. Includes `EcPointCompression` for compressed public key handling (decompression via P-256 curve equation, exploiting p ≡ 3 mod 4 for efficient square root). IEEE P1363 signature format (64 bytes). Registered by default in all providers and ASP.NET DI.
 
 232 tests passing (29 new). Backward-compatible: parameterless constructors default to Ed25519 + P-256.
+
+---
+
+# Invocation Replay Protection via Nonce Store - 2026-02-22
+
+## Motivation
+
+`Invocation.Id` auto-generates a `urn:uuid:` on construction, but nothing validated uniqueness — a signed invocation could be replayed indefinitely. Additionally, `invocation.Id` was excluded from the signed canonical document, meaning an attacker could swap the ID to bypass nonce checking while keeping a valid signature.
+
+## Plan
+
+### Part 1: Nonce store abstraction
+- [x] Create `INonceStore.cs` — single-method interface: `TryMarkAsUsedAsync` (atomic check-and-record)
+- [x] Create `NullNonceStore.cs` — internal no-op for backward compatibility
+- [x] Create `InMemoryNonceStore.cs` — `ConcurrentDictionary` + `TimeProvider` + periodic purge
+
+### Part 2: Bind invocation ID to signature
+- [x] Add `id = invocation.Id` to canonical document in `SigningService.SignInvocationAsync`
+- [x] Add `id = invocation.Id` to canonical document in `VerificationService.VerifyInvocationAsync`
+
+### Part 3: Integration
+- [x] Add `INonceStore` + `TimeSpan _nonceWindow` fields to `VerificationService`
+- [x] Add 5th constructor with nonce store; existing 4 chain with `NullNonceStore.Instance`
+- [x] Add nonce check at end of `VerifyInvocationAsync` (after all validation passes)
+- [x] Register `InMemoryNonceStore` in ASP.NET DI, add `AddZcapReplayProtection` extension methods
+
+### Phase 4: Tests
+- [x] `InMemoryNonceStoreTests.cs` — 8 tests (fresh, replay, expiry, concurrent, null input)
+- [x] `NullNonceStoreTests.cs` — 1 test
+- [x] `VerificationServiceReplayTests.cs` — 4 tests (replay rejected, different IDs, null store, invalid doesn't consume)
+
+### Phase 5: Verify
+- [x] Build solution — 0 errors
+- [x] Run full test suite — **Failed: 0, Passed: 245, Total: 245**
+
+## Review
+
+Added invocation replay protection via pluggable `INonceStore`. The nonce store uses a single atomic `TryMarkAsUsedAsync` method to eliminate TOCTOU race conditions. `InMemoryNonceStore` uses `ConcurrentDictionary.TryAdd` for thread-safe atomic insert, with `TimeProvider` for testable time and periodic expired-entry purging. Backward-compatible: existing `VerificationService` constructors chain with `NullNonceStore.Instance` (no-op). Fixed security gap where `invocation.Id` was not included in the signed payload — it is now bound to the signature to prevent ID-swap attacks. ASP.NET DI registers `InMemoryNonceStore` by default with `AddZcapReplayProtection` extension methods for custom stores.
+
+245 tests passing (13 new). Default nonce window: 5 minutes.

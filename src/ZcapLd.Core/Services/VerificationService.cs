@@ -16,7 +16,14 @@ public class VerificationService : IVerificationService
     private readonly ICaveatProcessor _caveatProcessor;
     private readonly ICryptoSuiteProvider _suiteProvider;
     private readonly IRevocationService _revocationService;
+    private readonly INonceStore _nonceStore;
+    private readonly TimeSpan _nonceWindow;
     private const int MaxChainLength = 10; // Per spec: SHOULD limit to 10
+
+    /// <summary>
+    /// Default window during which invocation nonces are tracked for replay protection.
+    /// </summary>
+    public static readonly TimeSpan DefaultNonceWindow = TimeSpan.FromMinutes(5);
 
     /// <summary>
     /// Backward-compatible constructor (Ed25519 only).
@@ -51,21 +58,38 @@ public class VerificationService : IVerificationService
     }
 
     /// <summary>
-    /// Full constructor with all dependencies.
+    /// Constructor with all core dependencies (no replay protection).
     /// </summary>
     public VerificationService(
         IDidResolver didResolver,
         ICaveatProcessor caveatProcessor,
         ICryptoSuiteProvider suiteProvider,
         IRevocationService revocationService)
+        : this(didResolver, caveatProcessor, suiteProvider, revocationService,
+               NullNonceStore.Instance)
+    {
+    }
+
+    /// <summary>
+    /// Full constructor with all dependencies including replay protection.
+    /// </summary>
+    public VerificationService(
+        IDidResolver didResolver,
+        ICaveatProcessor caveatProcessor,
+        ICryptoSuiteProvider suiteProvider,
+        IRevocationService revocationService,
+        INonceStore nonceStore,
+        TimeSpan? nonceWindow = null)
     {
         _didResolver = didResolver ?? throw new ArgumentNullException(nameof(didResolver));
         _caveatProcessor = caveatProcessor ?? throw new ArgumentNullException(nameof(caveatProcessor));
         _suiteProvider = suiteProvider ?? throw new ArgumentNullException(nameof(suiteProvider));
         _revocationService = revocationService ?? throw new ArgumentNullException(nameof(revocationService));
+        _nonceStore = nonceStore ?? throw new ArgumentNullException(nameof(nonceStore));
+        _nonceWindow = nonceWindow ?? DefaultNonceWindow;
     }
 
-    private static ICryptoSuiteProvider CreateDefaultSuiteProvider()
+    internal static ICryptoSuiteProvider CreateDefaultSuiteProvider()
     {
         var provider = new CryptoSuiteProvider();
         provider.Register(new Ed25519CryptoSuite());
@@ -190,14 +214,6 @@ public class VerificationService : IVerificationService
 
         try
         {
-            // SECURITY FIX S-04: Validate invocation ID exists for replay protection
-            // In production, this ID should be checked against a nonce store or timestamp window
-            if (string.IsNullOrEmpty(invocation.Id))
-            {
-                // Warning: No invocation ID means no replay protection
-                // For now, we allow it but production systems SHOULD require it
-            }
-
             // 1. Verify the capability chain is valid
             if (!await VerifyCapabilityChainAsync(capability))
                 return false;
@@ -223,6 +239,7 @@ public class VerificationService : IVerificationService
 
             var invocationWithoutProof = new
             {
+                id = invocation.Id,
                 capability = invocation.Capability,
                 capabilityAction = invocation.CapabilityAction,
                 invocationTarget = invocation.InvocationTarget
@@ -249,7 +266,15 @@ public class VerificationService : IVerificationService
             };
 
             // Evaluate all caveats from the complete chain (not just leaf)
-            return await _caveatProcessor.EvaluateCapabilityChainCaveatsAsync(chain.ToArray(), context);
+            if (!await _caveatProcessor.EvaluateCapabilityChainCaveatsAsync(chain.ToArray(), context))
+                return false;
+
+            // 8. Replay protection: reject if this invocation nonce has been seen before
+            var nonceExpiry = DateTime.UtcNow.Add(_nonceWindow);
+            if (await _nonceStore.TryMarkAsUsedAsync(invocation.Id, nonceExpiry))
+                return false;
+
+            return true;
         }
         catch
         {

@@ -281,7 +281,7 @@ var adminAuthority = await capabilityService.DelegateCapabilityAsync(
     parentCapability: sensitiveDoc,
     newController: companyAdminDid,
     allowedActions: new[] { "read", "write", "share", "delete" },
-    expires: DateTime.UtcNow.AddDays(180)
+    expires: DateTime.UtcNow.AddMonths(3)
 );
 
 Console.WriteLine("Company Admin creates root capability for Q4 financials");
@@ -289,12 +289,13 @@ Console.WriteLine($"  Capability: {sensitiveDoc.Id}");
 Console.WriteLine($"  Root Actions: {(sensitiveDoc.AllowedAction.Length == 0 ? "(none by design)" : string.Join(", ", sensitiveDoc.AllowedAction))}");
 Console.WriteLine($"  Admin Authority Actions: {string.Join(", ", adminAuthority.AllowedAction)}");
 
-// Admin delegates to Manager with sharing capability for 90 days
+// Admin delegates to Manager with sharing capability for 60 days
+// Note: child expiration MUST be ≤ parent expiration (attenuation rule)
 var managerAccess = await capabilityService.DelegateCapabilityAsync(
     parentCapability: adminAuthority,
     newController: managerDid,
     allowedActions: new[] { "read", "share" },
-    expires: DateTime.UtcNow.AddDays(90)
+    expires: DateTime.UtcNow.AddMonths(2)
 );
 
 Console.WriteLine("\nManager receives delegation:");
@@ -307,7 +308,7 @@ var employeeAccess = await capabilityService.DelegateCapabilityAsync(
     parentCapability: managerAccess,
     newController: employeeDid,
     allowedActions: new[] { "read" },
-    expires: DateTime.UtcNow.AddDays(30),
+    expires: DateTime.UtcNow.AddMonths(1),
     caveats: new Caveat[]
     {
         new UsageCountCaveat { MaxUses = 50, CurrentUses = 0 } // Limit to 50 views
