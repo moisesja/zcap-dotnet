@@ -54,7 +54,7 @@ jobs:
         run: dotnet pack src/ZcapLd.AspNetCore/ZcapLd.AspNetCore.csproj --configuration Release --no-build -o artifacts/aspnet
 
       - name: Upload ASP.NET adapter package artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: aspnet-nuget-packages
           path: |

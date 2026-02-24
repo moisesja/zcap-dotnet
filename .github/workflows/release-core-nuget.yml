@@ -67,7 +67,7 @@ jobs:
             -o artifacts/core
 
       - name: Upload core package artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: core-nuget-release-${{ steps.version.outputs.package_version }}
           path: |
