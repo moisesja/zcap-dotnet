@@ -14,8 +14,7 @@ public class Invocation
     /// that is validated to prevent replay attacks
     /// </summary>
     [JsonPropertyName("id")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? Id { get; set; }
+    public string Id { get; set; } = $"urn:uuid:{Guid.NewGuid()}";
 
     /// <summary>
     /// Reference to the capability being invoked

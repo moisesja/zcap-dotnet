@@ -3,19 +3,22 @@ using Xunit;
 using ZcapLd.Core.Exceptions;
 using ZcapLd.Core.Models;
 using ZcapLd.Core.Services;
+using ZcapLd.Core.Tests.Helpers;
 
 namespace ZcapLd.Core.Tests.Services;
 
 public class CaveatProcessorTests
 {
     private readonly CaveatProcessor _caveatProcessor;
+    private readonly InMemoryDidProvider _didProvider;
     private readonly SigningService _signingService;
     private readonly CapabilityService _capabilityService;
 
     public CaveatProcessorTests()
     {
         _caveatProcessor = new CaveatProcessor();
-        _signingService = new SigningService();
+        _didProvider = new InMemoryDidProvider();
+        _signingService = new SigningService(_didProvider, _didProvider);
         _capabilityService = new CapabilityService(_signingService);
     }
 
@@ -546,7 +549,7 @@ public class CaveatProcessorTests
     {
         // Arrange
         var controllerDid = "did:key:z6MkController";
-        _signingService.GenerateAndRegisterKeyPair(controllerDid);
+        _didProvider.GenerateAndRegisterKeyPair(controllerDid);
 
         var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
             controllerDid,
@@ -588,7 +591,7 @@ public class CaveatProcessorTests
     {
         // Arrange
         var controllerDid = "did:key:z6MkController";
-        _signingService.GenerateAndRegisterKeyPair(controllerDid);
+        _didProvider.GenerateAndRegisterKeyPair(controllerDid);
 
         var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
             controllerDid,

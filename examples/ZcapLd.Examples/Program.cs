@@ -1,15 +1,19 @@
 using ZcapLd.Core.Models;
 using ZcapLd.Core.Services;
+using ZcapLd.Examples;
 
 Console.WriteLine("===========================================");
 Console.WriteLine("W3C ZCAP-LD .NET Implementation Examples");
 Console.WriteLine("===========================================\n");
 
 // Initialize services
-var signingService = new SigningService();
+// In production, replace InMemoryDidProvider with your HSM/Key Vault-backed implementations
+// of IDidSigner and IDidResolver.
+var didProvider = new InMemoryDidProvider();
+var signingService = new SigningService(didProvider, didProvider);
 var capabilityService = new CapabilityService(signingService);
 var caveatProcessor = new CaveatProcessor();
-var verificationService = new VerificationService(signingService, caveatProcessor);
+var verificationService = new VerificationService(didProvider, caveatProcessor);
 
 // ===================================================
 // Example 1: Create a Root Capability
@@ -18,7 +22,7 @@ Console.WriteLine("Example 1: Creating a Root Capability");
 Console.WriteLine("--------------------------------------");
 
 var aliceDid = "did:key:z6MkAlice";
-signingService.GenerateAndRegisterKeyPair(aliceDid);
+didProvider.GenerateAndRegisterKeyPair(aliceDid);
 
 var rootCapability = await capabilityService.CreateRootCapabilityAsync(
     controller: aliceDid,
@@ -40,7 +44,7 @@ Console.WriteLine("Example 2: Single-Level Delegation");
 Console.WriteLine("-----------------------------------");
 
 var bobDid = "did:key:z6MkBob";
-signingService.GenerateAndRegisterKeyPair(bobDid);
+didProvider.GenerateAndRegisterKeyPair(bobDid);
 
 // Alice delegates to Bob with attenuated permissions (only read and write, no delete)
 var bobCapability = await capabilityService.DelegateCapabilityAsync(
@@ -67,7 +71,7 @@ Console.WriteLine("Example 3: Multi-Level Delegation Chain");
 Console.WriteLine("----------------------------------------");
 
 var carolDid = "did:key:z6MkCarol";
-signingService.GenerateAndRegisterKeyPair(carolDid);
+didProvider.GenerateAndRegisterKeyPair(carolDid);
 
 // Bob delegates to Carol with even more restricted permissions (only read)
 var carolCapability = await capabilityService.DelegateCapabilityAsync(
@@ -137,7 +141,7 @@ Console.WriteLine("Example 5: Capabilities with Caveats");
 Console.WriteLine("-------------------------------------");
 
 var davidDid = "did:key:z6MkDavid";
-signingService.GenerateAndRegisterKeyPair(davidDid);
+didProvider.GenerateAndRegisterKeyPair(davidDid);
 
 // Root first, then delegate with expiration and usage count caveats
 var caveatRoot = await capabilityService.CreateRootCapabilityAsync(
@@ -202,8 +206,8 @@ Console.WriteLine("-----------------------------------");
 
 var eveDid = "did:key:z6MkEve";
 var restrictedDid = "did:key:z6MkRestricted";
-signingService.GenerateAndRegisterKeyPair(eveDid);
-signingService.GenerateAndRegisterKeyPair(restrictedDid);
+didProvider.GenerateAndRegisterKeyPair(eveDid);
+didProvider.GenerateAndRegisterKeyPair(restrictedDid);
 
 // Create root, then delegated parent with broad permissions
 var attenuationRoot = await capabilityService.CreateRootCapabilityAsync(
@@ -261,9 +265,9 @@ var companyAdminDid = "did:key:z6MkCompanyAdmin";
 var managerDid = "did:key:z6MkManager";
 var employeeDid = "did:key:z6MkEmployee";
 
-signingService.GenerateAndRegisterKeyPair(companyAdminDid);
-signingService.GenerateAndRegisterKeyPair(managerDid);
-signingService.GenerateAndRegisterKeyPair(employeeDid);
+didProvider.GenerateAndRegisterKeyPair(companyAdminDid);
+didProvider.GenerateAndRegisterKeyPair(managerDid);
+didProvider.GenerateAndRegisterKeyPair(employeeDid);
 
 // Admin creates root capability for sensitive document
 var sensitiveDoc = await capabilityService.CreateRootCapabilityAsync(
@@ -277,7 +281,7 @@ var adminAuthority = await capabilityService.DelegateCapabilityAsync(
     parentCapability: sensitiveDoc,
     newController: companyAdminDid,
     allowedActions: new[] { "read", "write", "share", "delete" },
-    expires: DateTime.UtcNow.AddDays(180)
+    expires: DateTime.UtcNow.AddMonths(3)
 );
 
 Console.WriteLine("Company Admin creates root capability for Q4 financials");
@@ -285,12 +289,13 @@ Console.WriteLine($"  Capability: {sensitiveDoc.Id}");
 Console.WriteLine($"  Root Actions: {(sensitiveDoc.AllowedAction.Length == 0 ? "(none by design)" : string.Join(", ", sensitiveDoc.AllowedAction))}");
 Console.WriteLine($"  Admin Authority Actions: {string.Join(", ", adminAuthority.AllowedAction)}");
 
-// Admin delegates to Manager with sharing capability for 90 days
+// Admin delegates to Manager with sharing capability for 60 days
+// Note: child expiration MUST be ≤ parent expiration (attenuation rule)
 var managerAccess = await capabilityService.DelegateCapabilityAsync(
     parentCapability: adminAuthority,
     newController: managerDid,
     allowedActions: new[] { "read", "share" },
-    expires: DateTime.UtcNow.AddDays(90)
+    expires: DateTime.UtcNow.AddMonths(2)
 );
 
 Console.WriteLine("\nManager receives delegation:");
@@ -303,7 +308,7 @@ var employeeAccess = await capabilityService.DelegateCapabilityAsync(
     parentCapability: managerAccess,
     newController: employeeDid,
     allowedActions: new[] { "read" },
-    expires: DateTime.UtcNow.AddDays(30),
+    expires: DateTime.UtcNow.AddMonths(1),
     caveats: new Caveat[]
     {
         new UsageCountCaveat { MaxUses = 50, CurrentUses = 0 } // Limit to 50 views

@@ -17,8 +17,8 @@ In response to a comprehensive security and compliance review that identified **
 | **Critical Security Issues** | 2 | 0 | ✅ RESOLVED |
 | **High Security Issues** | 5 | 0 | ✅ RESOLVED |
 | **High Compliance Issues** | 5 | 0 | ✅ RESOLVED |
-| **Test Pass Rate** | 84.7% (133/157) | 95.5% (150/157) | ✅ IMPROVED |
-| **Test Failures** | 24 | 7 | ✅ REDUCED 71% |
+| **Test Pass Rate** | 84.7% (133/157) | 100% (245/245) | ✅ RESOLVED |
+| **Test Failures** | 24 | 0 | ✅ ALL RESOLVED |
 | **Security Posture** | High Risk | Production-Ready* | ✅ IMPROVED |
 
 *With documented limitations
@@ -144,7 +144,7 @@ if (capability.Proof.CapabilityChain != null && capability.Proof.CapabilityChain
 ---
 
 ### S-04: No Replay Protection (HIGH)
-**Status**: ✅ **FRAMEWORK IMPLEMENTED**
+**Status**: ✅ **COMPLETELY RESOLVED**
 
 **Original Issue**:
 - No nonce/challenge/freshness for invocation proofs
@@ -173,9 +173,10 @@ if (string.IsNullOrEmpty(invocation.Id))
 ```
 
 **Impact**:
-- ✅ Framework in place for replay protection
-- ⚠️ Production systems must enforce ID requirement
-- ⚠️ Production systems must implement nonce store or timestamp window validation
+- ✅ Full replay protection via `INonceStore` interface
+- ✅ `InMemoryNonceStore` (default) tracks invocation nonces with 5-minute window
+- ✅ `NullNonceStore` available for opt-out scenarios
+- ✅ `VerificationService` enforces nonce uniqueness during invocation verification
 
 ---
 
@@ -391,38 +392,36 @@ Failed: 24, Passed: 133, Total: 157 (84.7% pass rate)
 Issues: Stack overflow crashes, test host failures
 ```
 
-### After Security Fixes
+### After All Fixes
 ```
-Failed: 7, Passed: 150, Total: 157 (95.5% pass rate)
-Issues: Minor compliance edge cases, optional features
+Failed: 0, Passed: 245, Total: 245 (100% pass rate)
+Issues: None remaining
 ```
 
 ### Improvement
-- ✅ Fixed 17 tests (70.8% of failures)
+- ✅ Fixed all test failures (100% resolution)
 - ✅ No more crashes or DoS vulnerabilities
-- ✅ All critical security issues resolved
+- ✅ All critical, high, and medium security issues resolved
+- ✅ Added 88 new tests for crypto suites, replay protection, revocation, and compliance
 
 ---
 
 ## Remaining Known Limitations
 
-### 7 Failing Tests (Non-Critical)
+All 7 previously failing tests have been resolved through subsequent work:
+- **MUST-03**: Root capability field handling updated
+- **MUST-18**: Local chain verification edge case fixed
+- **MUST-21**: Revocation system fully implemented (`IRevocationService` / `IRevocationStore`)
+- **SHOULD-04**: 3-month expiration limit enforced in `CapabilityService`
+- **SHOULD-05**: Read/write action validation implemented
+- **SHOULD-07**: Revocation endpoints available via `ZcapLd.AspNetCore`
+- **Chain length test**: Test expectation corrected
 
-1. **MUST-03**: Root capabilities with allowedAction - Design decision documented
-2. **MUST-18**: Local chain verification - Edge case with first-level delegations
-3. **MUST-21**: Revocation storage - Feature not implemented
-4. **SHOULD-04**: 3-month expiration limit - Feature not implemented
-5. **SHOULD-05**: Read/write action validation - Feature not implemented
-6. **SHOULD-07**: Revocation endpoint - Feature not implemented
-7. **Test expectation**: Chain length exception vs. return false - Test needs update
+### Remaining Future Enhancements
 
-### Future Enhancements
-
-1. **Full URDNA2015 Canonicalization** - Currently using simplified JSON canonicalization
-2. **Proof Metadata Binding** - Requires proper DateTime handling
-3. **Revocation System** - Complete implementation needed
-4. **Strict Expiration Validation** - 3-month maximum enforcement
-5. **HTTP Signature Method** - Additional invocation method
+1. **Full URDNA2015 Canonicalization** - Currently using RFC 8785 JSON canonicalization
+2. **Proof Metadata Binding (S-03)** - Requires proper DateTime handling for full Data Integrity binding
+3. **HTTP Signature Invocation Method** - Additional invocation transport
 
 ---
 
@@ -452,18 +451,18 @@ Issues: Minor compliance edge cases, optional features
 
 | Requirement Type | Implemented | Total | Percentage |
 |------------------|-------------|-------|------------|
-| **MUST (Critical)** | 31 | 33 | 94% |
-| **SHOULD (Recommended)** | 4 | 7 | 57% |
+| **MUST (Critical)** | 32 | 33 | 97% |
+| **SHOULD (Recommended)** | 7 | 7 | 100% |
 | **MAY (Optional)** | 3 | 4 | 75% |
-| **Overall** | 38 | 44 | 86% |
+| **Overall** | 42 | 44 | 95% |
 
 **Notable Compliance:**
 - ✅ All cryptographic requirements (MUST-01 to MUST-08)
 - ✅ Chain verification (MUST-09 to MUST-15)
 - ✅ Attenuation enforcement (MUST-16, MUST-17)
 - ✅ Caveat inheritance (MUST-19, MUST-20)
-- ⚠️ Revocation (MUST-21) - Not implemented
-- ⚠️ Proof metadata binding (MUST-22) - Partial
+- ✅ Revocation (MUST-21) - Fully implemented
+- ⚠️ Proof metadata binding (MUST-22) - Partial (documented limitation)
 
 ---
 
@@ -506,12 +505,12 @@ The security and compliance review identified **critical vulnerabilities** that 
 
 **Current Status**: ✅ **PRODUCTION-READY** for most use cases
 
-**Remaining Work**: Optional features (revocation, full proof binding) and edge case compliance
+**Remaining Work**: Full URDNA2015 canonicalization and proof metadata binding (S-03)
 
 **Security Improvement**: From **HIGH RISK** to **SECURE** with documented limitations
 
 ---
 
-**Last Updated**: 2026-02-20
+**Last Updated**: 2026-02-22
 **Review Status**: All Critical/High Issues Resolved ✅
-**Test Pass Rate**: 95.5% (150/157)
+**Test Pass Rate**: 100% (245/245)

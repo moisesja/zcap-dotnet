@@ -1,5 +1,4 @@
 using NSec.Cryptography;
-using SimpleBase;
 
 namespace ZcapLd.Core.Cryptography;
 
@@ -35,9 +34,7 @@ public static class Ed25519Signer
             using var key = Key.Import(Ed25519, privateKeyBytes, KeyBlobFormat.RawPrivateKey);
 
             // Sign the data
-            var signature = Ed25519.Sign(key, data);
-
-            return signature;
+            return Ed25519.Sign(key, data);
         }
         catch (Exception ex)
         {
@@ -81,76 +78,6 @@ public static class Ed25519Signer
         {
             // Verification failures return false, not exceptions
             return false;
-        }
-    }
-
-    /// <summary>
-    /// Canonicalizes JSON document for signing
-    /// Uses deterministic JSON serialization (RFC 8785 style)
-    /// </summary>
-    /// <param name="document">The JSON document to canonicalize</param>
-    /// <returns>Canonicalized bytes</returns>
-    public static byte[] CanonicalizeDocument(object document)
-    {
-        return JsonCanonicalizer.Canonicalize(document);
-    }
-
-    /// <summary>
-    /// Encodes signature as base58-btc multibase string (Ed25519Signature2020 format)
-    /// Format: 'z' prefix + base58-btc encoded signature
-    /// </summary>
-    /// <param name="signature">The signature bytes</param>
-    /// <returns>Multibase-encoded signature (e.g., "z...")</returns>
-    public static string EncodeSignature(byte[] signature)
-    {
-        if (signature == null || signature.Length == 0)
-        {
-            throw new ArgumentException("Signature cannot be null or empty", nameof(signature));
-        }
-
-        try
-        {
-            // Encode as base58-btc (Bitcoin alphabet)
-            var base58 = Base58.Bitcoin.Encode(signature);
-
-            // Add multibase prefix 'z' for base58-btc
-            return "z" + base58;
-        }
-        catch (Exception ex)
-        {
-            throw new Exceptions.CryptographicException("Failed to encode signature", ex);
-        }
-    }
-
-    /// <summary>
-    /// Decodes base58-btc multibase signature
-    /// </summary>
-    /// <param name="encodedSignature">The multibase-encoded signature</param>
-    /// <returns>Signature bytes</returns>
-    public static byte[] DecodeSignature(string encodedSignature)
-    {
-        if (string.IsNullOrEmpty(encodedSignature))
-        {
-            throw new ArgumentException("Encoded signature cannot be null or empty", nameof(encodedSignature));
-        }
-
-        try
-        {
-            // Check for multibase prefix 'z' (base58-btc)
-            if (!encodedSignature.StartsWith("z"))
-            {
-                throw new ArgumentException("Signature must start with 'z' multibase prefix", nameof(encodedSignature));
-            }
-
-            // Remove multibase prefix and decode
-            var base58String = encodedSignature.Substring(1);
-            var signature = Base58.Bitcoin.Decode(base58String);
-
-            return signature.ToArray();
-        }
-        catch (Exception ex)
-        {
-            throw new Exceptions.CryptographicException("Failed to decode signature", ex);
         }
     }
 
@@ -209,9 +136,9 @@ public static class Ed25519Signer
     /// <returns>Multibase-encoded signature</returns>
     public static string SignJson(object jsonObject, byte[] privateKeyBytes)
     {
-        var canonicalBytes = CanonicalizeDocument(jsonObject);
+        var canonicalBytes = MultibaseCodec.CanonicalizeDocument(jsonObject);
         var signatureBytes = Sign(canonicalBytes, privateKeyBytes);
-        return EncodeSignature(signatureBytes);
+        return MultibaseCodec.Encode(signatureBytes);
     }
 
     /// <summary>
@@ -223,8 +150,8 @@ public static class Ed25519Signer
     /// <returns>True if signature is valid</returns>
     public static bool VerifyJson(object jsonObject, string encodedSignature, byte[] publicKeyBytes)
     {
-        var canonicalBytes = CanonicalizeDocument(jsonObject);
-        var signatureBytes = DecodeSignature(encodedSignature);
+        var canonicalBytes = MultibaseCodec.CanonicalizeDocument(jsonObject);
+        var signatureBytes = MultibaseCodec.Decode(encodedSignature);
         return Verify(canonicalBytes, signatureBytes, publicKeyBytes);
     }
 }

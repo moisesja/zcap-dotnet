@@ -33,8 +33,8 @@ public interface IVerificationService
     /// Resolves a DID to its public key for verification
     /// </summary>
     /// <param name="did">The DID to resolve</param>
-    /// <returns>The public key bytes</returns>
-    Task<byte[]> ResolvePublicKeyAsync(string did);
+    /// <returns>A <see cref="ResolvedKey"/> containing the public key bytes and key type</returns>
+    Task<ResolvedKey> ResolvePublicKeyAsync(string did);
 
     /// <summary>
     /// Revokes a capability by ID

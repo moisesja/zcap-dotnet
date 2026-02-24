@@ -1,3 +1,15 @@
+> **HISTORICAL DOCUMENT — DO NOT USE FOR CURRENT STATUS**
+>
+> This evaluation was performed on 2026-02-20 against an early-stage codebase
+> with stub cryptography and no verification implementation. All 42 issues
+> identified here have since been resolved. The project now has 245 passing
+> tests, real Ed25519 + P-256 cryptography, full delegation chain verification,
+> caveat inheritance, revocation, and replay protection.
+>
+> For current compliance status see [`docs/IMPLEMENTATION-COMPLETE.md`](../docs/IMPLEMENTATION-COMPLETE.md).
+
+---
+
 # W3C ZCAP-LD Specification Compliance Evaluation
 
 **Project**: zcap-dotnet

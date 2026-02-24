@@ -11,6 +11,9 @@ public class CapabilityService : ICapabilityService
 {
     private readonly ISigningService _signingService;
 
+    // https://w3c-ccg.github.io/zcap-spec/#:~:text=expiration%20date%2Dtime.-,A,-verifier%20SHOULD%20ensure
+    private const short MaxExpirationMonths = 3;
+
     public CapabilityService(ISigningService signingService)
     {
         _signingService = signingService ?? throw new ArgumentNullException(nameof(signingService));
@@ -93,13 +96,16 @@ public class CapabilityService : ICapabilityService
         // Inherit parent caveats (children inherit ALL parent caveats)
         var inheritedCaveats = InheritCaveats(parentCapability.Caveat, caveats);
 
+        // Resolve the signer's crypto suite context URL dynamically
+        var suiteContextUrl = await _signingService.ResolveSuiteContextUrlAsync(parentCapability.Controller);
+
         // Create the delegated capability (without proof initially)
         var delegatedCapability = new Capability
         {
             Context = new object[]
             {
                 "https://w3id.org/zcap/v1",
-                "https://w3id.org/security/suites/ed25519-2020/v1"
+                suiteContextUrl
             },
             Id = $"urn:uuid:{Guid.NewGuid()}",
             Controller = newController,
@@ -265,12 +271,12 @@ public class CapabilityService : ICapabilityService
         // COMPLIANCE FIX: SHOULD-04 - Enforce 3-month maximum expiration
         if (expires.HasValue)
         {
-            var threeMonthsFromNow = DateTime.UtcNow.AddMonths(3);
-            if (expires.Value > threeMonthsFromNow)
+            var maximumExpirationDate = DateTime.UtcNow.AddMonths(MaxExpirationMonths);
+            if (expires.Value > maximumExpirationDate)
             {
                 throw new InvalidOperationException(
-                    $"Capability expiration exceeds recommended 3-month limit. " +
-                    $"Requested: {expires.Value:O}, Maximum allowed: {threeMonthsFromNow:O}");
+                    $"Capability expiration exceeds recommended {MaxExpirationMonths}-month limit. " +
+                    $"Requested: {expires.Value:O}, Maximum allowed: {maximumExpirationDate:O}");
             }
         }
     }

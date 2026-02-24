@@ -18,7 +18,7 @@ W3C's ZCAP-LD (Authorization Capabilities for Linked Data) specification defines
 
 - Caveat Support: Implement handling of caveats (restrictions). The spec notes that each capability may add restrictions via a caveat property, and that child capabilities inherit all caveats of their parents. For example, one could add a time-based caveat (e.g. ValidUntil) or an action-limiting caveat. At minimum, design a Caveat class or interface so common types (timestamp checks, count limits, etc.) can be enforced at invocation time. When verifying a delegated capability, ensure that all caveats from the root through to the leaf are evaluated and honored. (For a minimal implementation, you can start by supporting a simple expiration or true/false caveat and expand later.)
 
-- Digital Identity Integration: Use the Trinsic SDK for DID wallet functionality. In practice, capabilities will be issued by entities (e.g. users or services) with DIDs and keypairs managed by Trinsic. Your code should interface with Trinsic (or any DID library) to fetch a DID document, extract the public key (verificationMethod) for signature verification, or to sign data with a private key. For example, you may call Trinsic APIs to get the public key for a DID used in controller or verificationMethod. In code, this may be abstracted as functions like ResolvePublicKey(did) and SignWithPrivateKey(data, did). (Details depend on the Trinsic SDK’s capabilities.)
+- Digital Identity Integration: In practice, capabilities will be issued by entities (e.g. users or services) with DIDs and keypairs managed by Trinsic. Your code should plan for implementors to provide their own DID managing library to fetch a DID document, extract the public key (verificationMethod) for signature verification, or to sign data with a private key. For example, you may call Trinsic APIs to get the public key for a DID used in controller or verificationMethod. In code, this may be abstracted as functions like ResolvePublicKey(did) and SignWithPrivateKey(data, did).
 
 - Architecture (In-Process vs gRPC): Since signing uses private keys, implementing this logic in-process (within the same application or service) is simplest. However, you may optionally expose the functionality over gRPC or HTTP for remote agents. For a library, ensure that signing and verification functions are thread-safe and do not persist private keys beyond needed scope. If exposing via gRPC, design service methods like CreateCapability(), DelegateCapability(), VerifyInvocation().
 
@@ -26,29 +26,67 @@ W3C's ZCAP-LD (Authorization Capabilities for Linked Data) specification defines
 
 ## Project Structure
 
-This is a new .NET project that currently contains:
-
-- `README.md` - Basic project description
-- `LICENSE` - MIT License
-- No source code or project files yet
+```
+zcap-dotnet/
+├── ZcapLd.sln
+├── src/
+│   ├── ZcapLd.Core/                    # Core library (NuGet package)
+│   │   ├── Cryptography/               # ICryptoSuite, CryptoSuiteProvider, Ed25519CryptoSuite,
+│   │   │                               #   P256CryptoSuite, MultibaseCodec, JsonCanonicalizer,
+│   │   │                               #   EcPointCompression, Ed25519Signer, SignatureVerifier
+│   │   ├── Models/                     # Capability, Proof, Invocation, Caveat, InvocationContext,
+│   │   │                               #   ResolvedKey, SignatureResult, RevocationRecord, RevocationRequest
+│   │   ├── Services/                   # ICapabilityService, ISigningService, IVerificationService,
+│   │   │                               #   ICaveatProcessor, IDidResolver, IDidSigner, IRevocationService,
+│   │   │                               #   IRevocationStore, INonceStore + implementations
+│   │   └── Exceptions/                 # ZcapLdExceptions
+│   └── ZcapLd.AspNetCore/             # ASP.NET adapter (NuGet package)
+│       ├── DependencyInjection/        # AddZcapServices(), AddZcapDidSigner<T>(), AddZcapRevocationSupport(),
+│       │                               #   AddZcapReplayProtection(), AddZcapCryptoSuite<T>(), AddZcapDidResolver<T>()
+│       ├── Endpoints/                  # MapZcapRevocationEndpoints()
+│       └── Contracts/                  # RevokeCapabilityHttpRequest, RevocationStatusHttpResponse
+├── tests/ZcapLd.Core.Tests/           # xUnit + FluentAssertions (245 tests)
+│   ├── Cryptography/                   # Ed25519, P256, JsonCanonicalizer, MultibaseCodec, etc.
+│   ├── Services/                       # CapabilityService, VerificationService, Revocation, Replay, etc.
+│   ├── Models/                         # Capability serialization tests
+│   ├── Integration/                    # End-to-end workflow tests
+│   ├── Compliance/                     # Normative unit + integration spec compliance tests
+│   └── Helpers/                        # InMemoryDidProvider (test-only IDidSigner + IDidResolver)
+├── examples/
+│   ├── ZcapLd.Examples/               # Console examples (7 scenarios)
+│   └── ZcapLd.RevocationEndpointsDemo/ # ASP.NET revocation demo (SQLite)
+├── docs/                               # Implementation, security, revocation, release docs
+├── tasks/                              # Historical evaluations, task tracking
+├── .github/workflows/                  # CI/CD pipelines
+├── ARCHITECTURE.md                     # Architecture and service boundaries
+├── CONTRIBUTING.md                     # Contributor guide
+└── README.md                          # Project overview and quick start
+```
 
 ## Development Commands
 
-Since this is a new project without .NET project files yet, typical .NET development commands will need to be established once the project structure is created:
-
-- `dotnet new` - Create new .NET projects/solutions
-- `dotnet build` - Build the project
-- `dotnet test` - Run tests
-- `dotnet run` - Run the application
-- `dotnet restore` - Restore NuGet packages
+```bash
+dotnet restore                                                         # Restore NuGet packages
+dotnet build ZcapLd.sln                                                # Build entire solution
+dotnet test ZcapLd.sln                                                 # Run all 245 tests
+dotnet pack src/ZcapLd.Core/ZcapLd.Core.csproj -c Release             # Pack core library
+dotnet pack src/ZcapLd.AspNetCore/ZcapLd.AspNetCore.csproj -c Release  # Pack ASP.NET adapter
+dotnet run --project examples/ZcapLd.Examples                          # Run console examples
+```
 
 ## Architecture Notes
 
-The project aims to implement W3C ZCAP-LD specification for .NET 10. Key architectural considerations:
-
-- Target framework: .NET 10
-- Purpose: Digital Identity Wallets
-- Standards compliance: W3C ZCAP-LD specification
+- **Target framework**: .NET 10 (`net10.0`)
+- **Specification**: W3C ZCAP-LD v0.3 (CG-DRAFT), 95%+ compliance (245 tests)
+- **Crypto suites**: Ed25519 (NSec.Cryptography) and P-256 (System.Security.Cryptography), extensible via `ICryptoSuite` / `ICryptoSuiteProvider`
+- **Key management**: No default `IDidSigner` — consumers must provide their own (HSM/KMS/Key Vault)
+- **DID resolution**: `DidKeyResolver` (did:key), `CompositeDidResolver` (multi-method routing); returns `ResolvedKey(byte[] PublicKeyBytes, string KeyType)`
+- **Signing**: `SigningService` delegates to `IDidSigner`; resolves verification methods via `IDidResolver` and context URLs via `ICryptoSuiteProvider`
+- **Verification**: `VerificationService` dispatches to correct `ICryptoSuite` by proof type; enforces chain validity, attenuation, caveats, revocation, and replay protection
+- **Revocation**: `IRevocationService` / `IRevocationStore` abstractions; `InMemoryRevocationStore` for dev; ASP.NET endpoints via `ZcapLd.AspNetCore`
+- **Replay protection**: `INonceStore` interface; `InMemoryNonceStore` (default), `NullNonceStore` (opt-out)
+- **Canonicalization**: RFC 8785 JSON Canonicalization (not full URDNA2015 — documented limitation)
+- **ASP.NET integration**: `AddZcapServices()` registers all core services; `AddZcapDidSigner<T>()` for signer; `AddZcapRevocationSupport()` and `MapZcapRevocationEndpoints()` for revocation
 
 ## Workflow Orchestration
 
@@ -96,7 +134,7 @@ The project aims to implement W3C ZCAP-LD specification for .NET 10. Key archite
 
 # Task Management
 
-1. **Plan First**: Write plan to `tasks/todo.md` with checkable items
+1. **Plan First**: Write plan to `tasks/todo{timestamp}.md` with checkable items
 2. **Verify Plan**: Check in before starting implementation
 3. **Track Progress**: Mark items complete as you go
 4. **Explain Changes**: High-level summary at each step

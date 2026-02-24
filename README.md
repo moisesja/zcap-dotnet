@@ -2,7 +2,8 @@
 
 A .NET 10 implementation of the [W3C ZCAP-LD](https://w3c-ccg.github.io/zcap-spec/) authorization capability model.
 
-[![CI](https://github.com/moisesja/zcap-dotnet/actions/workflows/ci.yml/badge.svg)](https://github.com/moisesja/zcap-dotnet/actions/workflows/ci.yml)
+[![CI Core](https://github.com/moisesja/zcap-dotnet/actions/workflows/ci-core.yml/badge.svg)](https://github.com/moisesja/zcap-dotnet/actions/workflows/ci-core.yml)
+[![CI ASP.NET](https://github.com/moisesja/zcap-dotnet/actions/workflows/ci-aspnet.yml/badge.svg)](https://github.com/moisesja/zcap-dotnet/actions/workflows/ci-aspnet.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 ## Why This Library
@@ -15,38 +16,55 @@ This library provides:
 - Delegation-chain verification
 - Invocation signing and verification
 - Caveat processing (expiration and usage count)
-- Ed25519 signatures with multibase encoding
+- Invocation replay protection with pluggable nonce stores
+- Revocation persistence with pluggable storage backends
+- Pluggable crypto suites (Ed25519 and P-256 included, additional curves extensible)
+- Dynamic JSON-LD context URLs per crypto suite
+- Multibase signature encoding
 
 ## Install
 
 ```bash
 dotnet add package ZcapLd.Core
+dotnet add package ZcapLd.AspNetCore # Optional endpoint adapter
 ```
 
 ## Quick Start
 
 ```csharp
+using ZcapLd.Core.Cryptography;
 using ZcapLd.Core.Models;
 using ZcapLd.Core.Services;
 
-var signing = new SigningService();
-var capabilities = new CapabilityService(signing);
-var verifier = new VerificationService(signing, new CaveatProcessor());
+// Wire up services — in production, replace InMemoryDidProvider with your
+// IDidSigner (HSM/Key Vault) and IDidResolver implementations.
+var didProvider = new InMemoryDidProvider(); // test helper: IDidSigner + IDidResolver
+
+var suiteProvider = new CryptoSuiteProvider();
+suiteProvider.Register(new Ed25519CryptoSuite());
+
+var signingService = new SigningService(didProvider, didProvider, suiteProvider);
+var capabilityService = new CapabilityService(signingService);
+var caveatProcessor = new CaveatProcessor();
+var revocationService = new RevocationService(new InMemoryRevocationStore());
+var nonceStore = new InMemoryNonceStore();
+var verificationService = new VerificationService(
+    didProvider, caveatProcessor, suiteProvider, revocationService, nonceStore);
 
 var rootDid = "did:key:z6MkRoot";
 var leafDid = "did:key:z6MkLeaf";
 
-signing.GenerateAndRegisterKeyPair(rootDid);
-signing.GenerateAndRegisterKeyPair(leafDid);
+didProvider.GenerateAndRegisterKeyPair(rootDid);
+didProvider.GenerateAndRegisterKeyPair(leafDid);
 
 // Root capability (root metadata only)
-var root = await capabilities.CreateRootCapabilityAsync(
+var root = await capabilityService.CreateRootCapabilityAsync(
     rootDid,
     "https://api.example.com/resources",
     new[] { "read", "write" });
 
 // Delegated capability (restrictions live here)
-var delegated = await capabilities.DelegateCapabilityAsync(
+var delegated = await capabilityService.DelegateCapabilityAsync(
     root,
     leafDid,
     new[] { "read" },
@@ -63,9 +81,59 @@ var invocation = new Invocation
     InvocationTarget = "https://api.example.com/resources/123"
 };
 
-invocation.Proof = await signing.SignInvocationAsync(invocation, leafDid);
-var isValid = await verifier.VerifyInvocationAsync(invocation, delegated);
+invocation.Proof = await signingService.SignInvocationAsync(invocation, leafDid);
+var isValid = await verificationService.VerifyInvocationAsync(invocation, delegated);
 ```
+
+## Revocation Extensibility
+
+The core package is storage-agnostic for revocation.
+
+- `IRevocationStore`: plug in your own backend (database, contract gateway, oracle bridge, cache)
+- `IRevocationService`: orchestration for persistence and expiry-aware lookups
+- `VerificationService`: checks revocation status during capability/invocation verification
+
+Optional ASP.NET endpoint rails are provided by `ZcapLd.AspNetCore`:
+
+```csharp
+using ZcapLd.AspNetCore.DependencyInjection;
+using ZcapLd.AspNetCore.Endpoints;
+
+var builder = WebApplication.CreateBuilder(args);
+builder.Services.AddZcapRevocationSupport(); // Or AddZcapRevocationSupport<MyStore>()
+
+var app = builder.Build();
+app.MapZcapRevocationEndpoints(); // /zcaps/revocations/{*capabilityId}
+app.Run();
+```
+
+### Setup Revocation Endpoints with ASP.NET
+
+Use `ZcapLd.AspNetCore` when your runtime is ASP.NET and you want ready-made minimal API rails:
+
+- Register services via `AddZcapRevocationSupport(...)`
+- Map routes via `MapZcapRevocationEndpoints(...)`
+- Override route prefix when needed (for example `/wallet/revocations`)
+
+### Expose Revocation in Other Ways
+
+If you do not want ASP.NET endpoints, call `IRevocationService` from your own transport layer:
+
+- gRPC handler
+- message consumer
+- admin CLI
+- worker-triggered orchestration
+
+### Persistence Strategy Options
+
+Configure storage via `IRevocationStore`:
+
+- `InMemoryRevocationStore` for local development/testing
+- database-backed custom stores for centralized persistence
+- smart-contract/oracle-backed stores for decentralized persistence
+- hybrid cache + durable store composites for high-throughput workloads
+
+Full developer guide: [`docs/REVOCATION-INTEGRATION.md`](docs/REVOCATION-INTEGRATION.md)
 
 ## Root vs Delegated Semantics
 
@@ -79,15 +147,19 @@ var isValid = await verifier.VerifyInvocationAsync(invocation, delegated);
 ## Project Layout
 
 - `src/ZcapLd.Core`: library code
+- `src/ZcapLd.AspNetCore`: optional ASP.NET endpoint adapter package
 - `tests/ZcapLd.Core.Tests`: unit, integration, and compliance tests
 - `examples/ZcapLd.Examples`: console examples
+- `examples/ZcapLd.RevocationEndpointsDemo`: ASP.NET revocation endpoints demo wired to SQLite
 - `docs`: implementation/security notes
 
 ## Developer Docs
 
 - Architecture: [`architecture.md`](architecture.md)
+- Revocation Integration: [`docs/REVOCATION-INTEGRATION.md`](docs/REVOCATION-INTEGRATION.md)
 - Contributing: [`CONTRIBUTING.md`](CONTRIBUTING.md)
 - NuGet Release Runbook: [`docs/NUGET-RELEASE.md`](docs/NUGET-RELEASE.md)
+- Monorepo Pipelines: [`docs/MONOREPO-PIPELINES.md`](docs/MONOREPO-PIPELINES.md)
 - MIT License: [`LICENSE`](LICENSE)
 
 ## Local Development
@@ -97,19 +169,23 @@ dotnet restore
 dotnet build ZcapLd.sln
 dotnet test ZcapLd.sln
 dotnet pack src/ZcapLd.Core/ZcapLd.Core.csproj -c Release
+dotnet pack src/ZcapLd.AspNetCore/ZcapLd.AspNetCore.csproj -c Release
 ```
 
 ## CI/CD
 
-- CI workflow: `.github/workflows/ci.yml`
-  - restore, build, test, pack
-  - uploads `.nupkg` / `.snupkg` artifacts
-- Publish workflow: `.github/workflows/release-nuget.yml`
-  - publishes on `v*.*.*` tags
-  - requires repository secret: `NUGET_API_KEY`
+- Core CI: `.github/workflows/ci-core.yml`
+- ASP.NET Adapter CI: `.github/workflows/ci-aspnet.yml`
+- Core publish: `.github/workflows/release-core-nuget.yml` on `core-v*.*.*` tags
+- ASP.NET adapter publish: `.github/workflows/release-aspnet-nuget.yml` on `aspnet-v*.*.*` tags
+- Shared package version source: `Directory.Build.props` (`ZcapLdVersion`)
+- Secrets:
+  - Core: `NUGET_API_KEY_CORE` (fallback `NUGET_API_KEY`)
+  - ASP.NET adapter: `NUGET_API_KEY_ASPNET` (fallback `NUGET_API_KEY`)
 
 ## Security and Production Notes
 
-- Current signing service stores private keys in memory for development/testing.
-- Production deployments should use HSM/KMS/Key Vault-backed signing.
+- No default `IDidSigner` ships in the core package — consumers must provide their own (HSM/KMS/Key Vault).
+- `InMemoryDidProvider` (in examples and tests) stores private keys in plaintext memory and is NOT for production use.
 - Canonicalization currently uses deterministic JSON canonicalization, not full RDF Dataset Canonicalization.
+- The `ICryptoSuite` abstraction supports pluggable algorithms; Ed25519 and P-256 are registered by default.

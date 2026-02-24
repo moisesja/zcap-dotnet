@@ -2,6 +2,7 @@ using FluentAssertions;
 using Xunit;
 using ZcapLd.Core.Models;
 using ZcapLd.Core.Services;
+using ZcapLd.Core.Tests.Helpers;
 
 namespace ZcapLd.Core.Tests.Integration;
 
@@ -11,6 +12,7 @@ namespace ZcapLd.Core.Tests.Integration;
 /// </summary>
 public class EndToEndTests
 {
+    private readonly InMemoryDidProvider _didProvider;
     private readonly SigningService _signingService;
     private readonly CapabilityService _capabilityService;
     private readonly CaveatProcessor _caveatProcessor;
@@ -18,9 +20,10 @@ public class EndToEndTests
 
     public EndToEndTests()
     {
-        _signingService = new SigningService();
+        _didProvider = new InMemoryDidProvider();
+        _signingService = new SigningService(_didProvider, _didProvider);
         _caveatProcessor = new CaveatProcessor();
-        _verificationService = new VerificationService(_signingService, _caveatProcessor);
+        _verificationService = new VerificationService(_didProvider, _caveatProcessor);
         _capabilityService = new CapabilityService(_signingService);
     }
 
@@ -31,7 +34,7 @@ public class EndToEndTests
     {
         // Arrange - Create a root capability
         var controllerDid = "did:key:z6MkController";
-        _signingService.GenerateAndRegisterKeyPair(controllerDid);
+        _didProvider.GenerateAndRegisterKeyPair(controllerDid);
 
         var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
             controllerDid,
@@ -58,7 +61,7 @@ public class EndToEndTests
     {
         // Arrange - Create root capability
         var rootController = "did:key:z6MkRootController";
-        _signingService.GenerateAndRegisterKeyPair(rootController);
+        _didProvider.GenerateAndRegisterKeyPair(rootController);
 
         var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
             rootController,
@@ -67,7 +70,7 @@ public class EndToEndTests
 
         // Delegate to a child
         var childController = "did:key:z6MkChildController";
-        _signingService.GenerateAndRegisterKeyPair(childController);
+        _didProvider.GenerateAndRegisterKeyPair(childController);
 
         var delegatedCapability = await _capabilityService.DelegateCapabilityAsync(
             rootCapability,
@@ -98,9 +101,9 @@ public class EndToEndTests
         var controller2 = "did:key:z6MkController2";
         var controller3 = "did:key:z6MkController3";
 
-        _signingService.GenerateAndRegisterKeyPair(controller1);
-        _signingService.GenerateAndRegisterKeyPair(controller2);
-        _signingService.GenerateAndRegisterKeyPair(controller3);
+        _didProvider.GenerateAndRegisterKeyPair(controller1);
+        _didProvider.GenerateAndRegisterKeyPair(controller2);
+        _didProvider.GenerateAndRegisterKeyPair(controller3);
 
         // Root capability
         var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
@@ -150,8 +153,8 @@ public class EndToEndTests
         // Arrange - Create delegated capability with expiration caveat
         var rootControllerDid = "did:key:z6MkRootController";
         var delegatedControllerDid = "did:key:z6MkDelegatedController";
-        _signingService.GenerateAndRegisterKeyPair(rootControllerDid);
-        _signingService.GenerateAndRegisterKeyPair(delegatedControllerDid);
+        _didProvider.GenerateAndRegisterKeyPair(rootControllerDid);
+        _didProvider.GenerateAndRegisterKeyPair(delegatedControllerDid);
 
         var expirationCaveat = new ExpirationCaveat
         {
@@ -191,8 +194,8 @@ public class EndToEndTests
         // Arrange - Create delegated capability with expired caveat
         var rootControllerDid = "did:key:z6MkRootController";
         var delegatedControllerDid = "did:key:z6MkDelegatedController";
-        _signingService.GenerateAndRegisterKeyPair(rootControllerDid);
-        _signingService.GenerateAndRegisterKeyPair(delegatedControllerDid);
+        _didProvider.GenerateAndRegisterKeyPair(rootControllerDid);
+        _didProvider.GenerateAndRegisterKeyPair(delegatedControllerDid);
 
         var expirationCaveat = new ExpirationCaveat
         {
@@ -232,8 +235,8 @@ public class EndToEndTests
         // Arrange - Create delegated capability with usage count caveat
         var rootControllerDid = "did:key:z6MkRootController";
         var delegatedControllerDid = "did:key:z6MkDelegatedController";
-        _signingService.GenerateAndRegisterKeyPair(rootControllerDid);
-        _signingService.GenerateAndRegisterKeyPair(delegatedControllerDid);
+        _didProvider.GenerateAndRegisterKeyPair(rootControllerDid);
+        _didProvider.GenerateAndRegisterKeyPair(delegatedControllerDid);
 
         var usageCaveat = new UsageCountCaveat
         {
@@ -289,8 +292,8 @@ public class EndToEndTests
         var controller1 = "did:key:z6MkController1";
         var controller2 = "did:key:z6MkController2";
 
-        _signingService.GenerateAndRegisterKeyPair(controller1);
-        _signingService.GenerateAndRegisterKeyPair(controller2);
+        _didProvider.GenerateAndRegisterKeyPair(controller1);
+        _didProvider.GenerateAndRegisterKeyPair(controller2);
 
         // Root without caveats; add caveat on first delegation.
         var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
@@ -350,8 +353,8 @@ public class EndToEndTests
         var rootController = "did:key:z6MkRootController";
         var childController = "did:key:z6MkChildController";
 
-        _signingService.GenerateAndRegisterKeyPair(rootController);
-        _signingService.GenerateAndRegisterKeyPair(childController);
+        _didProvider.GenerateAndRegisterKeyPair(rootController);
+        _didProvider.GenerateAndRegisterKeyPair(childController);
 
         var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
             rootController,
@@ -386,8 +389,8 @@ public class EndToEndTests
         var rootController = "did:key:z6MkRootController";
         var childController = "did:key:z6MkChildController";
 
-        _signingService.GenerateAndRegisterKeyPair(rootController);
-        _signingService.GenerateAndRegisterKeyPair(childController);
+        _didProvider.GenerateAndRegisterKeyPair(rootController);
+        _didProvider.GenerateAndRegisterKeyPair(childController);
 
         var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
             rootController,
@@ -422,8 +425,8 @@ public class EndToEndTests
         var rootController = "did:key:z6MkRootController";
         var childController = "did:key:z6MkChildController";
 
-        _signingService.GenerateAndRegisterKeyPair(rootController);
-        _signingService.GenerateAndRegisterKeyPair(childController);
+        _didProvider.GenerateAndRegisterKeyPair(rootController);
+        _didProvider.GenerateAndRegisterKeyPair(childController);
 
         var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
             rootController,
@@ -462,8 +465,8 @@ public class EndToEndTests
         var authorizedController = "did:key:z6MkAuthorizedController";
         var unauthorizedController = "did:key:z6MkUnauthorizedController";
 
-        _signingService.GenerateAndRegisterKeyPair(authorizedController);
-        _signingService.GenerateAndRegisterKeyPair(unauthorizedController);
+        _didProvider.GenerateAndRegisterKeyPair(authorizedController);
+        _didProvider.GenerateAndRegisterKeyPair(unauthorizedController);
 
         var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
             authorizedController,
@@ -491,7 +494,7 @@ public class EndToEndTests
     {
         // Arrange
         var controllerDid = "did:key:z6MkController";
-        _signingService.GenerateAndRegisterKeyPair(controllerDid);
+        _didProvider.GenerateAndRegisterKeyPair(controllerDid);
 
         var childDid = "did:key:z6MkChild";
 
@@ -521,7 +524,7 @@ public class EndToEndTests
     {
         // Arrange - Create capability with past expiration
         var controllerDid = "did:key:z6MkController";
-        _signingService.GenerateAndRegisterKeyPair(controllerDid);
+        _didProvider.GenerateAndRegisterKeyPair(controllerDid);
 
         var childDid = "did:key:z6MkChild";
 
@@ -557,9 +560,9 @@ public class EndToEndTests
         var bob = "did:key:z6MkBob";
         var carol = "did:key:z6MkCarol";
 
-        _signingService.GenerateAndRegisterKeyPair(alice);
-        _signingService.GenerateAndRegisterKeyPair(bob);
-        _signingService.GenerateAndRegisterKeyPair(carol);
+        _didProvider.GenerateAndRegisterKeyPair(alice);
+        _didProvider.GenerateAndRegisterKeyPair(bob);
+        _didProvider.GenerateAndRegisterKeyPair(carol);
 
         // Alice creates root capability for her document
         var aliceCapability = await _capabilityService.CreateRootCapabilityAsync(
@@ -633,8 +636,8 @@ public class EndToEndTests
         var apiProvider = "did:key:z6MkAPIProvider";
         var customer = "did:key:z6MkCustomer";
 
-        _signingService.GenerateAndRegisterKeyPair(apiProvider);
-        _signingService.GenerateAndRegisterKeyPair(customer);
+        _didProvider.GenerateAndRegisterKeyPair(apiProvider);
+        _didProvider.GenerateAndRegisterKeyPair(customer);
 
         // API provider creates root capability
         var apiCapability = await _capabilityService.CreateRootCapabilityAsync(

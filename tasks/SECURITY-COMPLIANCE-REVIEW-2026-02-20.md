@@ -1,3 +1,14 @@
+> **HISTORICAL DOCUMENT — ALL FINDINGS RESOLVED**
+>
+> This security review was performed on 2026-02-20 when the test suite had
+> 96 tests with 3 failures and a stack-overflow DoS vulnerability.
+> All critical, high, and medium findings documented here have been resolved.
+> The project now has 245 passing tests with zero failures.
+>
+> For the fixes applied see [`docs/SECURITY-FIXES-SUMMARY.md`](../docs/SECURITY-FIXES-SUMMARY.md).
+
+---
+
 # Security and Compliance Review - 2026-02-20
 
 ## Scope

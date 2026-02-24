@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Text.Json;
 using ZcapLd.Core.Cryptography;
 using ZcapLd.Core.Exceptions;
@@ -7,24 +6,95 @@ using ZcapLd.Core.Models;
 namespace ZcapLd.Core.Services;
 
 /// <summary>
-/// Service for verifying ZCAP-LD capabilities and invocations
-/// Implements W3C ZCAP-LD specification verification requirements
+/// Service for verifying ZCAP-LD capabilities and invocations.
+/// Implements W3C ZCAP-LD specification verification requirements.
+/// Only requires an <see cref="IDidResolver"/> — no private key access needed.
 /// </summary>
 public class VerificationService : IVerificationService
 {
-    private readonly ISigningService _signingService;
+    private readonly IDidResolver _didResolver;
     private readonly ICaveatProcessor _caveatProcessor;
+    private readonly ICryptoSuiteProvider _suiteProvider;
+    private readonly IRevocationService _revocationService;
+    private readonly INonceStore _nonceStore;
+    private readonly TimeSpan _nonceWindow;
     private const int MaxChainLength = 10; // Per spec: SHOULD limit to 10
 
-    // COMPLIANCE FIX: MUST-21, SHOULD-07 - Revocation storage
-    // Store revoked capability IDs with their expiration times
-    // In production, this should be persisted to a database
-    private readonly ConcurrentDictionary<string, DateTime?> _revokedCapabilities = new();
+    /// <summary>
+    /// Default window during which invocation nonces are tracked for replay protection.
+    /// </summary>
+    public static readonly TimeSpan DefaultNonceWindow = TimeSpan.FromMinutes(5);
 
-    public VerificationService(ISigningService signingService, ICaveatProcessor caveatProcessor)
+    /// <summary>
+    /// Backward-compatible constructor (Ed25519 only).
+    /// </summary>
+    public VerificationService(IDidResolver didResolver, ICaveatProcessor caveatProcessor)
+        : this(didResolver, caveatProcessor, CreateDefaultSuiteProvider(),
+               new RevocationService(new InMemoryRevocationStore()))
     {
-        _signingService = signingService ?? throw new ArgumentNullException(nameof(signingService));
+    }
+
+    /// <summary>
+    /// Backward-compatible constructor with custom revocation service (Ed25519 only).
+    /// </summary>
+    public VerificationService(
+        IDidResolver didResolver,
+        ICaveatProcessor caveatProcessor,
+        IRevocationService revocationService)
+        : this(didResolver, caveatProcessor, CreateDefaultSuiteProvider(), revocationService)
+    {
+    }
+
+    /// <summary>
+    /// Constructor with explicit crypto suite provider.
+    /// </summary>
+    public VerificationService(
+        IDidResolver didResolver,
+        ICaveatProcessor caveatProcessor,
+        ICryptoSuiteProvider suiteProvider)
+        : this(didResolver, caveatProcessor, suiteProvider,
+               new RevocationService(new InMemoryRevocationStore()))
+    {
+    }
+
+    /// <summary>
+    /// Constructor with all core dependencies (no replay protection).
+    /// </summary>
+    public VerificationService(
+        IDidResolver didResolver,
+        ICaveatProcessor caveatProcessor,
+        ICryptoSuiteProvider suiteProvider,
+        IRevocationService revocationService)
+        : this(didResolver, caveatProcessor, suiteProvider, revocationService,
+               NullNonceStore.Instance)
+    {
+    }
+
+    /// <summary>
+    /// Full constructor with all dependencies including replay protection.
+    /// </summary>
+    public VerificationService(
+        IDidResolver didResolver,
+        ICaveatProcessor caveatProcessor,
+        ICryptoSuiteProvider suiteProvider,
+        IRevocationService revocationService,
+        INonceStore nonceStore,
+        TimeSpan? nonceWindow = null)
+    {
+        _didResolver = didResolver ?? throw new ArgumentNullException(nameof(didResolver));
         _caveatProcessor = caveatProcessor ?? throw new ArgumentNullException(nameof(caveatProcessor));
+        _suiteProvider = suiteProvider ?? throw new ArgumentNullException(nameof(suiteProvider));
+        _revocationService = revocationService ?? throw new ArgumentNullException(nameof(revocationService));
+        _nonceStore = nonceStore ?? throw new ArgumentNullException(nameof(nonceStore));
+        _nonceWindow = nonceWindow ?? DefaultNonceWindow;
+    }
+
+    internal static ICryptoSuiteProvider CreateDefaultSuiteProvider()
+    {
+        var provider = new CryptoSuiteProvider();
+        provider.Register(new Ed25519CryptoSuite());
+        provider.Register(new P256CryptoSuite());
+        return provider;
     }
 
     /// <summary>
@@ -34,6 +104,11 @@ public class VerificationService : IVerificationService
     {
         if (capability == null)
             throw new ArgumentNullException(nameof(capability));
+
+        if (await IsCapabilityRevokedAsync(capability.Id))
+        {
+            return false;
+        }
 
         // Root capabilities have no proof
         if (string.IsNullOrEmpty(capability.ParentCapability))
@@ -86,7 +161,6 @@ public class VerificationService : IVerificationService
         }
 
         if (parentCapability != null &&
-            !string.IsNullOrWhiteSpace(parentCapability.Controller) &&
             !IsControllerAuthorized(capability.Proof.VerificationMethod, parentCapability))
         {
             return false;
@@ -98,29 +172,19 @@ public class VerificationService : IVerificationService
             return false;
         }
 
-        // Get the public key for verification
-        var publicKey = await ResolvePublicKeyAsync(capability.Proof.VerificationMethod);
+        // Get the public key and look up the crypto suite for this proof type
+        var resolvedKey = await _didResolver.ResolvePublicKeyAsync(capability.Proof.VerificationMethod);
+        var suite = _suiteProvider.GetByProofType(capability.Proof.Type)
+            ?? throw new CapabilityValidationException(
+                $"Unsupported proof type: {capability.Proof.Type}");
 
-        // Serialize the capability without the proof
-        var capabilityWithoutProof = new Capability
-        {
-            Context = capability.Context,
-            Id = capability.Id,
-            ParentCapability = capability.ParentCapability,
-            Controller = capability.Controller,
-            InvocationTarget = capability.InvocationTarget,
-            Expires = capability.Expires,
-            AllowedAction = capability.AllowedAction,
-            Caveat = capability.Caveat,
-            Proof = null
-        };
+        var capabilityWithoutProof = ProofSigningPayloadBuilder.CloneCapabilityWithoutProof(capability);
+        var canonicalBytes = ProofSigningPayloadBuilder.CanonicalizeCapabilityPayload(
+            capabilityWithoutProof,
+            capability.Proof);
+        var signatureBytes = MultibaseCodec.Decode(capability.Proof.ProofValue);
 
-        // TODO S-03: Full cryptographic binding of proof metadata deferred due to
-        // DateTime serialization complexity. Currently verifying document only.
-        var canonicalBytes = Ed25519Signer.CanonicalizeDocument(capabilityWithoutProof);
-        var signatureBytes = Ed25519Signer.DecodeSignature(capability.Proof.ProofValue);
-
-        return Ed25519Signer.Verify(canonicalBytes, signatureBytes, publicKey);
+        return suite.Verify(canonicalBytes, signatureBytes, resolvedKey.PublicKeyBytes);
     }
 
     /// <summary>
@@ -136,12 +200,9 @@ public class VerificationService : IVerificationService
 
         try
         {
-            // SECURITY FIX S-04: Validate invocation ID exists for replay protection
-            // In production, this ID should be checked against a nonce store or timestamp window
-            if (string.IsNullOrEmpty(invocation.Id))
+            if (string.IsNullOrWhiteSpace(invocation.Id))
             {
-                // Warning: No invocation ID means no replay protection
-                // For now, we allow it but production systems SHOULD require it
+                return false;
             }
 
             // 1. Verify the capability chain is valid
@@ -150,6 +211,16 @@ public class VerificationService : IVerificationService
 
             // 2. Verify invocation proof exists and has correct purpose
             if (invocation.Proof == null || invocation.Proof.ProofPurpose != "capabilityInvocation")
+                return false;
+
+            // 2a. Invocation MUST reference the capability being verified
+            if (!string.Equals(invocation.Capability, capability.Id, StringComparison.Ordinal))
+                return false;
+
+            // 2b. Proof payload fields MUST be semantically consistent with invocation fields
+            if (!string.Equals(invocation.Proof.Capability as string, invocation.Capability, StringComparison.Ordinal) ||
+                !string.Equals(invocation.Proof.CapabilityAction, invocation.CapabilityAction, StringComparison.Ordinal) ||
+                !string.Equals(invocation.Proof.InvocationTarget, invocation.InvocationTarget, StringComparison.Ordinal))
                 return false;
 
             // 3. Verify invocation target matches capability
@@ -162,19 +233,18 @@ public class VerificationService : IVerificationService
                 return false;
 
             // 5. Verify the invocation signature
-            var publicKey = await ResolvePublicKeyAsync(invocation.Proof.VerificationMethod);
+            var resolvedKey = await _didResolver.ResolvePublicKeyAsync(invocation.Proof.VerificationMethod);
+            var suite = _suiteProvider.GetByProofType(invocation.Proof.Type)
+                ?? throw new CapabilityValidationException(
+                    $"Unsupported proof type: {invocation.Proof.Type}");
 
-            var invocationWithoutProof = new
-            {
-                capability = invocation.Capability,
-                capabilityAction = invocation.CapabilityAction,
-                invocationTarget = invocation.InvocationTarget
-            };
+            var invocationWithoutProof = ProofSigningPayloadBuilder.CloneInvocationWithoutProof(invocation);
+            var canonicalBytes = ProofSigningPayloadBuilder.CanonicalizeInvocationPayload(
+                invocationWithoutProof,
+                invocation.Proof);
+            var signatureBytes = MultibaseCodec.Decode(invocation.Proof.ProofValue);
 
-            var canonicalBytes = Ed25519Signer.CanonicalizeDocument(invocationWithoutProof);
-            var signatureBytes = Ed25519Signer.DecodeSignature(invocation.Proof.ProofValue);
-
-            if (!Ed25519Signer.Verify(canonicalBytes, signatureBytes, publicKey))
+            if (!suite.Verify(canonicalBytes, signatureBytes, resolvedKey.PublicKeyBytes))
                 return false;
 
             // 6. Verify the controller is authorized
@@ -192,7 +262,15 @@ public class VerificationService : IVerificationService
             };
 
             // Evaluate all caveats from the complete chain (not just leaf)
-            return await _caveatProcessor.EvaluateCapabilityChainCaveatsAsync(chain.ToArray(), context);
+            if (!await _caveatProcessor.EvaluateCapabilityChainCaveatsAsync(chain.ToArray(), context))
+                return false;
+
+            // 8. Replay protection: reject if this invocation nonce has been seen before
+            var nonceExpiry = DateTime.UtcNow.Add(_nonceWindow);
+            if (await _nonceStore.TryMarkAsUsedAsync(invocation.Id, nonceExpiry))
+                return false;
+
+            return true;
         }
         catch
         {
@@ -220,7 +298,16 @@ public class VerificationService : IVerificationService
                 return false;
             }
 
-            // 2. Verify each link in the chain
+            // 2. Revocation check for all capabilities in the chain.
+            foreach (var chainCapability in chain)
+            {
+                if (await IsCapabilityRevokedAsync(chainCapability.Id))
+                {
+                    return false;
+                }
+            }
+
+            // 3. Verify each link in the chain
             for (int i = 1; i < chain.Count; i++)
             {
                 var parent = chain[i - 1];
@@ -230,7 +317,7 @@ public class VerificationService : IVerificationService
                 if (!await VerifyDelegationProofAsync(
                         child,
                         parentCapabilityOverride: parent,
-                        requireParentAuthorization: false))
+                        requireParentAuthorization: true))
                     return false;
 
                 // Verify attenuation (child is more restrictive than parent)
@@ -246,7 +333,7 @@ public class VerificationService : IVerificationService
                     return false;
             }
 
-            // 3. Verify root capability (should have no proof)
+            // 4. Verify root capability (should have no proof)
             var root = chain[0];
             if (root.Proof != null)
                 return false;
@@ -261,121 +348,15 @@ public class VerificationService : IVerificationService
     }
 
     /// <summary>
-    /// Resolves a DID to its public key for verification
-    /// SECURITY: Non-recursive implementation to prevent stack overflow DoS attacks
+    /// Resolves a DID to its public key for verification.
+    /// Delegates to the configured <see cref="IDidResolver"/>.
     /// </summary>
-    public async Task<byte[]> ResolvePublicKeyAsync(string did)
+    public async Task<ResolvedKey> ResolvePublicKeyAsync(string did)
     {
         if (string.IsNullOrEmpty(did))
             throw new ArgumentException("DID cannot be null or empty", nameof(did));
 
-        // SECURITY FIX S-01: Non-recursive DID resolution with explicit depth limit
-        const int maxResolutionDepth = 3;
-        int depth = 0;
-        string currentDid = did;
-
-        while (depth < maxResolutionDepth)
-        {
-            // Try to resolve via signing service first (for registered test keys)
-            // This should only happen once (depth 0)
-            if (depth == 0)
-            {
-                try
-                {
-                    // Try to get the actual public key from the signing service
-                    // This allows tests and real implementations to register keys
-                    var baseDid = currentDid.Split('#')[0];
-                    var publicKey = _signingService.GetPublicKey(baseDid);
-                    return publicKey;
-                }
-                catch (InvalidOperationException)
-                {
-                    // Key not registered in signing service, continue with other methods
-                }
-            }
-
-            // For did:key format, extract the public key directly
-            if (currentDid.StartsWith("did:key:"))
-            {
-                // Format: did:key:z{multibase-encoded-public-key}#z{multibase-encoded-public-key}
-                // Or just: did:key:z{multibase-encoded-public-key}
-                // Extract the key after "did:key:" and before any fragment
-                var keyPart = currentDid.Replace("did:key:", "").Split('#')[0];
-
-                if (!keyPart.StartsWith("z"))
-                {
-                    throw new CapabilityValidationException(
-                        $"Invalid did:key format (must start with 'z'): {currentDid}");
-                }
-
-                try
-                {
-                    // Decode multibase (base58-btc)
-                    var decoded = Ed25519Signer.DecodeSignature(keyPart);
-
-                    // For Ed25519, the decoded value includes a multicodec prefix
-                    // 0xed01 for Ed25519 public key, so we skip the first 2 bytes
-                    if (decoded.Length >= 34 && decoded[0] == 0xed && decoded[1] == 0x01)
-                    {
-                        return decoded.Skip(2).ToArray();
-                    }
-
-                    // If it's exactly 32 bytes, it's already the raw public key
-                    if (decoded.Length == 32)
-                    {
-                        return decoded;
-                    }
-
-                    throw new CapabilityValidationException(
-                        $"Invalid did:key decoded length: {decoded.Length} bytes for {currentDid}");
-                }
-                catch (CapabilityValidationException)
-                {
-                    throw; // Re-throw our own exceptions
-                }
-                catch (Exception ex)
-                {
-                    throw new CapabilityValidationException(
-                        $"Failed to decode did:key public key: {currentDid}", ex);
-                }
-            }
-
-            // For other DID methods, try to resolve via signing service
-            if (depth == 0)
-            {
-                try
-                {
-                    var verificationMethod = await _signingService.GetVerificationMethodAsync(currentDid);
-
-                    // If verification method is the same as current DID, we're in a loop
-                    if (verificationMethod == currentDid)
-                    {
-                        throw new CapabilityValidationException(
-                            $"DID resolution loop detected for: {currentDid}");
-                    }
-
-                    currentDid = verificationMethod;
-                    depth++;
-                    continue;
-                }
-                catch (InvalidOperationException)
-                {
-                    // Signing service doesn't have this key registered
-                    throw new CapabilityValidationException(
-                        $"Unable to resolve public key for DID: {currentDid}. " +
-                        $"DID method not supported or key not registered.");
-                }
-            }
-
-            // If we get here at depth > 0, we have an unsupported DID method
-            throw new CapabilityValidationException(
-                $"Unsupported DID method or invalid DID format: {currentDid}");
-        }
-
-        // Exceeded max resolution depth
-        throw new CapabilityValidationException(
-            $"DID resolution exceeded maximum depth ({maxResolutionDepth}). " +
-            $"Possible circular reference starting from: {did}");
+        return await _didResolver.ResolvePublicKeyAsync(did);
     }
 
     /// <summary>
@@ -385,9 +366,22 @@ public class VerificationService : IVerificationService
     {
         var chain = new List<Capability>();
         var current = capability;
+        var visitedIds = new HashSet<string>(StringComparer.Ordinal);
+        string? expectedRootId = null;
 
         while (true)
         {
+            if (string.IsNullOrWhiteSpace(current.Id))
+            {
+                throw new CapabilityValidationException("Capability in chain is missing required id.");
+            }
+
+            if (!visitedIds.Add(current.Id))
+            {
+                throw new CapabilityValidationException(
+                    $"Detected a cycle in capability chain at capability ID '{current.Id}'.");
+            }
+
             chain.Insert(0, current); // Add to beginning to build root->leaf order
 
             if (string.IsNullOrEmpty(current.ParentCapability))
@@ -409,30 +403,23 @@ public class VerificationService : IVerificationService
                     "capabilityChain first entry MUST be the root capability ID string");
             }
 
-            // Direct delegation from root: chain contains only the root capability ID.
-            if (current.Proof.CapabilityChain.Length == 1)
+            if (expectedRootId == null)
             {
-                if (!string.Equals(chainRootId, current.ParentCapability, StringComparison.Ordinal))
-                {
-                    throw new CapabilityValidationException(
-                        $"Capability chain root ID '{chainRootId}' does not match parentCapability '{current.ParentCapability}'");
-                }
-
-                current = new Capability
-                {
-                    Id = chainRootId,
-                    ParentCapability = null,
-                    InvocationTarget = current.InvocationTarget,
-                    AllowedAction = Array.Empty<string>(),
-                    Caveat = Array.Empty<Caveat>(),
-                    Proof = null
-                };
-
-                continue;
+                expectedRootId = chainRootId;
+            }
+            else if (!string.Equals(expectedRootId, chainRootId, StringComparison.Ordinal))
+            {
+                throw new CapabilityValidationException(
+                    $"Inconsistent root capability IDs in capabilityChain. Expected '{expectedRootId}', got '{chainRootId}'.");
             }
 
-            if (!TryDeserializeCapability(current.Proof.CapabilityChain[^1], out var parentCapability) ||
-                parentCapability == null)
+            if (current.Proof.CapabilityChain.Length < 2)
+            {
+                throw new CapabilityValidationException(
+                    "capabilityChain MUST include root capability ID and embedded immediate parent capability object.");
+            }
+
+            if (!TryDeserializeCapability(current.Proof.CapabilityChain[^1], out var parentCapability) || parentCapability == null)
             {
                 throw new CapabilityValidationException(
                     "capabilityChain last entry MUST embed the immediate parent capability object");
@@ -445,6 +432,36 @@ public class VerificationService : IVerificationService
             }
 
             current = parentCapability;
+        }
+
+        var root = chain[0];
+
+        if (!string.IsNullOrWhiteSpace(expectedRootId) &&
+            !string.Equals(expectedRootId, root.Id, StringComparison.Ordinal))
+        {
+            throw new CapabilityValidationException(
+                $"Root capability ID '{root.Id}' does not match capabilityChain root ID '{expectedRootId}'.");
+        }
+
+        if (!string.IsNullOrEmpty(root.ParentCapability))
+        {
+            throw new CapabilityValidationException("Root capability MUST NOT have parentCapability.");
+        }
+
+        if (root.Proof != null)
+        {
+            throw new CapabilityValidationException("Root capability MUST NOT include a delegation proof.");
+        }
+
+        if (string.IsNullOrWhiteSpace(root.Controller))
+        {
+            throw new CapabilityValidationException("Root capability MUST include a non-empty controller.");
+        }
+
+        if (string.IsNullOrWhiteSpace(root.InvocationTarget) ||
+            !Uri.IsWellFormedUriString(root.InvocationTarget, UriKind.Absolute))
+        {
+            throw new CapabilityValidationException("Root capability MUST include a valid absolute invocationTarget URI.");
         }
 
         return Task.FromResult(chain);
@@ -589,17 +606,7 @@ public class VerificationService : IVerificationService
         if (string.IsNullOrEmpty(revokerDid))
             throw new ArgumentException("Revoker DID cannot be null or empty", nameof(revokerDid));
 
-        // In production, you would:
-        // 1. Verify the revoker is authorized (root controller or delegator)
-        // 2. Get the capability's expiration from storage/chain
-        // 3. Store revocation in persistent storage (database)
-        // 4. Publish revocation to revocation list endpoint
-
-        // For now, we store with no expiration (indefinite revocation)
-        // In production, you should retrieve the capability's expiration and use that
-        _revokedCapabilities.TryAdd(capabilityId, null);
-
-        return Task.FromResult(true);
+        return RevokeCapabilityCoreAsync(capabilityId, revokerDid);
     }
 
     /// <summary>
@@ -611,19 +618,17 @@ public class VerificationService : IVerificationService
         if (string.IsNullOrEmpty(capabilityId))
             return Task.FromResult(false);
 
-        // Check if capability is in revocation store
-        if (_revokedCapabilities.TryGetValue(capabilityId, out var expiration))
+        return _revocationService.IsRevokedAsync(capabilityId);
+    }
+
+    private async Task<bool> RevokeCapabilityCoreAsync(string capabilityId, string revokerDid)
+    {
+        await _revocationService.RevokeAsync(new RevocationRequest
         {
-            // If expiration is set and has passed, remove from revocation store
-            if (expiration.HasValue && expiration.Value < DateTime.UtcNow)
-            {
-                _revokedCapabilities.TryRemove(capabilityId, out _);
-                return Task.FromResult(false);
-            }
+            CapabilityId = capabilityId,
+            RevokedBy = revokerDid
+        });
 
-            return Task.FromResult(true);
-        }
-
-        return Task.FromResult(false);
+        return true;
     }
 }

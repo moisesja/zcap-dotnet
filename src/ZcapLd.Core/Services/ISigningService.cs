@@ -3,7 +3,9 @@ using ZcapLd.Core.Models;
 namespace ZcapLd.Core.Services;
 
 /// <summary>
-/// Service for cryptographic signing operations
+/// Service for assembling ZCAP-LD cryptographic proofs.
+/// Delegates signing to an <see cref="IDidSigner"/> and DID resolution
+/// to an <see cref="IDidResolver"/>.
 /// </summary>
 public interface ISigningService
 {
@@ -30,16 +32,10 @@ public interface ISigningService
     Task<Proof> SignInvocationAsync(Invocation invocation, string signerDid);
 
     /// <summary>
-    /// Gets the verification method URI for a DID
+    /// Resolves the JSON-LD security suite context URL for a signer's key type.
+    /// Used by <see cref="CapabilityService"/> to set the correct context on delegated capabilities.
     /// </summary>
-    /// <param name="did">The DID to resolve</param>
-    /// <returns>The verification method URI</returns>
-    Task<string> GetVerificationMethodAsync(string did);
-
-    /// <summary>
-    /// Gets the public key for a registered DID
-    /// </summary>
-    /// <param name="did">The DID to get the public key for</param>
-    /// <returns>The public key bytes</returns>
-    byte[] GetPublicKey(string did);
+    /// <param name="signerDid">The DID of the signer</param>
+    /// <returns>The suite's context URL (e.g. "https://w3id.org/security/suites/ed25519-2020/v1")</returns>
+    Task<string> ResolveSuiteContextUrlAsync(string signerDid);
 }

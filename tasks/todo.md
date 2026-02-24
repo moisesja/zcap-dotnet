@@ -1,141 +1,208 @@
-# OSS NuGet Readiness Plan - 2026-02-20 (Codex)
+# IDidProvider Interface Segregation Refactor - 2026-02-21
 
-## Scope
+## Motivation
 
-Prepare `zcap-dotnet` for open-source NuGet distribution, including package metadata, contributor/developer docs, and CI/CD automation.
+`InMemoryDidProvider` stores private keys in plaintext memory with no protection. It should not ship in the core NuGet package. Additionally, `IDidProvider` conflates two distinct responsibilities: secret-holding signing operations and public key resolution.
 
-## Plan
+## Design
 
-- [x] Add NuGet package metadata and packaging settings to `src/ZcapLd.Core/ZcapLd.Core.csproj`
-- [x] Add package-specific readme for NuGet and ensure it is packed
-- [x] Create `architecture.md` for developer architecture overview and data flow
-- [x] Create `contributors.md` and `CONTRIBUTING.md` with contributor workflow
-- [x] Update root `README.md` for OSS + NuGet publish/readme accuracy
-- [x] Add GitHub Actions CI pipeline for restore/build/test/pack
-- [x] Add GitHub Actions publish pipeline for tagged releases to NuGet.org
-- [x] Validate with `dotnet test` and `dotnet pack` locally
+Split `IDidProvider` into two interfaces following ISP:
 
-## Verification Log
+- **`IDidResolver`** — public key resolution, no secrets. Ships with `DidKeyResolver` (handles `did:key:` method) and `CompositeDidResolver` (routes by DID method prefix). Users implement for `did:web:`, `did:ion:`, etc.
+- **`IDidSigner`** — signing operations, requires secret key access. No default implementation in core. Users must provide their own (HSM, Key Vault, Trinsic, etc.).
 
-- [x] `dotnet test ZcapLd.sln`: `Failed: 0, Passed: 157, Total: 157`
-- [x] `dotnet pack src/ZcapLd.Core/ZcapLd.Core.csproj -c Release`: generated `.nupkg` and `.snupkg` in `artifacts/`
+`InMemoryDidProvider` (implements both `IDidSigner` + `IDidResolver`) moves to test project as a test helper.
 
-## Review
-
-- Added NuGet-ready package metadata, SourceLink, symbols, and packaged readme/license support.
-- Added OSS documentation set for architecture, contribution flow, contributors list, and NuGet release runbook.
-- Added GitHub Actions CI and release-to-NuGet workflows, plus Dependabot configuration.
-- Updated examples and README to match strict root capability semantics and delegated restriction behavior.
-
----
-
-# Remediation Plan - 2026-02-20 (Codex)
-
-## Scope
-
-Stabilize the post-remediation codebase and make behavior consistent with the repository's normative compliance model.
+### Dependency changes:
+- `SigningService(IDidSigner, IDidResolver)` — needs signer for `SignAsync`, resolver for `GetVerificationMethodAsync`
+- `VerificationService(IDidResolver, ICaveatProcessor, ...)` — only needs resolver for `ResolvePublicKeyAsync`
 
 ## Plan
 
-- [x] Baseline current failures (`dotnet test ZcapLd.sln`) and identify mismatches between implementation and compliance expectations
-- [x] Fix verification chain/proof behavior for local embedded-chain validation (`MUST-18`) and chain-limit behavior (`MUST-13`)
-- [x] Keep strict root-capability semantics and align legacy tests to delegated-capability restrictions where required
-- [x] Update compliance tests with root-incompatible setups (`MUST-12`, `MUST-20`, `SHOULD-05`) to equivalent delegated scenarios
-- [x] Run full tests, resolve residual failures, and capture final review notes in this file
+### Phase 1: New interfaces
+- [x] Create `IDidResolver.cs` — `ResolvePublicKeyAsync` + `GetVerificationMethodAsync`
+- [x] Create `IDidSigner.cs` — `SignAsync`
+- [x] Delete `IDidProvider.cs`
 
-## Verification Log
+### Phase 2: Core implementations
+- [x] Create `DidKeyResolver : IDidResolver` — extract `did:key:` resolution logic from `InMemoryDidProvider` (stateless, no secrets)
+- [x] Rename `CompositeDidProvider` → `CompositeDidResolver : IDidResolver` (routes resolver calls by DID method prefix)
 
-- [x] `dotnet test ZcapLd.sln` (baseline captured): `Failed: 14, Passed: 143, Total: 157`
-- [x] `dotnet test tests/ZcapLd.Core.Tests/ZcapLd.Core.Tests.csproj --filter FullyQualifiedName~Compliance`: `Failed: 3, Passed: 26, Total: 29` (post-first remediation checkpoint)
-- [x] `dotnet test ZcapLd.sln` (final): `Failed: 0, Passed: 157, Total: 157`
+### Phase 3: Update services
+- [x] Update `SigningService` — constructor takes `(IDidSigner, IDidResolver)`, field split
+- [x] Update `ISigningService` doc comments (references to `IDidProvider`)
+- [x] Update `VerificationService` — constructor takes `IDidResolver` instead of `IDidProvider`
+
+### Phase 4: Move InMemoryDidProvider out of core
+- [x] Move `InMemoryDidProvider` to test project as test helper (implements `IDidSigner, IDidResolver`)
+- [x] Update all test files to use relocated `InMemoryDidProvider`
+- [x] Update `ComplianceTestFixture` wiring
+- [x] Update examples with local `InMemoryDidProvider` copy
+
+### Phase 5: Update DI extensions
+- [x] Update ASP.NET DI extensions — register `DidKeyResolver` as `IDidResolver`, require user-provided `IDidSigner`, added `AddZcapDidSigner` + `AddZcapDidResolver` methods
+
+### Phase 6: Verify
+- [x] Build solution (`dotnet build ZcapLd.sln`) — 0 errors, 0 warnings
+- [x] Run full test suite (`dotnet test ZcapLd.sln`) — **Failed: 0, Passed: 187, Total: 187**
+- [x] Verify no references to `IDidProvider` remain in core or ASP.NET packages — confirmed clean
 
 ## Review
 
-- Verification service now distinguishes strict standalone delegation-proof checks from chain-context checks, enabling local embedded-chain validation while keeping malformed standalone first-level proofs rejected.
-- Chain-length violations now return `false` from verification flows instead of throwing.
-- Legacy tests that modeled root `allowedAction`/`caveat` behavior were migrated to delegated-capability scenarios, matching strict root semantics.
-- Normative tests `MUST-12`, `MUST-20`, and `SHOULD-05` now assert equivalent delegated scenarios that are compatible with strict root capability shape.
+Split `IDidProvider` into `IDidResolver` (public key resolution) and `IDidSigner` (signing operations) following Interface Segregation Principle. Removed insecure `InMemoryDidProvider` from the core NuGet package. Core now ships `DidKeyResolver` for did:key resolution and `CompositeDidResolver` for routing across DID methods. No default signer ships — consumers must provide their own backed by a secure key management system. ASP.NET DI extensions updated with `AddZcapDidSigner<T>()` and `AddZcapDidResolver<T>()` methods.
 
 ---
 
-# ZCAP-LD Compliance + Security Audit Plan
+# Pluggable Crypto Suite Abstraction - 2026-02-21
 
-**Date**: 2026-02-20  
-**Scope**: Entire repository (`src`, `tests`, `examples`, `docs`, `README`) against live ZCAP-LD spec and cryptosuite requirements.
+## Motivation
+
+DID methods (did:key, did:web) and signature algorithms (Ed25519, P-256, secp256k1) are orthogonal. Previously, `DidKeyResolver` only understood the `0xed01` multicodec prefix (Ed25519), and `VerificationService`/`SigningService` hardcoded `Ed25519Signer` static calls for verification. This locked consumers into Ed25519.
+
+## Design
+
+Three orthogonal abstractions:
+
+- **`ICryptoSuite`** — algorithm-specific sign/verify, proof type, key type, multicodec prefix, public key length
+- **`ICryptoSuiteProvider`** — registry for lookup by proof type or multicodec prefix
+- **`ResolvedKey`** — record carrying key bytes + key type from resolver to verification service
 
 ## Plan
 
-- [x] Pull and review the live ZCAP-LD specification
-- [x] Pull and review Ed25519/Data Integrity cryptosuite requirements
-- [x] Review all source code in `src/ZcapLd.Core`
-- [x] Review all tests in `tests/ZcapLd.Core.Tests`
-- [x] Validate documentation claims vs actual runtime behavior
-- [x] Run full test suite and reproduce critical failures
-- [x] Build compliance findings matrix
-- [x] Build security findings matrix
-- [x] Write remediation priorities
+### Phase 1: New types
+- [x] Create `ICryptoSuite.cs` — pluggable algorithm interface
+- [x] Create `ICryptoSuiteProvider.cs` — registry interface
+- [x] Create `CryptoSuiteProvider.cs` — default implementation (ConcurrentDictionary + List)
+- [x] Create `Ed25519CryptoSuite.cs` — thin adapter wrapping `Ed25519Signer`
+- [x] Create `ResolvedKey.cs` — `record ResolvedKey(byte[] PublicKeyBytes, string KeyType)`
 
-## Verification Log
+### Phase 2: Update interfaces
+- [x] `IDidResolver.ResolvePublicKeyAsync` returns `Task<ResolvedKey>` (was `Task<byte[]>`)
+- [x] `IVerificationService.ResolvePublicKeyAsync` returns `Task<ResolvedKey>`
 
-- [x] `dotnet test ZcapLd.sln`
-: Result: `Failed: 3, Passed: 93, Total: 96`, then `Test Run Aborted` due host crash.
-- [x] `dotnet test tests/ZcapLd.Core.Tests/ZcapLd.Core.Tests.csproj --filter FullyQualifiedName~ResolvePublicKey_WithInvalidDid_ShouldThrow`
-: Result: stack overflow in `VerificationService.ResolvePublicKeyAsync` recursion path.
+### Phase 3: Update implementations
+- [x] `DidKeyResolver` — new `ICryptoSuiteProvider` constructor + multicodec prefix lookup
+- [x] `CompositeDidResolver` — return type change
+- [x] `VerificationService` — `ICryptoSuiteProvider` dependency + suite dispatch by proof type
+- [x] `SignatureVerifier` — `ICryptoSuite` parameter for verify methods
+
+### Phase 4: Update consumers
+- [x] `InMemoryDidProvider` (tests + examples) — return `ResolvedKey`
+- [x] Test assertion fixes (`CapabilityServiceTests`, `InMemoryDidProviderTests`, `VerificationServiceTests`)
+- [x] ASP.NET DI extensions — register `Ed25519CryptoSuite`, `ICryptoSuiteProvider`, `AddZcapCryptoSuite<T>()`
+
+### Phase 5: New tests
+- [x] `CryptoSuiteProviderTests.cs` — 7 tests (registration, lookup, null handling, replacement)
+- [x] `Ed25519CryptoSuiteTests.cs` — 6 tests (properties, sign/verify, wrong key)
+
+### Phase 6: Verify
+- [x] Build solution — 0 errors, 0 warnings
+- [x] Run full test suite — **Failed: 0, Passed: 203, Total: 203**
+
+### Phase 7: Documentation
+- [x] Update `README.md` — feature list, Quick Start, security notes
+- [x] Update `ARCHITECTURE.md` — service interfaces, crypto section, extensibility
+- [x] Update `src/ZcapLd.Core/PACKAGE_README.md` — Quick Start, features, notes
+- [x] Update `docs/IMPLEMENTATION-COMPLETE.md` — project structure, code examples, compliance, future enhancements
 
 ## Review
 
-- [x] Detailed report written to `tasks/SECURITY-COMPLIANCE-REVIEW-2026-02-20.md`
-- [x] Compliance verdict recorded
-- [x] Security verdict recorded
-- [x] Highest-risk issues prioritized
-
-### Summary Verdict
-
-- `100% spec compliance`: **NOT achieved**
-- `Security posture`: **High risk; exploitable issues present**
-
-### Highest-Risk Findings (P0/P1)
-
-- `S-01`: stack-overflow denial of service in DID resolution recursion (`src/ZcapLd.Core/Services/VerificationService.cs`)
-- `S-02`: delegated capability forgery risk from missing parent-controller authorization enforcement (`src/ZcapLd.Core/Services/VerificationService.cs`)
-- `C-03`: capability chain format produced by delegator is non-compliant (missing embedded parent object) (`src/ZcapLd.Core/Services/CapabilityService.cs`)
-- `C-05`: invocation proof generation omits required invocation proof fields (`src/ZcapLd.Core/Services/SigningService.cs`)
-- `C-07`: proof generation/verification does not follow Ed25519Signature2020 canonicalization + proof-configuration algorithm (`src/ZcapLd.Core/Cryptography/JsonCanonicalizer.cs`)
-
-## Compliance Test Suite Task (tests-only, no remediation)
-
-- [x] Confirm task scope with user: add tests only, do not fix implementation
-- [x] Use normative MUST/SHOULD list from `docs/ZCAP-LD-SPECIFICATION-REQUIREMENTS.md` section 10
-- [x] Add explicit compliance unit tests for each MUST/SHOULD requirement
-- [x] Add explicit compliance integration tests for each MUST/SHOULD requirement
-- [x] Ensure each test includes requirement ID traceability
-- [x] Run the compliance suite to confirm compile/execution (failing assertions allowed)
-- [x] Document test suite location and execution command
-❌ No implementation found
-❌ Critical for security
-
-### Invocation (0% complete)
-❌ No verification logic
-❌ No method support
-
-### Caveats (20% complete)
-✅ Basic model structure
-✅ Two example implementations
-❌ No evaluation logic
-❌ No inheritance logic
-
-### Testing (10% complete)
-✅ Basic test structure
-❌ Only trivial tests
-❌ No spec compliance tests
-❌ No integration tests
+Added pluggable crypto suite abstraction (`ICryptoSuite`, `ICryptoSuiteProvider`, `CryptoSuiteProvider`, `Ed25519CryptoSuite`) and `ResolvedKey` record. DID methods and signature algorithms are now fully orthogonal — `DidKeyResolver` decodes any registered multicodec prefix, and `VerificationService` dispatches verification to the correct suite by proof type. All backward-compatible: parameterless constructors default to Ed25519. ASP.NET DI extended with `AddZcapCryptoSuite<T>()`. 203 tests passing.
 
 ---
 
-## Overall Status: 15-20% Complete
+# Crypto Refinement: MultibaseCodec, Dynamic Context URL, P-256 Suite - 2026-02-21
 
-**Blockers**: Core cryptography, proof creation, chain verification
-**Next Steps**: Phase 1 (Core Cryptography) must be completed first
-**Timeline**: 4-5 weeks to minimal compliance, 6-8 weeks to production-ready
+## Motivation
+
+Three deferred items from the crypto suite abstraction:
+1. Shared utilities (`CanonicalizeDocument`, `EncodeSignature`, `DecodeSignature`) lived on `Ed25519Signer` despite being algorithm-agnostic.
+2. `CapabilityService.DelegateCapabilityAsync` hardcoded the Ed25519 JSON-LD context URL — P-256 capabilities would get the wrong context.
+3. No P-256 (`ICryptoSuite`) implementation existed.
+
+## Plan
+
+### Part 1: Extract MultibaseCodec
+- [x] Create `MultibaseCodec.cs` — `Encode`, `Decode`, `CanonicalizeDocument` (algorithm-agnostic)
+- [x] Remove methods from `Ed25519Signer` (breaking change, no `[Obsolete]` wrappers)
+- [x] Update all callers: `SigningService`, `VerificationService`, `SignatureVerifier`, `DidKeyResolver`, `InMemoryDidProvider` (test helper), `Ed25519SignerTests`
+- [x] Create `MultibaseCodecTests.cs` — 10 tests
+
+### Part 2: Dynamic context URL
+- [x] Add `ContextUrl` property to `ICryptoSuite` + `Ed25519CryptoSuite`
+- [x] Add `GetByKeyType(string)` to `ICryptoSuiteProvider` + `CryptoSuiteProvider`
+- [x] Add `ResolveSuiteContextUrlAsync(string signerDid)` to `ISigningService` + `SigningService`
+- [x] Add `ICryptoSuiteProvider` dependency to `SigningService`
+- [x] Update `CapabilityService.DelegateCapabilityAsync` — dynamic context URL resolution
+- [x] Update ASP.NET DI wiring for `SigningService` with `ICryptoSuiteProvider`
+
+### Part 3: P-256 suite
+- [x] Create `EcPointCompression.cs` — internal helper for compressed EC point handling (P-256 curve equation via BigInteger)
+- [x] Create `P256CryptoSuite.cs` — full `ICryptoSuite` implementation using `System.Security.Cryptography.ECDsa` (zero new dependencies)
+- [x] Register P-256 in default providers: `DidKeyResolver`, `VerificationService`, `SigningService`
+- [x] Register P-256 in ASP.NET DI
+- [x] Create `EcPointCompressionTests.cs` — 7 tests
+- [x] Create `P256CryptoSuiteTests.cs` — 11 tests
+- [x] Add `InternalsVisibleTo` for test project access to internal helpers
+
+### Phase 4: Verify
+- [x] Build solution — 0 errors, 0 warnings (1 pre-existing doc warning)
+- [x] Run full test suite — **Failed: 0, Passed: 232, Total: 232**
+
+### Phase 5: Documentation
+- [x] Update `README.md` — feature list, security notes
+- [x] Update `ARCHITECTURE.md` — crypto section, service descriptions, extensibility
+- [x] Update `PACKAGE_README.md` — feature list, notes
+- [x] Update `tasks/todo.md`
+
+## Review
+
+Three refinements to the crypto layer:
+
+1. **MultibaseCodec extraction**: Moved algorithm-agnostic `CanonicalizeDocument`, `Encode`, and `Decode` from `Ed25519Signer` to a new `MultibaseCodec` static class. Clean breaking change — no deprecated wrappers. All 9 core callers and test/example sites updated.
+
+2. **Dynamic context URL**: Added `ContextUrl` to `ICryptoSuite`, `GetByKeyType` to `ICryptoSuiteProvider`, and `ResolveSuiteContextUrlAsync` to `ISigningService`. `CapabilityService` now resolves the correct JSON-LD security suite context URL from the signer's key type instead of hardcoding the Ed25519 URL.
+
+3. **P-256 suite**: `P256CryptoSuite` implements `ICryptoSuite` for NIST P-256 using built-in `System.Security.Cryptography.ECDsa` — zero new NuGet dependencies. Includes `EcPointCompression` for compressed public key handling (decompression via P-256 curve equation, exploiting p ≡ 3 mod 4 for efficient square root). IEEE P1363 signature format (64 bytes). Registered by default in all providers and ASP.NET DI.
+
+232 tests passing (29 new). Backward-compatible: parameterless constructors default to Ed25519 + P-256.
 
 ---
+
+# Invocation Replay Protection via Nonce Store - 2026-02-22
+
+## Motivation
+
+`Invocation.Id` auto-generates a `urn:uuid:` on construction, but nothing validated uniqueness — a signed invocation could be replayed indefinitely. Additionally, `invocation.Id` was excluded from the signed canonical document, meaning an attacker could swap the ID to bypass nonce checking while keeping a valid signature.
+
+## Plan
+
+### Part 1: Nonce store abstraction
+- [x] Create `INonceStore.cs` — single-method interface: `TryMarkAsUsedAsync` (atomic check-and-record)
+- [x] Create `NullNonceStore.cs` — internal no-op for backward compatibility
+- [x] Create `InMemoryNonceStore.cs` — `ConcurrentDictionary` + `TimeProvider` + periodic purge
+
+### Part 2: Bind invocation ID to signature
+- [x] Add `id = invocation.Id` to canonical document in `SigningService.SignInvocationAsync`
+- [x] Add `id = invocation.Id` to canonical document in `VerificationService.VerifyInvocationAsync`
+
+### Part 3: Integration
+- [x] Add `INonceStore` + `TimeSpan _nonceWindow` fields to `VerificationService`
+- [x] Add 5th constructor with nonce store; existing 4 chain with `NullNonceStore.Instance`
+- [x] Add nonce check at end of `VerifyInvocationAsync` (after all validation passes)
+- [x] Register `InMemoryNonceStore` in ASP.NET DI, add `AddZcapReplayProtection` extension methods
+
+### Phase 4: Tests
+- [x] `InMemoryNonceStoreTests.cs` — 8 tests (fresh, replay, expiry, concurrent, null input)
+- [x] `NullNonceStoreTests.cs` — 1 test
+- [x] `VerificationServiceReplayTests.cs` — 4 tests (replay rejected, different IDs, null store, invalid doesn't consume)
+
+### Phase 5: Verify
+- [x] Build solution — 0 errors
+- [x] Run full test suite — **Failed: 0, Passed: 245, Total: 245**
+
+## Review
+
+Added invocation replay protection via pluggable `INonceStore`. The nonce store uses a single atomic `TryMarkAsUsedAsync` method to eliminate TOCTOU race conditions. `InMemoryNonceStore` uses `ConcurrentDictionary.TryAdd` for thread-safe atomic insert, with `TimeProvider` for testable time and periodic expired-entry purging. Backward-compatible: existing `VerificationService` constructors chain with `NullNonceStore.Instance` (no-op). Fixed security gap where `invocation.Id` was not included in the signed payload — it is now bound to the signature to prevent ID-swap attacks. ASP.NET DI registers `InMemoryNonceStore` by default with `AddZcapReplayProtection` extension methods for custom stores.
+
+245 tests passing (13 new). Default nonce window: 5 minutes.

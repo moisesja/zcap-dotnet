@@ -3,11 +3,13 @@ using Xunit;
 using ZcapLd.Core.Exceptions;
 using ZcapLd.Core.Models;
 using ZcapLd.Core.Services;
+using ZcapLd.Core.Tests.Helpers;
 
 namespace ZcapLd.Core.Tests.Services;
 
 public class VerificationServiceTests
 {
+    private readonly InMemoryDidProvider _didProvider;
     private readonly SigningService _signingService;
     private readonly CapabilityService _capabilityService;
     private readonly CaveatProcessor _caveatProcessor;
@@ -15,9 +17,10 @@ public class VerificationServiceTests
 
     public VerificationServiceTests()
     {
-        _signingService = new SigningService();
+        _didProvider = new InMemoryDidProvider();
+        _signingService = new SigningService(_didProvider, _didProvider);
         _caveatProcessor = new CaveatProcessor();
-        _verificationService = new VerificationService(_signingService, _caveatProcessor);
+        _verificationService = new VerificationService(_didProvider, _caveatProcessor);
         _capabilityService = new CapabilityService(_signingService);
     }
 
@@ -44,7 +47,7 @@ public class VerificationServiceTests
     {
         // Arrange
         var parentDid = "did:key:z6MkParent";
-        _signingService.GenerateAndRegisterKeyPair(parentDid);
+        _didProvider.GenerateAndRegisterKeyPair(parentDid);
 
         var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
             parentDid,
@@ -114,7 +117,7 @@ public class VerificationServiceTests
     {
         // Arrange
         var parentDid = "did:key:z6MkParent";
-        _signingService.GenerateAndRegisterKeyPair(parentDid);
+        _didProvider.GenerateAndRegisterKeyPair(parentDid);
 
         var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
             parentDid,
@@ -137,6 +140,62 @@ public class VerificationServiceTests
         result.Should().BeFalse();
     }
 
+    [Fact]
+    public async Task VerifyCapabilityProof_WithTamperedVerificationMethod_ShouldReturnFalse()
+    {
+        // Arrange
+        var parentDid = "did:key:z6MkParent";
+        var attackerDid = "did:key:z6MkAttacker";
+        _didProvider.GenerateAndRegisterKeyPair(parentDid);
+        _didProvider.GenerateAndRegisterKeyPair(attackerDid);
+
+        var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
+            parentDid,
+            "https://example.com/resource",
+            new[] { "read", "write" });
+
+        var delegatedCapability = await _capabilityService.DelegateCapabilityAsync(
+            rootCapability,
+            "did:key:z6MkChild",
+            new[] { "read" },
+            DateTime.UtcNow.AddDays(30));
+
+        delegatedCapability.Proof!.VerificationMethod = await _didProvider.GetVerificationMethodAsync(attackerDid);
+
+        // Act
+        var result = await _verificationService.VerifyCapabilityProofAsync(delegatedCapability);
+
+        // Assert
+        result.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task VerifyCapabilityProof_WithTamperedCapabilityChain_ShouldReturnFalse()
+    {
+        // Arrange
+        var parentDid = "did:key:z6MkParent";
+        _didProvider.GenerateAndRegisterKeyPair(parentDid);
+
+        var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
+            parentDid,
+            "https://example.com/resource",
+            new[] { "read", "write" });
+
+        var delegatedCapability = await _capabilityService.DelegateCapabilityAsync(
+            rootCapability,
+            "did:key:z6MkChild",
+            new[] { "read" },
+            DateTime.UtcNow.AddDays(30));
+
+        delegatedCapability.Proof!.CapabilityChain[0] = "urn:zcap:root:tampered";
+
+        // Act
+        var result = await _verificationService.VerifyCapabilityProofAsync(delegatedCapability);
+
+        // Assert
+        result.Should().BeFalse();
+    }
+
     #endregion
 
     #region Capability Chain Verification Tests
@@ -146,7 +205,7 @@ public class VerificationServiceTests
     {
         // Arrange
         var parentDid = "did:key:z6MkParent";
-        _signingService.GenerateAndRegisterKeyPair(parentDid);
+        _didProvider.GenerateAndRegisterKeyPair(parentDid);
 
         var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
             parentDid,
@@ -167,6 +226,46 @@ public class VerificationServiceTests
     }
 
     [Fact]
+    public async Task VerifyCapabilityChain_SelfSignedDelegationWithoutEmbeddedParent_ShouldReturnFalse()
+    {
+        // Arrange
+        var rootDid = "did:key:z6MkRoot";
+        var childDid = "did:key:z6MkChild";
+        _didProvider.GenerateAndRegisterKeyPair(rootDid);
+        _didProvider.GenerateAndRegisterKeyPair(childDid);
+
+        var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
+            rootDid,
+            "https://example.com/resource",
+            new[] { "read", "write" });
+
+        var suiteContext = await _signingService.ResolveSuiteContextUrlAsync(childDid);
+        var delegatedCapability = new Capability
+        {
+            Context = new object[] { "https://w3id.org/zcap/v1", suiteContext },
+            Id = $"urn:uuid:{Guid.NewGuid()}",
+            ParentCapability = rootCapability.Id,
+            Controller = childDid,
+            InvocationTarget = rootCapability.InvocationTarget,
+            AllowedAction = new[] { "read" },
+            Expires = DateTime.UtcNow.AddDays(5)
+        };
+
+        // Malicious chain omits the embedded immediate parent object.
+        delegatedCapability.Proof = await _signingService.SignCapabilityAsync(
+            delegatedCapability,
+            childDid,
+            "capabilityDelegation",
+            new object[] { rootCapability.Id });
+
+        // Act
+        var result = await _verificationService.VerifyCapabilityChainAsync(delegatedCapability);
+
+        // Assert
+        result.Should().BeFalse();
+    }
+
+    [Fact]
     public async Task VerifyCapabilityChain_ValidMultiLevelChain_ShouldReturnTrue()
     {
         // Arrange
@@ -174,9 +273,9 @@ public class VerificationServiceTests
         var controller2 = "did:key:z6MkController2";
         var controller3 = "did:key:z6MkController3";
 
-        _signingService.GenerateAndRegisterKeyPair(controller1);
-        _signingService.GenerateAndRegisterKeyPair(controller2);
-        _signingService.GenerateAndRegisterKeyPair(controller3);
+        _didProvider.GenerateAndRegisterKeyPair(controller1);
+        _didProvider.GenerateAndRegisterKeyPair(controller2);
+        _didProvider.GenerateAndRegisterKeyPair(controller3);
 
         // Create root
         var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
@@ -214,7 +313,7 @@ public class VerificationServiceTests
         {
             var did = $"did:key:z6MkController{i}";
             controllers.Add(did);
-            _signingService.GenerateAndRegisterKeyPair(did);
+            _didProvider.GenerateAndRegisterKeyPair(did);
         }
 
         var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
@@ -244,7 +343,7 @@ public class VerificationServiceTests
     {
         // Arrange
         var parentDid = "did:key:z6MkParent";
-        _signingService.GenerateAndRegisterKeyPair(parentDid);
+        _didProvider.GenerateAndRegisterKeyPair(parentDid);
 
         var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
             parentDid,
@@ -274,7 +373,7 @@ public class VerificationServiceTests
     {
         // Arrange
         var parentDid = "did:key:z6MkParent";
-        _signingService.GenerateAndRegisterKeyPair(parentDid);
+        _didProvider.GenerateAndRegisterKeyPair(parentDid);
 
         var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
             parentDid,
@@ -300,7 +399,7 @@ public class VerificationServiceTests
     {
         // Arrange
         var parentDid = "did:key:z6MkParent";
-        _signingService.GenerateAndRegisterKeyPair(parentDid);
+        _didProvider.GenerateAndRegisterKeyPair(parentDid);
 
         var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
             parentDid,
@@ -332,7 +431,7 @@ public class VerificationServiceTests
     {
         // Arrange
         var controllerDid = "did:key:z6MkController";
-        _signingService.GenerateAndRegisterKeyPair(controllerDid);
+        _didProvider.GenerateAndRegisterKeyPair(controllerDid);
 
         var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
             controllerDid,
@@ -362,8 +461,8 @@ public class VerificationServiceTests
         // Arrange
         var rootControllerDid = "did:key:z6MkRootController";
         var delegatedControllerDid = "did:key:z6MkDelegatedController";
-        _signingService.GenerateAndRegisterKeyPair(rootControllerDid);
-        _signingService.GenerateAndRegisterKeyPair(delegatedControllerDid);
+        _didProvider.GenerateAndRegisterKeyPair(rootControllerDid);
+        _didProvider.GenerateAndRegisterKeyPair(delegatedControllerDid);
 
         var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
             rootControllerDid,
@@ -393,11 +492,39 @@ public class VerificationServiceTests
     }
 
     [Fact]
+    public async Task VerifyInvocation_WithMismatchedCapabilityReference_ShouldReturnFalse()
+    {
+        // Arrange
+        var controllerDid = "did:key:z6MkController";
+        _didProvider.GenerateAndRegisterKeyPair(controllerDid);
+
+        var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
+            controllerDid,
+            "https://example.com/resource",
+            new[] { "read", "write" });
+
+        var invocation = new Invocation
+        {
+            Capability = "urn:uuid:not-the-capability-under-verification",
+            CapabilityAction = "read",
+            InvocationTarget = "https://example.com/resource"
+        };
+
+        invocation.Proof = await _signingService.SignInvocationAsync(invocation, controllerDid);
+
+        // Act
+        var result = await _verificationService.VerifyInvocationAsync(invocation, rootCapability);
+
+        // Assert
+        result.Should().BeFalse();
+    }
+
+    [Fact]
     public async Task VerifyInvocation_WithInvalidTarget_ShouldReturnFalse()
     {
         // Arrange
         var controllerDid = "did:key:z6MkController";
-        _signingService.GenerateAndRegisterKeyPair(controllerDid);
+        _didProvider.GenerateAndRegisterKeyPair(controllerDid);
 
         var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
             controllerDid,
@@ -425,7 +552,7 @@ public class VerificationServiceTests
     {
         // Arrange
         var controllerDid = "did:key:z6MkController";
-        _signingService.GenerateAndRegisterKeyPair(controllerDid);
+        _didProvider.GenerateAndRegisterKeyPair(controllerDid);
 
         var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
             controllerDid,
@@ -454,7 +581,7 @@ public class VerificationServiceTests
     {
         // Arrange
         var controllerDid = "did:key:z6MkController";
-        _signingService.GenerateAndRegisterKeyPair(controllerDid);
+        _didProvider.GenerateAndRegisterKeyPair(controllerDid);
 
         var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
             controllerDid,
@@ -481,7 +608,7 @@ public class VerificationServiceTests
     {
         // Arrange
         var controllerDid = "did:key:z6MkController";
-        _signingService.GenerateAndRegisterKeyPair(controllerDid);
+        _didProvider.GenerateAndRegisterKeyPair(controllerDid);
 
         var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
             controllerDid,
@@ -506,13 +633,42 @@ public class VerificationServiceTests
     }
 
     [Fact]
+    public async Task VerifyInvocation_WithMismatchedProofFields_ShouldReturnFalse()
+    {
+        // Arrange
+        var controllerDid = "did:key:z6MkController";
+        _didProvider.GenerateAndRegisterKeyPair(controllerDid);
+
+        var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
+            controllerDid,
+            "https://example.com/resource",
+            new[] { "read" });
+
+        var invocation = new Invocation
+        {
+            Capability = rootCapability.Id,
+            CapabilityAction = "read",
+            InvocationTarget = "https://example.com/resource"
+        };
+
+        invocation.Proof = await _signingService.SignInvocationAsync(invocation, controllerDid);
+        invocation.Proof.CapabilityAction = "write";
+
+        // Act
+        var result = await _verificationService.VerifyInvocationAsync(invocation, rootCapability);
+
+        // Assert
+        result.Should().BeFalse();
+    }
+
+    [Fact]
     public async Task VerifyInvocation_WithCaveats_ShouldEvaluateThem()
     {
         // Arrange
         var rootControllerDid = "did:key:z6MkRootController";
         var delegatedControllerDid = "did:key:z6MkDelegatedController";
-        _signingService.GenerateAndRegisterKeyPair(rootControllerDid);
-        _signingService.GenerateAndRegisterKeyPair(delegatedControllerDid);
+        _didProvider.GenerateAndRegisterKeyPair(rootControllerDid);
+        _didProvider.GenerateAndRegisterKeyPair(delegatedControllerDid);
 
         var expiredCaveat = new ExpirationCaveat
         {
@@ -549,6 +705,76 @@ public class VerificationServiceTests
 
     #endregion
 
+    #region Revocation Tests
+
+    [Fact]
+    public async Task VerifyCapabilityChain_WithRevokedLeaf_ShouldReturnFalse()
+    {
+        // Arrange
+        var rootControllerDid = "did:key:z6MkRootController";
+        var delegatedControllerDid = "did:key:z6MkDelegatedController";
+        _didProvider.GenerateAndRegisterKeyPair(rootControllerDid);
+        _didProvider.GenerateAndRegisterKeyPair(delegatedControllerDid);
+
+        var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
+            rootControllerDid,
+            "https://example.com/resource",
+            new[] { "read", "write" });
+
+        var delegatedCapability = await _capabilityService.DelegateCapabilityAsync(
+            rootCapability,
+            delegatedControllerDid,
+            new[] { "read" },
+            DateTime.UtcNow.AddDays(5));
+
+        await _verificationService.RevokeCapabilityAsync(delegatedCapability.Id, rootControllerDid);
+
+        // Act
+        var result = await _verificationService.VerifyCapabilityChainAsync(delegatedCapability);
+
+        // Assert
+        result.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task VerifyInvocation_WithRevokedCapability_ShouldReturnFalse()
+    {
+        // Arrange
+        var rootControllerDid = "did:key:z6MkRootController";
+        var delegatedControllerDid = "did:key:z6MkDelegatedController";
+        _didProvider.GenerateAndRegisterKeyPair(rootControllerDid);
+        _didProvider.GenerateAndRegisterKeyPair(delegatedControllerDid);
+
+        var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
+            rootControllerDid,
+            "https://example.com/resource",
+            new[] { "read", "write" });
+
+        var delegatedCapability = await _capabilityService.DelegateCapabilityAsync(
+            rootCapability,
+            delegatedControllerDid,
+            new[] { "read" },
+            DateTime.UtcNow.AddDays(5));
+
+        var invocation = new Invocation
+        {
+            Capability = delegatedCapability.Id,
+            CapabilityAction = "read",
+            InvocationTarget = delegatedCapability.InvocationTarget
+        };
+        invocation.Proof = await _signingService.SignInvocationAsync(invocation, delegatedControllerDid);
+
+        await _verificationService.RevokeCapabilityAsync(delegatedCapability.Id, rootControllerDid);
+
+        // Act
+        var result = await _verificationService.VerifyInvocationAsync(invocation, delegatedCapability);
+
+        // Assert
+        result.Should().BeFalse();
+    }
+
+    #endregion
+
     #region DID Resolution Tests
 
     [Fact]
@@ -556,15 +782,15 @@ public class VerificationServiceTests
     {
         // Arrange
         var did = "did:key:z6MkTest";
-        var (privateKey, publicKey) = _signingService.GenerateAndRegisterKeyPair(did);
-        var verificationMethod = await _signingService.GetVerificationMethodAsync(did);
+        var (privateKey, publicKey) = _didProvider.GenerateAndRegisterKeyPair(did);
+        var verificationMethod = await _didProvider.GetVerificationMethodAsync(did);
 
         // Act
         var resolvedKey = await _verificationService.ResolvePublicKeyAsync(verificationMethod);
 
         // Assert
         resolvedKey.Should().NotBeNull();
-        resolvedKey.Should().HaveCount(32); // Ed25519 public keys are 32 bytes
+        resolvedKey.PublicKeyBytes.Should().HaveCount(32); // Ed25519 public keys are 32 bytes
     }
 
     [Fact]

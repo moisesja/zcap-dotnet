@@ -251,6 +251,7 @@ ClientBin/
 *~
 *.dbmdl
 *.dbproj.schemaview
+examples/ZcapLd.RevocationEndpointsDemo/revocations-demo.db
 *.jfm
 *.pfx
 *.publishsettings
