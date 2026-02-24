@@ -1,3 +1,14 @@
+> **HISTORICAL DOCUMENT — DO NOT USE FOR CURRENT STATUS**
+>
+> This summary was produced on 2026-02-20 when the codebase had stub
+> cryptographic implementations. The project has since achieved 95%+
+> W3C ZCAP-LD compliance with 245 passing tests, production-ready crypto
+> (Ed25519 + P-256), revocation, replay protection, and an ASP.NET adapter.
+>
+> For current status see [`docs/IMPLEMENTATION-COMPLETE.md`](../docs/IMPLEMENTATION-COMPLETE.md).
+
+---
+
 # W3C ZCAP-LD Specification Compliance - Executive Summary
 
 **Date**: 2026-02-20

@@ -39,10 +39,17 @@ using ZcapLd.Core.Services;
 // Wire up services — in production, replace InMemoryDidProvider with your
 // IDidSigner (HSM/Key Vault) and IDidResolver implementations.
 var didProvider = new InMemoryDidProvider(); // test helper: IDidSigner + IDidResolver
-var signingService = new SigningService(didProvider, didProvider);
+
+var suiteProvider = new CryptoSuiteProvider();
+suiteProvider.Register(new Ed25519CryptoSuite());
+
+var signingService = new SigningService(didProvider, didProvider, suiteProvider);
 var capabilityService = new CapabilityService(signingService);
 var caveatProcessor = new CaveatProcessor();
-var verificationService = new VerificationService(didProvider, caveatProcessor);
+var revocationService = new RevocationService(new InMemoryRevocationStore());
+var nonceStore = new InMemoryNonceStore();
+var verificationService = new VerificationService(
+    didProvider, caveatProcessor, suiteProvider, revocationService, nonceStore);
 
 var rootDid = "did:key:z6MkRoot";
 var leafDid = "did:key:z6MkLeaf";
