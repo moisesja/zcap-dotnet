@@ -5,7 +5,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <PackageId>ZcapLd.AspNetCore</PackageId>
-    <Version>0.1.0</Version>
+    <Version>$(ZcapLdVersion)</Version>
     <Authors>Moises E Jaramillo</Authors>
     <Description>ASP.NET Core endpoint adapter for ZCAP-LD revocation workflows with pluggable revocation storage backends.</Description>
     <PackageTags>zcap;zcap-ld;aspnetcore;minimal-api;authorization;revocation;did</PackageTags>

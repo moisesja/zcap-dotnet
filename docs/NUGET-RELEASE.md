@@ -66,9 +66,10 @@ dotnet pack src/ZcapLd.AspNetCore/ZcapLd.AspNetCore.csproj -c Release
 
 ## Versioning Strategy
 
-- Tags are package-scoped (`core-v*`, `aspnet-v*`) to support independent release flow.
-- Each `.csproj` keeps a default development version.
+- `ZcapLd.Core` and `ZcapLd.AspNetCore` are version-synchronized via `ZcapLdVersion`
+  in `Directory.Build.props`.
 - Release workflows override package versions from tag/input at pack time.
+- Use the same semantic version for both package release workflows.
 
 ## Troubleshooting
 

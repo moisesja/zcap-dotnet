@@ -5,7 +5,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <PackageId>ZcapLd.Core</PackageId>
-    <Version>0.1.0</Version>
+    <Version>$(ZcapLdVersion)</Version>
     <Authors>Moises E Jaramillo</Authors>
     <Description>.NET implementation of W3C ZCAP-LD for creating, delegating, and verifying authorization capabilities.</Description>
     <PackageTags>zcap;zcap-ld;authorization;capability;did;linked-data;wallet</PackageTags>

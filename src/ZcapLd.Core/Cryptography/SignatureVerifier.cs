@@ -12,6 +12,7 @@ public class SignatureVerifier
     /// </summary>
     /// <param name="capability">The capability to verify</param>
     /// <param name="publicKey">The public key for verification</param>
+    /// <param name="suite">The crypto suite to use for verification</param>
     /// <returns>True if signature is valid</returns>
     public static bool VerifyCapabilitySignature(Capability capability, byte[] publicKey, ICryptoSuite suite)
     {
@@ -20,22 +21,10 @@ public class SignatureVerifier
 
         try
         {
-            // Create a copy of the capability without the proof for verification
-            var capabilityForVerification = new Capability
-            {
-                Id = capability.Id,
-                Context = capability.Context,
-                Controller = capability.Controller,
-                InvocationTarget = capability.InvocationTarget,
-                AllowedAction = capability.AllowedAction,
-                Expires = capability.Expires,
-                ParentCapability = capability.ParentCapability,
-                Caveat = capability.Caveat
-                // Note: Proof is excluded for signature verification
-            };
-
-            // Canonicalize the document
-            var canonicalizedData = MultibaseCodec.CanonicalizeDocument(capabilityForVerification);
+            var capabilityForVerification = ProofSigningPayloadBuilder.CloneCapabilityWithoutProof(capability);
+            var canonicalizedData = ProofSigningPayloadBuilder.CanonicalizeCapabilityPayload(
+                capabilityForVerification,
+                capability.Proof);
 
             // Decode the signature
             var signature = MultibaseCodec.Decode(capability.Proof.ProofValue);
@@ -63,17 +52,10 @@ public class SignatureVerifier
 
         try
         {
-            // Create a copy of the invocation without the proof for verification
-            var invocationForVerification = new Invocation
-            {
-                Capability = invocation.Capability,
-                CapabilityAction = invocation.CapabilityAction,
-                InvocationTarget = invocation.InvocationTarget
-                // Note: Proof is excluded for signature verification
-            };
-
-            // Canonicalize the document
-            var canonicalizedData = MultibaseCodec.CanonicalizeDocument(invocationForVerification);
+            var invocationForVerification = ProofSigningPayloadBuilder.CloneInvocationWithoutProof(invocation);
+            var canonicalizedData = ProofSigningPayloadBuilder.CanonicalizeInvocationPayload(
+                invocationForVerification,
+                invocation.Proof);
 
             // Decode the signature
             var signature = MultibaseCodec.Decode(invocation.Proof.ProofValue);

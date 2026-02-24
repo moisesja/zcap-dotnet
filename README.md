@@ -178,6 +178,7 @@ dotnet pack src/ZcapLd.AspNetCore/ZcapLd.AspNetCore.csproj -c Release
 - ASP.NET Adapter CI: `.github/workflows/ci-aspnet.yml`
 - Core publish: `.github/workflows/release-core-nuget.yml` on `core-v*.*.*` tags
 - ASP.NET adapter publish: `.github/workflows/release-aspnet-nuget.yml` on `aspnet-v*.*.*` tags
+- Shared package version source: `Directory.Build.props` (`ZcapLdVersion`)
 - Secrets:
   - Core: `NUGET_API_KEY_CORE` (fallback `NUGET_API_KEY`)
   - ASP.NET adapter: `NUGET_API_KEY_ASPNET` (fallback `NUGET_API_KEY`)

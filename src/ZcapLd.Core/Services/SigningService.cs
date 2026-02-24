@@ -1,4 +1,5 @@
 using ZcapLd.Core.Cryptography;
+using ZcapLd.Core.Exceptions;
 using ZcapLd.Core.Models;
 
 namespace ZcapLd.Core.Services;
@@ -55,43 +56,30 @@ public class SigningService : ISigningService
         if (string.IsNullOrEmpty(signerDid))
             throw new ArgumentException("Signer DID cannot be null or empty", nameof(signerDid));
 
-        // Create a copy of the capability without the proof
-        var capabilityWithoutProof = new Capability
-        {
-            Context = capability.Context,
-            Id = capability.Id,
-            Controller = capability.Controller,
-            InvocationTarget = capability.InvocationTarget,
-            AllowedAction = capability.AllowedAction,
-            Expires = capability.Expires,
-            ParentCapability = capability.ParentCapability,
-            Caveat = capability.Caveat,
-            Proof = null // Explicitly null for signing
-        };
+        if (string.IsNullOrWhiteSpace(proofPurpose))
+            throw new ArgumentException("Proof purpose cannot be null or empty", nameof(proofPurpose));
 
-        // TODO S-03: Full cryptographic binding of proof metadata requires more careful
-        // handling of DateTime serialization. For now, we sign only the document.
-        // This is a known limitation - proof metadata (created, verificationMethod, etc.)
-        // can be modified without invalidating the signature.
-
-        // Canonicalize and sign via provider
-        var canonicalBytes = MultibaseCodec.CanonicalizeDocument(capabilityWithoutProof);
-        var result = await _signer.SignAsync(signerDid, canonicalBytes);
-        var proofValue = MultibaseCodec.Encode(result.Signature);
-
-        // Get verification method
+        var capabilityWithoutProof = ProofSigningPayloadBuilder.CloneCapabilityWithoutProof(capability);
+        var suite = await ResolveSuiteForDidAsync(signerDid);
         var verificationMethod = await _resolver.GetVerificationMethodAsync(signerDid);
+        var created = DateTime.UtcNow;
+        var proofType = suite.ProofType;
+        var normalizedChain = capabilityChain ?? Array.Empty<object>();
 
-        // Create the proof
         var proof = new Proof
         {
-            Type = result.SignatureType,
-            Created = DateTime.UtcNow,
+            Type = proofType,
+            Created = created,
             ProofPurpose = proofPurpose,
             VerificationMethod = verificationMethod,
-            CapabilityChain = capabilityChain ?? Array.Empty<object>(),
-            ProofValue = proofValue
+            CapabilityChain = normalizedChain,
+            ProofValue = string.Empty
         };
+
+        var canonicalBytes = ProofSigningPayloadBuilder.CanonicalizeCapabilityPayload(capabilityWithoutProof, proof);
+        var result = await _signer.SignAsync(signerDid, canonicalBytes);
+        ValidateSignatureType(result.SignatureType, proofType);
+        proof.ProofValue = MultibaseCodec.Encode(result.Signature);
 
         return proof;
     }
@@ -107,39 +95,32 @@ public class SigningService : ISigningService
         if (string.IsNullOrEmpty(signerDid))
             throw new ArgumentException("Signer DID cannot be null or empty", nameof(signerDid));
 
-        // Create a copy of the invocation without the proof for signing
-        // The id is included in the signed payload for replay protection (nonce binding)
-        var invocationWithoutProof = new
-        {
-            id = invocation.Id,
-            capability = invocation.Capability,
-            capabilityAction = invocation.CapabilityAction,
-            invocationTarget = invocation.InvocationTarget
-        };
-
-        // Canonicalize and sign via provider
-        var canonicalBytes = MultibaseCodec.CanonicalizeDocument(invocationWithoutProof);
-        var result = await _signer.SignAsync(signerDid, canonicalBytes);
-        var proofValue = MultibaseCodec.Encode(result.Signature);
-
-        // Get verification method
+        var invocationWithoutProof = ProofSigningPayloadBuilder.CloneInvocationWithoutProof(invocation);
+        var suite = await ResolveSuiteForDidAsync(signerDid);
         var verificationMethod = await _resolver.GetVerificationMethodAsync(signerDid);
+        var created = DateTime.UtcNow;
+        var proofType = suite.ProofType;
 
         // COMPLIANCE FIX C-05: Create the invocation proof with required fields
         // Per spec, invocation proofs MUST include capability, invocationTarget, and capabilityAction
         var proof = new Proof
         {
-            Type = result.SignatureType,
-            Created = DateTime.UtcNow,
+            Type = proofType,
+            Created = created,
             ProofPurpose = "capabilityInvocation",
             VerificationMethod = verificationMethod,
             CapabilityChain = Array.Empty<object>(), // Invocation proofs don't have chains
-            ProofValue = proofValue,
+            ProofValue = string.Empty,
             // Required invocation proof fields:
             Capability = invocation.Capability,
             InvocationTarget = invocation.InvocationTarget,
             CapabilityAction = invocation.CapabilityAction
         };
+
+        var canonicalBytes = ProofSigningPayloadBuilder.CanonicalizeInvocationPayload(invocationWithoutProof, proof);
+        var result = await _signer.SignAsync(signerDid, canonicalBytes);
+        ValidateSignatureType(result.SignatureType, proofType);
+        proof.ProofValue = MultibaseCodec.Encode(result.Signature);
 
         return proof;
     }
@@ -152,11 +133,25 @@ public class SigningService : ISigningService
         if (string.IsNullOrEmpty(signerDid))
             throw new ArgumentException("Signer DID cannot be null or empty", nameof(signerDid));
 
-        var resolvedKey = await _resolver.ResolvePublicKeyAsync(signerDid);
-        var suite = _suiteProvider.GetByKeyType(resolvedKey.KeyType)
-            ?? throw new Exceptions.CryptographicException(
-                $"No crypto suite registered for key type: {resolvedKey.KeyType}");
+        var suite = await ResolveSuiteForDidAsync(signerDid);
 
         return suite.ContextUrl;
+    }
+
+    private async Task<ICryptoSuite> ResolveSuiteForDidAsync(string signerDid)
+    {
+        var resolvedKey = await _resolver.ResolvePublicKeyAsync(signerDid);
+        return _suiteProvider.GetByKeyType(resolvedKey.KeyType)
+            ?? throw new CryptographicException(
+                $"No crypto suite registered for key type: {resolvedKey.KeyType}");
+    }
+
+    private static void ValidateSignatureType(string actualType, string expectedType)
+    {
+        if (!string.Equals(actualType, expectedType, StringComparison.Ordinal))
+        {
+            throw new CryptographicException(
+                $"Signer returned signature type '{actualType}' but expected '{expectedType}'.");
+        }
     }
 }

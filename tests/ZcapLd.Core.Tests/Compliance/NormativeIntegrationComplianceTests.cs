@@ -39,7 +39,7 @@ public class NormativeIntegrationComplianceTests
             delegated,
             attackerDid,
             "capabilityDelegation",
-            new object[] { root.Id });
+            new object[] { root.Id, root });
 
         var result = await fixture.VerificationService.VerifyCapabilityProofAsync(delegated);
         result.Should().BeFalse("MUST-09 requires delegation signatures to be authorized by the parent controller.");
@@ -206,7 +206,7 @@ public class NormativeIntegrationComplianceTests
             level1,
             rootDid,
             "capabilityDelegation",
-            new object[] { root.Id });
+            new object[] { root.Id, root });
 
         var level2 = new Capability
         {

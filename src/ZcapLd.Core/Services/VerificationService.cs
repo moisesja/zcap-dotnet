@@ -161,7 +161,6 @@ public class VerificationService : IVerificationService
         }
 
         if (parentCapability != null &&
-            !string.IsNullOrWhiteSpace(parentCapability.Controller) &&
             !IsControllerAuthorized(capability.Proof.VerificationMethod, parentCapability))
         {
             return false;
@@ -179,23 +178,10 @@ public class VerificationService : IVerificationService
             ?? throw new CapabilityValidationException(
                 $"Unsupported proof type: {capability.Proof.Type}");
 
-        // Serialize the capability without the proof
-        var capabilityWithoutProof = new Capability
-        {
-            Context = capability.Context,
-            Id = capability.Id,
-            ParentCapability = capability.ParentCapability,
-            Controller = capability.Controller,
-            InvocationTarget = capability.InvocationTarget,
-            Expires = capability.Expires,
-            AllowedAction = capability.AllowedAction,
-            Caveat = capability.Caveat,
-            Proof = null
-        };
-
-        // TODO S-03: Full cryptographic binding of proof metadata deferred due to
-        // DateTime serialization complexity. Currently verifying document only.
-        var canonicalBytes = MultibaseCodec.CanonicalizeDocument(capabilityWithoutProof);
+        var capabilityWithoutProof = ProofSigningPayloadBuilder.CloneCapabilityWithoutProof(capability);
+        var canonicalBytes = ProofSigningPayloadBuilder.CanonicalizeCapabilityPayload(
+            capabilityWithoutProof,
+            capability.Proof);
         var signatureBytes = MultibaseCodec.Decode(capability.Proof.ProofValue);
 
         return suite.Verify(canonicalBytes, signatureBytes, resolvedKey.PublicKeyBytes);
@@ -214,12 +200,27 @@ public class VerificationService : IVerificationService
 
         try
         {
+            if (string.IsNullOrWhiteSpace(invocation.Id))
+            {
+                return false;
+            }
+
             // 1. Verify the capability chain is valid
             if (!await VerifyCapabilityChainAsync(capability))
                 return false;
 
             // 2. Verify invocation proof exists and has correct purpose
             if (invocation.Proof == null || invocation.Proof.ProofPurpose != "capabilityInvocation")
+                return false;
+
+            // 2a. Invocation MUST reference the capability being verified
+            if (!string.Equals(invocation.Capability, capability.Id, StringComparison.Ordinal))
+                return false;
+
+            // 2b. Proof payload fields MUST be semantically consistent with invocation fields
+            if (!string.Equals(invocation.Proof.Capability as string, invocation.Capability, StringComparison.Ordinal) ||
+                !string.Equals(invocation.Proof.CapabilityAction, invocation.CapabilityAction, StringComparison.Ordinal) ||
+                !string.Equals(invocation.Proof.InvocationTarget, invocation.InvocationTarget, StringComparison.Ordinal))
                 return false;
 
             // 3. Verify invocation target matches capability
@@ -237,15 +238,10 @@ public class VerificationService : IVerificationService
                 ?? throw new CapabilityValidationException(
                     $"Unsupported proof type: {invocation.Proof.Type}");
 
-            var invocationWithoutProof = new
-            {
-                id = invocation.Id,
-                capability = invocation.Capability,
-                capabilityAction = invocation.CapabilityAction,
-                invocationTarget = invocation.InvocationTarget
-            };
-
-            var canonicalBytes = MultibaseCodec.CanonicalizeDocument(invocationWithoutProof);
+            var invocationWithoutProof = ProofSigningPayloadBuilder.CloneInvocationWithoutProof(invocation);
+            var canonicalBytes = ProofSigningPayloadBuilder.CanonicalizeInvocationPayload(
+                invocationWithoutProof,
+                invocation.Proof);
             var signatureBytes = MultibaseCodec.Decode(invocation.Proof.ProofValue);
 
             if (!suite.Verify(canonicalBytes, signatureBytes, resolvedKey.PublicKeyBytes))
@@ -321,7 +317,7 @@ public class VerificationService : IVerificationService
                 if (!await VerifyDelegationProofAsync(
                         child,
                         parentCapabilityOverride: parent,
-                        requireParentAuthorization: false))
+                        requireParentAuthorization: true))
                     return false;
 
                 // Verify attenuation (child is more restrictive than parent)
@@ -370,9 +366,22 @@ public class VerificationService : IVerificationService
     {
         var chain = new List<Capability>();
         var current = capability;
+        var visitedIds = new HashSet<string>(StringComparer.Ordinal);
+        string? expectedRootId = null;
 
         while (true)
         {
+            if (string.IsNullOrWhiteSpace(current.Id))
+            {
+                throw new CapabilityValidationException("Capability in chain is missing required id.");
+            }
+
+            if (!visitedIds.Add(current.Id))
+            {
+                throw new CapabilityValidationException(
+                    $"Detected a cycle in capability chain at capability ID '{current.Id}'.");
+            }
+
             chain.Insert(0, current); // Add to beginning to build root->leaf order
 
             if (string.IsNullOrEmpty(current.ParentCapability))
@@ -394,30 +403,23 @@ public class VerificationService : IVerificationService
                     "capabilityChain first entry MUST be the root capability ID string");
             }
 
-            // Direct delegation from root: chain contains only the root capability ID.
-            if (current.Proof.CapabilityChain.Length == 1)
+            if (expectedRootId == null)
             {
-                if (!string.Equals(chainRootId, current.ParentCapability, StringComparison.Ordinal))
-                {
-                    throw new CapabilityValidationException(
-                        $"Capability chain root ID '{chainRootId}' does not match parentCapability '{current.ParentCapability}'");
-                }
-
-                current = new Capability
-                {
-                    Id = chainRootId,
-                    ParentCapability = null,
-                    InvocationTarget = current.InvocationTarget,
-                    AllowedAction = Array.Empty<string>(),
-                    Caveat = Array.Empty<Caveat>(),
-                    Proof = null
-                };
-
-                continue;
+                expectedRootId = chainRootId;
+            }
+            else if (!string.Equals(expectedRootId, chainRootId, StringComparison.Ordinal))
+            {
+                throw new CapabilityValidationException(
+                    $"Inconsistent root capability IDs in capabilityChain. Expected '{expectedRootId}', got '{chainRootId}'.");
             }
 
-            if (!TryDeserializeCapability(current.Proof.CapabilityChain[^1], out var parentCapability) ||
-                parentCapability == null)
+            if (current.Proof.CapabilityChain.Length < 2)
+            {
+                throw new CapabilityValidationException(
+                    "capabilityChain MUST include root capability ID and embedded immediate parent capability object.");
+            }
+
+            if (!TryDeserializeCapability(current.Proof.CapabilityChain[^1], out var parentCapability) || parentCapability == null)
             {
                 throw new CapabilityValidationException(
                     "capabilityChain last entry MUST embed the immediate parent capability object");
@@ -430,6 +432,36 @@ public class VerificationService : IVerificationService
             }
 
             current = parentCapability;
+        }
+
+        var root = chain[0];
+
+        if (!string.IsNullOrWhiteSpace(expectedRootId) &&
+            !string.Equals(expectedRootId, root.Id, StringComparison.Ordinal))
+        {
+            throw new CapabilityValidationException(
+                $"Root capability ID '{root.Id}' does not match capabilityChain root ID '{expectedRootId}'.");
+        }
+
+        if (!string.IsNullOrEmpty(root.ParentCapability))
+        {
+            throw new CapabilityValidationException("Root capability MUST NOT have parentCapability.");
+        }
+
+        if (root.Proof != null)
+        {
+            throw new CapabilityValidationException("Root capability MUST NOT include a delegation proof.");
+        }
+
+        if (string.IsNullOrWhiteSpace(root.Controller))
+        {
+            throw new CapabilityValidationException("Root capability MUST include a non-empty controller.");
+        }
+
+        if (string.IsNullOrWhiteSpace(root.InvocationTarget) ||
+            !Uri.IsWellFormedUriString(root.InvocationTarget, UriKind.Absolute))
+        {
+            throw new CapabilityValidationException("Root capability MUST include a valid absolute invocationTarget URI.");
         }
 
         return Task.FromResult(chain);
