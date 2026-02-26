@@ -53,11 +53,18 @@ jobs:
           dotnet restore src/ZcapLd.AspNetCore/ZcapLd.AspNetCore.csproj
           dotnet restore tests/ZcapLd.Core.Tests/ZcapLd.Core.Tests.csproj
 
+      - name: Clean
+        run: |
+          dotnet clean src/ZcapLd.Core/ZcapLd.Core.csproj --configuration Release
+          dotnet clean src/ZcapLd.AspNetCore/ZcapLd.AspNetCore.csproj --configuration Release
+          dotnet clean tests/ZcapLd.Core.Tests/ZcapLd.Core.Tests.csproj --configuration Release
+
       - name: Build
         run: |
           dotnet build src/ZcapLd.Core/ZcapLd.Core.csproj \
             --configuration Release \
             --no-restore \
+            --no-incremental \
             -p:Version=${{ steps.version.outputs.package_version }} \
             -p:PackageVersion=${{ steps.version.outputs.package_version }} \
             -p:AssemblyVersion=${{ steps.version.outputs.assembly_version }} \
@@ -65,6 +72,7 @@ jobs:
           dotnet build src/ZcapLd.AspNetCore/ZcapLd.AspNetCore.csproj \
             --configuration Release \
             --no-restore \
+            --no-incremental \
             -p:Version=${{ steps.version.outputs.package_version }} \
             -p:PackageVersion=${{ steps.version.outputs.package_version }} \
             -p:AssemblyVersion=${{ steps.version.outputs.assembly_version }} \
@@ -72,6 +80,7 @@ jobs:
           dotnet build tests/ZcapLd.Core.Tests/ZcapLd.Core.Tests.csproj \
             --configuration Release \
             --no-restore \
+            --no-incremental \
             -p:Version=${{ steps.version.outputs.package_version }} \
             -p:PackageVersion=${{ steps.version.outputs.package_version }} \
             -p:AssemblyVersion=${{ steps.version.outputs.assembly_version }} \
