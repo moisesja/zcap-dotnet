@@ -42,7 +42,9 @@ jobs:
             exit 1
           fi
 
+          ASSEMBLY_VERSION="${VERSION%%-*}.0"
           echo "package_version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "assembly_version=$ASSEMBLY_VERSION" >> "$GITHUB_OUTPUT"
           echo "Resolved ASP.NET adapter package version: $VERSION"
 
       - name: Restore
@@ -53,9 +55,27 @@ jobs:
 
       - name: Build
         run: |
-          dotnet build src/ZcapLd.Core/ZcapLd.Core.csproj --configuration Release --no-restore -p:Version=${{ steps.version.outputs.package_version }}
-          dotnet build src/ZcapLd.AspNetCore/ZcapLd.AspNetCore.csproj --configuration Release --no-restore -p:Version=${{ steps.version.outputs.package_version }}
-          dotnet build tests/ZcapLd.Core.Tests/ZcapLd.Core.Tests.csproj --configuration Release --no-restore
+          dotnet build src/ZcapLd.Core/ZcapLd.Core.csproj \
+            --configuration Release \
+            --no-restore \
+            -p:Version=${{ steps.version.outputs.package_version }} \
+            -p:PackageVersion=${{ steps.version.outputs.package_version }} \
+            -p:AssemblyVersion=${{ steps.version.outputs.assembly_version }} \
+            -p:FileVersion=${{ steps.version.outputs.assembly_version }}
+          dotnet build src/ZcapLd.AspNetCore/ZcapLd.AspNetCore.csproj \
+            --configuration Release \
+            --no-restore \
+            -p:Version=${{ steps.version.outputs.package_version }} \
+            -p:PackageVersion=${{ steps.version.outputs.package_version }} \
+            -p:AssemblyVersion=${{ steps.version.outputs.assembly_version }} \
+            -p:FileVersion=${{ steps.version.outputs.assembly_version }}
+          dotnet build tests/ZcapLd.Core.Tests/ZcapLd.Core.Tests.csproj \
+            --configuration Release \
+            --no-restore \
+            -p:Version=${{ steps.version.outputs.package_version }} \
+            -p:PackageVersion=${{ steps.version.outputs.package_version }} \
+            -p:AssemblyVersion=${{ steps.version.outputs.assembly_version }} \
+            -p:FileVersion=${{ steps.version.outputs.assembly_version }}
 
       - name: Test
         run: dotnet test tests/ZcapLd.Core.Tests/ZcapLd.Core.Tests.csproj --configuration Release --no-build --verbosity normal
@@ -66,6 +86,9 @@ jobs:
             --configuration Release \
             --no-build \
             -p:Version=${{ steps.version.outputs.package_version }} \
+            -p:PackageVersion=${{ steps.version.outputs.package_version }} \
+            -p:AssemblyVersion=${{ steps.version.outputs.assembly_version }} \
+            -p:FileVersion=${{ steps.version.outputs.assembly_version }} \
             -o artifacts/aspnet
 
       - name: Upload ASP.NET adapter package artifacts

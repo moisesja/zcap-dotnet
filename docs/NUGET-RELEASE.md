@@ -68,7 +68,10 @@ dotnet pack src/ZcapLd.AspNetCore/ZcapLd.AspNetCore.csproj -c Release
 
 - `ZcapLd.Core` and `ZcapLd.AspNetCore` are version-synchronized via `ZcapLdVersion`
   in `Directory.Build.props`.
-- Release workflows override package versions from tag/input at pack time.
+- Package projects set `PackageVersion`, `AssemblyVersion`, and `FileVersion` explicitly
+  from the effective package version.
+- Release workflows propagate the same version metadata to all build steps
+  (including test project builds) before packing.
 - Use the same semantic version for both package release workflows.
 
 ## Troubleshooting

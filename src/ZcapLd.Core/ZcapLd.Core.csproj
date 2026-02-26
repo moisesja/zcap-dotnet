@@ -6,6 +6,10 @@
     <Nullable>enable</Nullable>
     <PackageId>ZcapLd.Core</PackageId>
     <Version>$(ZcapLdVersion)</Version>
+    <PackageVersion Condition="'$(PackageVersion)' == ''">$(Version)</PackageVersion>
+    <VersionWithoutPrerelease>$([System.Text.RegularExpressions.Regex]::Replace('$(PackageVersion)', '-.*$', ''))</VersionWithoutPrerelease>
+    <AssemblyVersion>$(VersionWithoutPrerelease).0</AssemblyVersion>
+    <FileVersion>$(VersionWithoutPrerelease).0</FileVersion>
     <Authors>Moises E Jaramillo</Authors>
     <Description>.NET implementation of W3C ZCAP-LD for creating, delegating, and verifying authorization capabilities.</Description>
     <PackageTags>zcap;zcap-ld;authorization;capability;did;linked-data;wallet</PackageTags>
