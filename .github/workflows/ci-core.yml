@@ -57,7 +57,7 @@ jobs:
         run: dotnet pack src/ZcapLd.Core/ZcapLd.Core.csproj --configuration Release --no-build -o artifacts/core
 
       - name: Upload core package artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: core-nuget-packages
           path: |
