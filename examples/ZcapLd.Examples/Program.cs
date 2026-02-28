@@ -26,6 +26,8 @@ didProvider.GenerateAndRegisterKeyPair(aliceDid);
 
 var rootCapability = await capabilityService.CreateRootCapabilityAsync(
     controller: aliceDid,
+
+    // The invocation target is the resource or API endpoint the capability grants access to.
     invocationTarget: "https://storage.example.com/documents/report.pdf",
     allowedActions: new[] { "read", "write", "delete" }
 );
@@ -344,6 +346,115 @@ employeeShare.Proof = await signingService.SignInvocationAsync(employeeShare, em
 
 var employeeCanShare = await verificationService.VerifyInvocationAsync(employeeShare, employeeAccess);
 Console.WriteLine($"Employee shares document: {(employeeCanShare ? "ALLOWED" : "DENIED")} (expected: DENIED)");
+
+Console.WriteLine();
+
+// ===================================================
+// Example 8: ValidWhileTrue Caveat (Remote Revocation)
+// ===================================================
+Console.WriteLine("Example 8: ValidWhileTrue Caveat (Remote Revocation)");
+Console.WriteLine("-----------------------------------------------------");
+
+// ValidWhileTrue is a spec-defined caveat where the delegator/controller hosts
+// a revocation status endpoint. The verifier checks that endpoint at invocation
+// time to confirm the capability is still valid.
+//
+// Flow:
+//   1. Controller creates capability with ValidWhileTrue caveat pointing to their endpoint
+//   2. Controller deploys revocation endpoint (e.g. MapZcapRevocationEndpoints())
+//   3. Verifier configures AddZcapValidWhileTrueSupport() to enable HTTP checking
+//   4. At verification time, the handler GETs the URI and checks isRevoked
+//   5. Controller can revoke by POSTing to their own endpoint
+
+var orgDid = "did:key:z6MkOrg";
+var partnerDid = "did:key:z6MkPartner";
+didProvider.GenerateAndRegisterKeyPair(orgDid);
+didProvider.GenerateAndRegisterKeyPair(partnerDid);
+
+// The organization creates a root capability for an API resource
+var apiRoot = await capabilityService.CreateRootCapabilityAsync(
+    controller: orgDid,
+    invocationTarget: "https://api.org.example/v1/data",
+    allowedActions: new[] { "read", "write" }
+);
+
+// Delegate to a partner with a ValidWhileTrue caveat.
+// The URI points to the org's revocation status endpoint.
+var partnerCapability = await capabilityService.DelegateCapabilityAsync(
+    parentCapability: apiRoot,
+    newController: partnerDid,
+    allowedActions: new[] { "read" },
+    expires: DateTime.UtcNow.AddDays(30),
+    caveats: new Caveat[]
+    {
+        new ValidWhileTrueCaveat
+        {
+            // In production, this would be a real URL served by MapZcapRevocationEndpoints()
+            Uri = $"https://revocation.org.example/zcaps/revocations/{Uri.EscapeDataString(apiRoot.Id)}"
+        }
+    }
+);
+
+Console.WriteLine($"Delegated to partner: {partnerCapability.Id}");
+Console.WriteLine($"  Controller: {partnerCapability.Controller}");
+Console.WriteLine($"  Actions: {string.Join(", ", partnerCapability.AllowedAction)}");
+Console.WriteLine($"  Caveats:");
+foreach (var c in partnerCapability.Caveat)
+{
+    if (c is ValidWhileTrueCaveat vwt)
+        Console.WriteLine($"    - ValidWhileTrue -> {vwt.Uri}");
+}
+
+// Without a handler, verification fails (fail-closed security)
+Console.WriteLine("\n  Without handler (fail-closed):");
+var noHandlerProcessor = new CaveatProcessor(); // no handler
+var noHandlerVerifier = new VerificationService(didProvider, noHandlerProcessor);
+
+var partnerInvocation = new Invocation
+{
+    Capability = partnerCapability.Id,
+    CapabilityAction = "read",
+    InvocationTarget = "https://api.org.example/v1/data"
+};
+partnerInvocation.Proof = await signingService.SignInvocationAsync(partnerInvocation, partnerDid);
+
+var noHandlerResult = await noHandlerVerifier.VerifyInvocationAsync(partnerInvocation, partnerCapability);
+Console.WriteLine($"    Invocation valid: {noHandlerResult} (expected: False — no handler configured)");
+
+// With a handler that confirms the capability is still valid, verification succeeds
+Console.WriteLine("\n  With handler (capability NOT revoked):");
+var activeHandler = new StubValidWhileTrueHandler(isActive: true);
+var handlerProcessor = new CaveatProcessor(activeHandler);
+var handlerVerifier = new VerificationService(didProvider, handlerProcessor);
+
+// Re-sign with fresh nonce to avoid replay detection
+var partnerInvocation2 = new Invocation
+{
+    Capability = partnerCapability.Id,
+    CapabilityAction = "read",
+    InvocationTarget = "https://api.org.example/v1/data"
+};
+partnerInvocation2.Proof = await signingService.SignInvocationAsync(partnerInvocation2, partnerDid);
+
+var activeResult = await handlerVerifier.VerifyInvocationAsync(partnerInvocation2, partnerCapability);
+Console.WriteLine($"    Invocation valid: {activeResult} (expected: True — handler confirms active)");
+
+// Simulate revocation: handler now says the capability is revoked
+Console.WriteLine("\n  With handler (capability REVOKED):");
+var revokedHandler = new StubValidWhileTrueHandler(isActive: false);
+var revokedProcessor = new CaveatProcessor(revokedHandler);
+var revokedVerifier = new VerificationService(didProvider, revokedProcessor);
+
+var partnerInvocation3 = new Invocation
+{
+    Capability = partnerCapability.Id,
+    CapabilityAction = "read",
+    InvocationTarget = "https://api.org.example/v1/data"
+};
+partnerInvocation3.Proof = await signingService.SignInvocationAsync(partnerInvocation3, partnerDid);
+
+var revokedResult = await revokedVerifier.VerifyInvocationAsync(partnerInvocation3, partnerCapability);
+Console.WriteLine($"    Invocation valid: {revokedResult} (expected: False — capability revoked)");
 
 Console.WriteLine();
 Console.WriteLine("===========================================");

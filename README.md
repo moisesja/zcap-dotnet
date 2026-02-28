@@ -15,9 +15,10 @@ This library provides:
 - Capability creation and delegation
 - Delegation-chain verification
 - Invocation signing and verification
-- Caveat processing (expiration and usage count)
+- Caveat processing (expiration, usage count, and ValidWhileTrue remote revocation)
 - Invocation replay protection with pluggable nonce stores
 - Revocation persistence with pluggable storage backends
+- ValidWhileTrue caveat support with HTTP-based remote revocation checking
 - Pluggable crypto suites (Ed25519 and P-256 included, additional curves extensible)
 - Dynamic JSON-LD context URLs per crypto suite
 - Multibase signature encoding
@@ -135,6 +136,44 @@ Configure storage via `IRevocationStore`:
 
 Full developer guide: [`docs/REVOCATION-INTEGRATION.md`](docs/REVOCATION-INTEGRATION.md)
 
+## ValidWhileTrue Caveat (Remote Revocation)
+
+The `ValidWhileTrue` caveat (per the W3C ZCAP-LD spec) enables remote revocation by embedding a URI in the capability. At verification time, the verifier checks the URI to confirm the capability is still valid. The delegator/controller hosts the endpoint — not the verifier.
+
+**Controller side** (hosts the revocation status endpoint):
+
+```csharp
+builder.Services.AddZcapRevocationSupport<MyStore>();
+app.MapZcapRevocationEndpoints();
+
+// When delegating, attach the caveat pointing to your endpoint:
+var delegated = await capabilityService.DelegateCapabilityAsync(
+    root, partnerDid, new[] { "read" },
+    DateTime.UtcNow.AddDays(30),
+    new Caveat[]
+    {
+        new ValidWhileTrueCaveat
+        {
+            Uri = $"https://my-service/zcaps/revocations/{Uri.EscapeDataString(root.Id)}"
+        }
+    });
+```
+
+**Verifier side** (checks the URI during invocation verification):
+
+```csharp
+builder.Services.AddZcapValidWhileTrueSupport(); // registers HttpValidWhileTrueHandler
+builder.Services.AddZcapServices();
+
+// HttpClient can be configured for timeouts/retry:
+builder.Services.AddHttpClient("ZcapValidWhileTrue", client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(5);
+});
+```
+
+When a `ValidWhileTrue` caveat is encountered during verification, the handler GETs the URI and checks the `isRevoked` field in the response. Without a handler configured, the caveat fails closed (denies access).
+
 ## Root vs Delegated Semantics
 
 - Root capability:
@@ -149,8 +188,8 @@ Full developer guide: [`docs/REVOCATION-INTEGRATION.md`](docs/REVOCATION-INTEGRA
 - `src/ZcapLd.Core`: library code
 - `src/ZcapLd.AspNetCore`: optional ASP.NET endpoint adapter package
 - `tests/ZcapLd.Core.Tests`: unit, integration, and compliance tests
-- `examples/ZcapLd.Examples`: console examples
-- `examples/ZcapLd.RevocationEndpointsDemo`: ASP.NET revocation endpoints demo wired to SQLite
+- `examples/ZcapLd.Examples`: console examples (8 scenarios including ValidWhileTrue)
+- `examples/ZcapLd.RevocationEndpointsDemo`: ASP.NET revocation endpoints demo wired to SQLite (with ValidWhileTrue support)
 - `docs`: implementation/security notes
 
 ## Developer Docs

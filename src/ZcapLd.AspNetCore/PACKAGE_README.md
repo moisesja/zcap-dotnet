@@ -1,10 +1,11 @@
 # ZcapLd.AspNetCore
 
-Optional ASP.NET Core adapter for `ZcapLd.Core` revocation workflows.
+Optional ASP.NET Core adapter for `ZcapLd.Core` revocation and ValidWhileTrue workflows.
 
 ## Features
 
 - Minimal API endpoint rails for revocation status and revocation requests
+- ValidWhileTrue caveat support via `HttpValidWhileTrueHandler` (HTTP-based remote revocation checking)
 - DI registration helpers for default and custom `IRevocationStore` backends
 - Works with pluggable stores (database, contract client, oracle bridge, cache)
 
@@ -74,3 +75,29 @@ builder.Services.AddZcapRevocationSupport(sp =>
 ```
 
 See `docs/REVOCATION-INTEGRATION.md` for full guidance.
+
+## ValidWhileTrue Caveat Support
+
+Enable HTTP-based ValidWhileTrue caveat checking for verifiers:
+
+```csharp
+builder.Services.AddZcapValidWhileTrueSupport();
+builder.Services.AddZcapServices();
+```
+
+This registers `HttpValidWhileTrueHandler`, which GETs the caveat URI during invocation verification and checks the `isRevoked` field from the `RevocationStatusHttpResponse`. The existing `GET /zcaps/revocations/{*capabilityId}` endpoint serves as the backend.
+
+The named `HttpClient` (`"ZcapValidWhileTrue"`) can be configured for timeouts and retry policies:
+
+```csharp
+builder.Services.AddHttpClient("ZcapValidWhileTrue", client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(5);
+});
+```
+
+Custom handler implementations can be registered via:
+
+```csharp
+builder.Services.AddZcapValidWhileTrueSupport<MyCustomHandler>();
+```

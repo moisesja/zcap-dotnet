@@ -9,11 +9,29 @@ namespace ZcapLd.Core.Services;
 /// </summary>
 public class CaveatProcessor : ICaveatProcessor
 {
+    private readonly IValidWhileTrueHandler? _validWhileTrueHandler;
+
+    /// <summary>
+    /// Backward-compatible parameterless constructor.
+    /// ValidWhileTrueCaveat evaluation will fail-closed (always deny).
+    /// </summary>
+    public CaveatProcessor() : this(null) { }
+
+    /// <summary>
+    /// Constructor with optional ValidWhileTrue handler.
+    /// When a handler is provided, ValidWhileTrueCaveat instances are evaluated
+    /// by calling the handler's CheckAsync method instead of IsSatisfied.
+    /// </summary>
+    public CaveatProcessor(IValidWhileTrueHandler? validWhileTrueHandler)
+    {
+        _validWhileTrueHandler = validWhileTrueHandler;
+    }
+
     /// <summary>
     /// Evaluates all caveats for a capability invocation
     /// Per spec: All caveats in the chain must be satisfied
     /// </summary>
-    public Task<bool> EvaluateCaveatsAsync(Capability capability, InvocationContext context)
+    public async Task<bool> EvaluateCaveatsAsync(Capability capability, InvocationContext context)
     {
         if (capability == null)
             throw new ArgumentNullException(nameof(capability));
@@ -25,13 +43,27 @@ public class CaveatProcessor : ICaveatProcessor
             // Evaluate all caveats on this capability
             foreach (var caveat in capability.Caveat)
             {
-                if (!caveat.IsSatisfied(context))
+                if (caveat is ValidWhileTrueCaveat validWhileTrue)
                 {
-                    return Task.FromResult(false);
+                    if (_validWhileTrueHandler == null)
+                        return false; // Fail-closed: no handler configured
+
+                    if (string.IsNullOrWhiteSpace(validWhileTrue.Uri))
+                        return false; // Malformed caveat: no URI to check
+
+                    if (!await _validWhileTrueHandler.CheckAsync(validWhileTrue.Uri))
+                        return false;
+                }
+                else
+                {
+                    if (!caveat.IsSatisfied(context))
+                    {
+                        return false;
+                    }
                 }
             }
 
-            return Task.FromResult(true);
+            return true;
         }
         catch (Exception ex)
         {
@@ -126,7 +158,16 @@ public class CaveatProcessor : ICaveatProcessor
                         }
                     }
 
-                    // Other caveat types can add similar validation
+                    // For ValidWhileTrueCaveat, child must reference the same URI
+                    // (changing the URI would bypass the parent's revocation authority)
+                    if (parentCaveat is ValidWhileTrueCaveat parentVwt &&
+                        matchingChildCaveat is ValidWhileTrueCaveat childVwt)
+                    {
+                        if (!string.Equals(childVwt.Uri, parentVwt.Uri, StringComparison.Ordinal))
+                        {
+                            return Task.FromResult(false); // URI mismatch
+                        }
+                    }
                 }
             }
 

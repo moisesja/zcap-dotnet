@@ -712,6 +712,271 @@ public class CaveatProcessorTests
 
     #endregion
 
+    #region ValidWhileTrue Caveat Tests
+
+    [Fact]
+    public async Task EvaluateCaveats_WithValidWhileTrueCaveat_NoHandler_ShouldReturnFalse()
+    {
+        // Arrange - processor without handler (fail-closed)
+        var processor = new CaveatProcessor();
+
+        var capability = new Capability
+        {
+            Id = "urn:zcap:root:test",
+            Caveat = new Caveat[]
+            {
+                new ValidWhileTrueCaveat { Uri = "https://example.com/status" }
+            }
+        };
+
+        var context = new InvocationContext
+        {
+            RequestedAction = "read",
+            TargetResource = "https://example.com/resource"
+        };
+
+        // Act
+        var result = await processor.EvaluateCaveatsAsync(capability, context);
+
+        // Assert
+        result.Should().BeFalse("no handler is configured; fail-closed");
+    }
+
+    [Fact]
+    public async Task EvaluateCaveats_WithValidWhileTrueCaveat_HandlerReturnsTrue_ShouldReturnTrue()
+    {
+        // Arrange
+        var processor = new CaveatProcessor(new StubValidWhileTrueHandler(true));
+
+        var capability = new Capability
+        {
+            Id = "urn:zcap:root:test",
+            Caveat = new Caveat[]
+            {
+                new ValidWhileTrueCaveat { Uri = "https://example.com/status" }
+            }
+        };
+
+        var context = new InvocationContext
+        {
+            RequestedAction = "read",
+            TargetResource = "https://example.com/resource"
+        };
+
+        // Act
+        var result = await processor.EvaluateCaveatsAsync(capability, context);
+
+        // Assert
+        result.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task EvaluateCaveats_WithValidWhileTrueCaveat_HandlerReturnsFalse_ShouldReturnFalse()
+    {
+        // Arrange - handler says capability is revoked
+        var processor = new CaveatProcessor(new StubValidWhileTrueHandler(false));
+
+        var capability = new Capability
+        {
+            Id = "urn:zcap:root:test",
+            Caveat = new Caveat[]
+            {
+                new ValidWhileTrueCaveat { Uri = "https://example.com/status" }
+            }
+        };
+
+        var context = new InvocationContext
+        {
+            RequestedAction = "read",
+            TargetResource = "https://example.com/resource"
+        };
+
+        // Act
+        var result = await processor.EvaluateCaveatsAsync(capability, context);
+
+        // Assert
+        result.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task EvaluateCaveats_WithValidWhileTrueCaveat_EmptyUri_ShouldReturnFalse()
+    {
+        // Arrange - malformed caveat with empty URI
+        var processor = new CaveatProcessor(new StubValidWhileTrueHandler(true));
+
+        var capability = new Capability
+        {
+            Id = "urn:zcap:root:test",
+            Caveat = new Caveat[]
+            {
+                new ValidWhileTrueCaveat { Uri = "" }
+            }
+        };
+
+        var context = new InvocationContext
+        {
+            RequestedAction = "read",
+            TargetResource = "https://example.com/resource"
+        };
+
+        // Act
+        var result = await processor.EvaluateCaveatsAsync(capability, context);
+
+        // Assert
+        result.Should().BeFalse("empty URI is a malformed caveat");
+    }
+
+    [Fact]
+    public async Task EvaluateCaveats_WithMixedCaveats_AllSatisfied_ShouldReturnTrue()
+    {
+        // Arrange
+        var processor = new CaveatProcessor(new StubValidWhileTrueHandler(true));
+
+        var capability = new Capability
+        {
+            Id = "urn:zcap:root:test",
+            Caveat = new Caveat[]
+            {
+                new ExpirationCaveat { Expires = DateTime.UtcNow.AddDays(1) },
+                new ValidWhileTrueCaveat { Uri = "https://example.com/status" }
+            }
+        };
+
+        var context = new InvocationContext
+        {
+            RequestedAction = "read",
+            TargetResource = "https://example.com/resource"
+        };
+
+        // Act
+        var result = await processor.EvaluateCaveatsAsync(capability, context);
+
+        // Assert
+        result.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task EvaluateCaveats_WithMixedCaveats_ValidWhileTrueFails_ShouldReturnFalse()
+    {
+        // Arrange
+        var processor = new CaveatProcessor(new StubValidWhileTrueHandler(false));
+
+        var capability = new Capability
+        {
+            Id = "urn:zcap:root:test",
+            Caveat = new Caveat[]
+            {
+                new ExpirationCaveat { Expires = DateTime.UtcNow.AddDays(1) },
+                new ValidWhileTrueCaveat { Uri = "https://example.com/status" }
+            }
+        };
+
+        var context = new InvocationContext
+        {
+            RequestedAction = "read",
+            TargetResource = "https://example.com/resource"
+        };
+
+        // Act
+        var result = await processor.EvaluateCaveatsAsync(capability, context);
+
+        // Assert
+        result.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ValidateCaveatCompatibility_ValidWhileTrue_SameUri_ShouldReturnTrue()
+    {
+        // Arrange
+        var parentCaveats = new Caveat[]
+        {
+            new ValidWhileTrueCaveat { Uri = "https://example.com/status" }
+        };
+
+        var childCaveats = new Caveat[]
+        {
+            new ValidWhileTrueCaveat { Uri = "https://example.com/status" }
+        };
+
+        // Act
+        var result = await _caveatProcessor.ValidateCaveatCompatibilityAsync(parentCaveats, childCaveats);
+
+        // Assert
+        result.Should().BeTrue("child references the same revocation authority");
+    }
+
+    [Fact]
+    public async Task ValidateCaveatCompatibility_ValidWhileTrue_DifferentUri_ShouldReturnFalse()
+    {
+        // Arrange
+        var parentCaveats = new Caveat[]
+        {
+            new ValidWhileTrueCaveat { Uri = "https://example.com/status/original" }
+        };
+
+        var childCaveats = new Caveat[]
+        {
+            new ValidWhileTrueCaveat { Uri = "https://evil.com/status/bypass" }
+        };
+
+        // Act
+        var result = await _caveatProcessor.ValidateCaveatCompatibilityAsync(parentCaveats, childCaveats);
+
+        // Assert
+        result.Should().BeFalse("child cannot change the revocation authority URI");
+    }
+
+    [Fact]
+    public async Task EvaluateCapabilityChainCaveats_WithValidWhileTrue_ShouldEvaluateViaHandler()
+    {
+        // Arrange
+        var processor = new CaveatProcessor(new StubValidWhileTrueHandler(true));
+
+        var root = new Capability
+        {
+            Id = "urn:zcap:root:test",
+            Controller = "did:key:z6MkRoot",
+            InvocationTarget = "https://example.com/resource",
+            AllowedAction = new[] { "read" },
+            Caveat = new Caveat[]
+            {
+                new ValidWhileTrueCaveat { Uri = "https://example.com/status" }
+            }
+        };
+
+        var child = new Capability
+        {
+            Id = "urn:uuid:child",
+            Controller = "did:key:z6MkChild",
+            InvocationTarget = "https://example.com/resource",
+            AllowedAction = new[] { "read" },
+            ParentCapability = root.Id,
+            Caveat = Array.Empty<Caveat>()
+        };
+
+        var context = new InvocationContext
+        {
+            RequestedAction = "read",
+            TargetResource = "https://example.com/resource"
+        };
+
+        // Act
+        var result = await processor.EvaluateCapabilityChainCaveatsAsync(new[] { root, child }, context);
+
+        // Assert
+        result.Should().BeTrue("handler confirms capability is still valid");
+    }
+
+    private class StubValidWhileTrueHandler : IValidWhileTrueHandler
+    {
+        private readonly bool _result;
+        public StubValidWhileTrueHandler(bool result) => _result = result;
+        public Task<bool> CheckAsync(string uri, CancellationToken cancellationToken = default)
+            => Task.FromResult(_result);
+    }
+
+    #endregion
+
     #region UsageCountCaveat Tests
 
     [Fact]

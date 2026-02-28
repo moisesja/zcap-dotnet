@@ -14,7 +14,8 @@ dotnet add package ZcapLd.Core
 - Delegated capability creation with attenuation
 - Invocation signing and verification
 - Delegation chain verification
-- Caveat support (expiration and usage count)
+- Caveat support (expiration, usage count, and ValidWhileTrue remote revocation)
+- ValidWhileTrue caveat with pluggable `IValidWhileTrueHandler` for remote revocation checking
 - Revocation service abstractions with pluggable storage (`IRevocationStore`)
 - Pluggable crypto suites (Ed25519 and P-256 included, additional curves extensible)
 - Dynamic JSON-LD context URLs per crypto suite
@@ -69,12 +70,33 @@ invocation.Proof = await signingService.SignInvocationAsync(invocation, leafDid)
 var isValid = await verificationService.VerifyInvocationAsync(invocation, delegated);
 ```
 
+## ValidWhileTrue Caveat (Remote Revocation)
+
+`ValidWhileTrueCaveat` enables remote revocation per the W3C ZCAP-LD spec. The delegator embeds a URI in the caveat; at verification time, the handler checks it. Core provides the `IValidWhileTrueHandler` interface — `ZcapLd.AspNetCore` provides the HTTP implementation.
+
+```csharp
+// Delegate with a ValidWhileTrue caveat pointing to the controller's endpoint
+var delegated = await capabilityService.DelegateCapabilityAsync(
+    root, partnerDid, new[] { "read" },
+    DateTime.UtcNow.AddDays(30),
+    new Caveat[]
+    {
+        new ValidWhileTrueCaveat
+        {
+            Uri = "https://my-service/zcaps/revocations/urn%3Auuid%3A12345"
+        }
+    });
+```
+
+Without a handler configured, `ValidWhileTrueCaveat` always fails closed (denies access).
+
 ## Revocation Backend Plug-In
 
 `ZcapLd.Core` provides:
 
 - `IRevocationStore` for storage providers
 - `IRevocationService` for revocation workflow orchestration
+- `IValidWhileTrueHandler` for async remote revocation checks (ValidWhileTrue caveat)
 - `InMemoryRevocationStore` as the default implementation
 
 ## Exposing Revocation Without ASP.NET

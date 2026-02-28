@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using ZcapLd.AspNetCore.Services;
 using ZcapLd.Core.Cryptography;
 using ZcapLd.Core.Services;
 
@@ -50,7 +51,11 @@ public static class ZcapRevocationServiceCollectionExtensions
                 sp.GetRequiredService<IDidSigner>(),
                 sp.GetRequiredService<IDidResolver>(),
                 sp.GetRequiredService<ICryptoSuiteProvider>()));
-        services.TryAddSingleton<ICaveatProcessor, CaveatProcessor>();
+        // CaveatProcessor: use factory to optionally inject IValidWhileTrueHandler
+        // If AddZcapValidWhileTrueSupport() was called, the handler is available;
+        // otherwise GetService returns null and the processor operates fail-closed.
+        services.TryAddSingleton<ICaveatProcessor>(sp =>
+            new CaveatProcessor(sp.GetService<IValidWhileTrueHandler>()));
         services.TryAddSingleton<ICapabilityService, CapabilityService>();
         services.TryAddSingleton<IRevocationStore, InMemoryRevocationStore>();
         services.TryAddSingleton<IRevocationService, RevocationService>();
@@ -213,6 +218,69 @@ public static class ZcapRevocationServiceCollectionExtensions
 
         services.Replace(ServiceDescriptor.Singleton(revocationStoreFactory));
         services.TryAddSingleton<IRevocationService, RevocationService>();
+        return services;
+    }
+
+    /// <summary>
+    /// Registers ValidWhileTrue caveat support with the default HTTP handler.
+    /// When enabled, <see cref="Core.Models.ValidWhileTrueCaveat"/> instances are
+    /// evaluated by GETting the caveat URI and checking the revocation status response.
+    ///
+    /// The named <see cref="HttpClient"/> (<see cref="HttpValidWhileTrueHandler.HttpClientName"/>)
+    /// can be configured for timeouts, retry policies, etc.:
+    /// <code>
+    /// services.AddHttpClient("ZcapValidWhileTrue", client =&gt;
+    /// {
+    ///     client.Timeout = TimeSpan.FromSeconds(5);
+    /// });
+    /// </code>
+    /// </summary>
+    public static IServiceCollection AddZcapValidWhileTrueSupport(this IServiceCollection services)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        services.AddHttpClient(HttpValidWhileTrueHandler.HttpClientName);
+        services.TryAddSingleton<IValidWhileTrueHandler, HttpValidWhileTrueHandler>();
+
+        // Re-register CaveatProcessor to pick up the handler,
+        // regardless of whether AddZcapServices() was called before or after
+        services.Replace(ServiceDescriptor.Singleton<ICaveatProcessor>(sp =>
+            new CaveatProcessor(sp.GetService<IValidWhileTrueHandler>())));
+
+        return services;
+    }
+
+    /// <summary>
+    /// Registers ValidWhileTrue caveat support with a custom handler implementation.
+    /// </summary>
+    public static IServiceCollection AddZcapValidWhileTrueSupport<THandler>(this IServiceCollection services)
+        where THandler : class, IValidWhileTrueHandler
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        services.TryAddSingleton<IValidWhileTrueHandler, THandler>();
+
+        services.Replace(ServiceDescriptor.Singleton<ICaveatProcessor>(sp =>
+            new CaveatProcessor(sp.GetService<IValidWhileTrueHandler>())));
+
+        return services;
+    }
+
+    /// <summary>
+    /// Registers ValidWhileTrue caveat support with a factory-provided handler.
+    /// </summary>
+    public static IServiceCollection AddZcapValidWhileTrueSupport(
+        this IServiceCollection services,
+        Func<IServiceProvider, IValidWhileTrueHandler> handlerFactory)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(handlerFactory);
+
+        services.Replace(ServiceDescriptor.Singleton(handlerFactory));
+
+        services.Replace(ServiceDescriptor.Singleton<ICaveatProcessor>(sp =>
+            new CaveatProcessor(sp.GetService<IValidWhileTrueHandler>())));
+
         return services;
     }
 }

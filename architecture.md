@@ -22,6 +22,7 @@ Primary assembly: `src/ZcapLd.Core`.
 - `Caveat` + derived types:
   - `ExpirationCaveat`
   - `UsageCountCaveat`
+  - `ValidWhileTrueCaveat` (remote revocation via URI check)
 - `InvocationContext`: runtime context for caveat evaluation
 
 ### Service Interfaces (`src/ZcapLd.Core/Services`)
@@ -35,6 +36,7 @@ Primary assembly: `src/ZcapLd.Core`.
 - `INonceStore`: pluggable persistence contract for invocation nonce tracking (replay protection); implementations: `InMemoryNonceStore`, `NullNonceStore` (no-op)
 - `IRevocationStore`: pluggable persistence contract for revocation records
 - `IRevocationService`: revocation orchestration (record + lookup + expiry pruning on read)
+- `IValidWhileTrueHandler`: async handler for evaluating ValidWhileTrue caveat URIs; no default in core — `HttpValidWhileTrueHandler` provided by `ZcapLd.AspNetCore`
 
 ### Service Implementations (`src/ZcapLd.Core/Services`)
 
@@ -60,9 +62,9 @@ Primary assembly: `src/ZcapLd.Core`.
 - `InMemoryRevocationStore`
   - Default development/testing revocation persistence
 - `CaveatProcessor`
-  - Evaluates caveat predicates
+  - Evaluates caveat predicates (including async ValidWhileTrue via optional `IValidWhileTrueHandler`)
   - Merges inherited caveats across chain
-  - Checks caveat compatibility
+  - Checks caveat compatibility (ValidWhileTrue enforces URI immutability across delegations)
 
 ### Crypto (`src/ZcapLd.Core/Cryptography`)
 
@@ -127,6 +129,14 @@ Implement `ICryptoSuite` for new signature algorithms and register via `CryptoSu
 ### Custom Caveats
 
 Implement new caveat types by extending `Caveat` and adding compatibility/evaluation logic in `CaveatProcessor`.
+
+### ValidWhileTrue Caveat (Remote Revocation)
+
+The `ValidWhileTrueCaveat` embeds a URI that the verifier checks at invocation time. The delegator/controller hosts the status endpoint; the verifier opts in to checking it.
+
+- **Core**: `ValidWhileTrueCaveat` model + `IValidWhileTrueHandler` interface. `CaveatProcessor` accepts an optional handler; without one, the caveat fails closed.
+- **ASP.NET**: `HttpValidWhileTrueHandler` implements `IValidWhileTrueHandler` using `IHttpClientFactory`. Register via `AddZcapValidWhileTrueSupport()`. The existing `GET /zcaps/revocations/{*capabilityId}` endpoint serves as the backend — the handler checks `!isRevoked` from the `RevocationStatusHttpResponse`.
+- **Attenuation**: child capabilities cannot change a parent's ValidWhileTrue URI (enforced in `ValidateCaveatCompatibilityAsync`).
 
 ### DID Resolution
 

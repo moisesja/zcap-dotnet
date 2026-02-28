@@ -140,6 +140,67 @@ Implement `IRevocationStore` as a composite:
 - Durable write-through in `UpsertAsync`
 - Coordinated delete/expiration cleanup
 
+## 4. ValidWhileTrue Caveat (Remote Revocation)
+
+The `ValidWhileTrue` caveat (per the W3C ZCAP-LD spec) enables remote revocation by embedding a URI in the capability. At verification time, the verifier checks the URI to confirm the capability is still valid. The delegator/controller hosts the endpoint — not the verifier.
+
+### Controller Side
+
+The controller hosts the revocation status endpoint and attaches a `ValidWhileTrue` caveat when delegating:
+
+```csharp
+builder.Services.AddZcapRevocationSupport<MyStore>();
+app.MapZcapRevocationEndpoints();
+
+// When delegating, attach the caveat pointing to your endpoint:
+var delegated = await capabilityService.DelegateCapabilityAsync(
+    root, partnerDid, new[] { "read" },
+    DateTime.UtcNow.AddDays(30),
+    new Caveat[]
+    {
+        new ValidWhileTrueCaveat
+        {
+            Uri = $"https://my-service/zcaps/revocations/{Uri.EscapeDataString(root.Id)}"
+        }
+    });
+```
+
+To revoke, the controller POSTs to their own revocation endpoint. All verifiers checking the URI will see the updated status.
+
+### Verifier Side
+
+The verifier registers the `ValidWhileTrue` handler so that `CaveatProcessor` can check the URI during verification:
+
+```csharp
+builder.Services.AddZcapValidWhileTrueSupport(); // registers HttpValidWhileTrueHandler
+builder.Services.AddZcapServices();
+
+// Optional: configure timeouts/retry for the named HttpClient
+builder.Services.AddHttpClient("ZcapValidWhileTrue", client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(5);
+});
+```
+
+When a `ValidWhileTrue` caveat is encountered during verification, the handler GETs the URI and checks the `IsRevoked` field in the `RevocationStatusHttpResponse`. Without a handler configured, the caveat fails closed (denies access).
+
+### Custom Handlers
+
+You can provide a custom `IValidWhileTrueHandler` instead of the default HTTP handler:
+
+```csharp
+// Generic type registration
+builder.Services.AddZcapValidWhileTrueSupport<MyCustomHandler>();
+
+// Factory registration
+builder.Services.AddZcapValidWhileTrueSupport(sp =>
+    new MyCustomHandler(sp.GetRequiredService<IMyDependency>()));
+```
+
+### Attenuation Rules
+
+When delegating a capability that contains a `ValidWhileTrue` caveat, the child capability must use the same URI as the parent. This prevents a delegatee from bypassing revocation by redirecting the check to a different endpoint.
+
 ## Operational Notes
 
 - `VerificationService` checks revocation during proof, chain, and invocation verification.

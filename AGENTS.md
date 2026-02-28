@@ -34,18 +34,21 @@ zcap-dotnet/
 │   │   ├── Cryptography/               # ICryptoSuite, CryptoSuiteProvider, Ed25519CryptoSuite,
 │   │   │                               #   P256CryptoSuite, MultibaseCodec, JsonCanonicalizer,
 │   │   │                               #   EcPointCompression, Ed25519Signer, SignatureVerifier
-│   │   ├── Models/                     # Capability, Proof, Invocation, Caveat, InvocationContext,
-│   │   │                               #   ResolvedKey, SignatureResult, RevocationRecord, RevocationRequest
+│   │   ├── Models/                     # Capability, Proof, Invocation, Caveat, ValidWhileTrueCaveat,
+│   │   │                               #   InvocationContext, ResolvedKey, SignatureResult,
+│   │   │                               #   RevocationRecord, RevocationRequest
 │   │   ├── Services/                   # ICapabilityService, ISigningService, IVerificationService,
 │   │   │                               #   ICaveatProcessor, IDidResolver, IDidSigner, IRevocationService,
-│   │   │                               #   IRevocationStore, INonceStore + implementations
+│   │   │                               #   IRevocationStore, INonceStore, IValidWhileTrueHandler + implementations
 │   │   └── Exceptions/                 # ZcapLdExceptions
 │   └── ZcapLd.AspNetCore/             # ASP.NET adapter (NuGet package)
 │       ├── DependencyInjection/        # AddZcapServices(), AddZcapDidSigner<T>(), AddZcapRevocationSupport(),
-│       │                               #   AddZcapReplayProtection(), AddZcapCryptoSuite<T>(), AddZcapDidResolver<T>()
+│       │                               #   AddZcapReplayProtection(), AddZcapCryptoSuite<T>(),
+│       │                               #   AddZcapDidResolver<T>(), AddZcapValidWhileTrueSupport()
 │       ├── Endpoints/                  # MapZcapRevocationEndpoints()
+│       ├── Services/                   # HttpValidWhileTrueHandler
 │       └── Contracts/                  # RevokeCapabilityHttpRequest, RevocationStatusHttpResponse
-├── tests/ZcapLd.Core.Tests/           # xUnit + FluentAssertions (245 tests)
+├── tests/ZcapLd.Core.Tests/           # xUnit + FluentAssertions (266 tests)
 │   ├── Cryptography/                   # Ed25519, P256, JsonCanonicalizer, MultibaseCodec, etc.
 │   ├── Services/                       # CapabilityService, VerificationService, Revocation, Replay, etc.
 │   ├── Models/                         # Capability serialization tests
@@ -53,8 +56,8 @@ zcap-dotnet/
 │   ├── Compliance/                     # Normative unit + integration spec compliance tests
 │   └── Helpers/                        # InMemoryDidProvider (test-only IDidSigner + IDidResolver)
 ├── examples/
-│   ├── ZcapLd.Examples/               # Console examples (7 scenarios)
-│   └── ZcapLd.RevocationEndpointsDemo/ # ASP.NET revocation demo (SQLite)
+│   ├── ZcapLd.Examples/               # Console examples (8 scenarios)
+│   └── ZcapLd.RevocationEndpointsDemo/ # ASP.NET revocation demo (SQLite + ValidWhileTrue)
 ├── docs/                               # Implementation, security, revocation, release docs
 ├── tasks/                              # Historical evaluations, task tracking
 ├── .github/workflows/                  # CI/CD pipelines
@@ -68,7 +71,7 @@ zcap-dotnet/
 ```bash
 dotnet restore                                                         # Restore NuGet packages
 dotnet build ZcapLd.sln                                                # Build entire solution
-dotnet test ZcapLd.sln                                                 # Run all 245 tests
+dotnet test ZcapLd.sln                                                 # Run all 266 tests
 dotnet pack src/ZcapLd.Core/ZcapLd.Core.csproj -c Release             # Pack core library
 dotnet pack src/ZcapLd.AspNetCore/ZcapLd.AspNetCore.csproj -c Release  # Pack ASP.NET adapter
 dotnet run --project examples/ZcapLd.Examples                          # Run console examples
@@ -77,7 +80,7 @@ dotnet run --project examples/ZcapLd.Examples                          # Run con
 ## Architecture Notes
 
 - **Target framework**: .NET 10 (`net10.0`)
-- **Specification**: W3C ZCAP-LD v0.3 (CG-DRAFT), 95%+ compliance (245 tests)
+- **Specification**: W3C ZCAP-LD v0.3 (CG-DRAFT), 95%+ compliance (266 tests)
 - **Crypto suites**: Ed25519 (NSec.Cryptography) and P-256 (System.Security.Cryptography), extensible via `ICryptoSuite` / `ICryptoSuiteProvider`
 - **Key management**: No default `IDidSigner` — consumers must provide their own (HSM/KMS/Key Vault)
 - **DID resolution**: `DidKeyResolver` (did:key), `CompositeDidResolver` (multi-method routing); returns `ResolvedKey(byte[] PublicKeyBytes, string KeyType)`
@@ -86,7 +89,8 @@ dotnet run --project examples/ZcapLd.Examples                          # Run con
 - **Revocation**: `IRevocationService` / `IRevocationStore` abstractions; `InMemoryRevocationStore` for dev; ASP.NET endpoints via `ZcapLd.AspNetCore`
 - **Replay protection**: `INonceStore` interface; `InMemoryNonceStore` (default), `NullNonceStore` (opt-out)
 - **Canonicalization**: RFC 8785 JSON Canonicalization (not full URDNA2015 — documented limitation)
-- **ASP.NET integration**: `AddZcapServices()` registers all core services; `AddZcapDidSigner<T>()` for signer; `AddZcapRevocationSupport()` and `MapZcapRevocationEndpoints()` for revocation
+- **ValidWhileTrue**: `ValidWhileTrueCaveat` model + `IValidWhileTrueHandler` interface in Core; `HttpValidWhileTrueHandler` in AspNetCore; `AddZcapValidWhileTrueSupport()` for DI; fail-closed when no handler configured
+- **ASP.NET integration**: `AddZcapServices()` registers all core services; `AddZcapDidSigner<T>()` for signer; `AddZcapRevocationSupport()` and `MapZcapRevocationEndpoints()` for revocation; `AddZcapValidWhileTrueSupport()` for remote revocation checking
 
 ## Workflow Orchestration
 
