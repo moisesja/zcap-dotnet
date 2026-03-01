@@ -1,3 +1,4 @@
+using System.Text.Json;
 using FluentAssertions;
 using Xunit;
 using ZcapLd.Core.Exceptions;
@@ -62,6 +63,37 @@ public class VerificationServiceTests
 
         // Act
         var result = await _verificationService.VerifyCapabilityProofAsync(delegatedCapability);
+
+        // Assert
+        result.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task VerifyCapabilityProof_AfterJsonRoundTrip_ShouldReturnTrue()
+    {
+        // Arrange — simulates HTTP POST: serialize capability → deserialize on server
+        var parentDid = "did:key:z6MkParent";
+        _didProvider.GenerateAndRegisterKeyPair(parentDid);
+
+        var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
+            parentDid,
+            "https://example.com/resource",
+            new[] { "read", "write" });
+
+        var delegatedCapability = await _capabilityService.DelegateCapabilityAsync(
+            rootCapability,
+            "did:key:z6MkChild",
+            new[] { "read" },
+            DateTime.UtcNow.AddDays(30));
+
+        // JSON round-trip: object → JSON string → new object
+        // This converts native C# types (string, object[], Capability) to JsonElement,
+        // which is exactly what happens when ASP.NET Core deserializes a POST body.
+        var json = JsonSerializer.Serialize(delegatedCapability);
+        var deserialized = JsonSerializer.Deserialize<Capability>(json)!;
+
+        // Act
+        var result = await _verificationService.VerifyCapabilityProofAsync(deserialized);
 
         // Assert
         result.Should().BeTrue();

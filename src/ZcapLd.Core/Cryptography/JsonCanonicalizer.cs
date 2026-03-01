@@ -81,6 +81,12 @@ public static class JsonCanonicalizer
                 writer.WriteStartObject();
                 foreach (var property in element.EnumerateObject().OrderBy(p => p.Name))
                 {
+                    // Skip null-valued properties so that JsonElement objects
+                    // (from JSON round-trips) produce the same canonical form
+                    // as native C# objects serialized with WhenWritingNull.
+                    if (property.Value.ValueKind == JsonValueKind.Null)
+                        continue;
+
                     writer.WritePropertyName(property.Name);
                     WriteElementSorted(writer, property.Value);
                 }
