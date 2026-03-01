@@ -182,8 +182,8 @@ public class CapabilityService : ICapabilityService
             if (isRoot)
             {
                 // Root capability validation
-                // Context MUST be string
-                if (capability.Context is not string)
+                // Context MUST be string (handles both native string and JsonElement after deserialization)
+                if (!IsStringContext(capability.Context))
                 {
                     return Task.FromResult(false);
                 }
@@ -203,8 +203,8 @@ public class CapabilityService : ICapabilityService
             else
             {
                 // Delegated capability validation
-                // Context MUST be array
-                if (capability.Context is not object[])
+                // Context MUST be array (handles both native object[] and JsonElement after deserialization)
+                if (!IsArrayContext(capability.Context))
                 {
                     return Task.FromResult(false);
                 }
@@ -371,4 +371,20 @@ public class CapabilityService : ICapabilityService
 
         return chain.ToArray();
     }
+
+    /// <summary>
+    /// Checks if Context is a string value, handling both native string
+    /// and JsonElement (which occurs after JSON deserialization of object-typed properties).
+    /// </summary>
+    private static bool IsStringContext(object? context) =>
+        context is string ||
+        (context is JsonElement je && je.ValueKind == JsonValueKind.String);
+
+    /// <summary>
+    /// Checks if Context is an array value, handling both native object[]
+    /// and JsonElement (which occurs after JSON deserialization of object-typed properties).
+    /// </summary>
+    private static bool IsArrayContext(object? context) =>
+        context is object[] ||
+        (context is JsonElement je && je.ValueKind == JsonValueKind.Array);
 }
