@@ -191,7 +191,14 @@ public class VerificationService : IVerificationService
     /// Verifies an invocation request
     /// SECURITY FIX S-04: Added validation for invocation ID (replay protection)
     /// </summary>
-    public async Task<bool> VerifyInvocationAsync(Invocation invocation, Capability capability)
+    public Task<bool> VerifyInvocationAsync(Invocation invocation, Capability capability)
+        => VerifyInvocationAsync(invocation, capability, contextProperties: null);
+
+    /// <inheritdoc />
+    public async Task<bool> VerifyInvocationAsync(
+        Invocation invocation,
+        Capability capability,
+        Dictionary<string, object>? contextProperties)
     {
         if (invocation == null)
             throw new ArgumentNullException(nameof(invocation));
@@ -260,6 +267,15 @@ public class VerificationService : IVerificationService
                 RequestedAction = invocation.CapabilityAction,
                 TargetResource = invocation.InvocationTarget
             };
+
+            // Merge caller-provided properties into the invocation context
+            if (contextProperties != null)
+            {
+                foreach (var kvp in contextProperties)
+                {
+                    context.Properties[kvp.Key] = kvp.Value;
+                }
+            }
 
             // Evaluate all caveats from the complete chain (not just leaf)
             if (!await _caveatProcessor.EvaluateCapabilityChainCaveatsAsync(chain.ToArray(), context))

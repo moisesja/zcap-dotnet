@@ -457,6 +457,95 @@ var revokedResult = await revokedVerifier.VerifyInvocationAsync(partnerInvocatio
 Console.WriteLine($"    Invocation valid: {revokedResult} (expected: False — capability revoked)");
 
 Console.WriteLine();
+
+// ===================================================
+// Example 9: Context Property Injection for Custom Caveats
+// ===================================================
+Console.WriteLine("Example 9: Context Property Injection for Custom Caveats");
+Console.WriteLine("---------------------------------------------------------");
+
+// Custom caveats often need application-specific metadata that isn't part of
+// the invocation document itself (e.g. HTTP Content-Type, schema URI, caller IP).
+// The 3-param VerifyInvocationAsync overload lets callers inject these properties
+// into InvocationContext.Properties, where custom caveats can read them.
+
+var apiOwnerDid = "did:key:z6MkApiOwner";
+var clientDid = "did:key:z6MkClient";
+didProvider.GenerateAndRegisterKeyPair(apiOwnerDid);
+didProvider.GenerateAndRegisterKeyPair(clientDid);
+
+// Create root capability for an API that only accepts JSON payloads
+var jsonApiRoot = await capabilityService.CreateRootCapabilityAsync(
+    controller: apiOwnerDid,
+    invocationTarget: "https://api.example.com/v1/records",
+    allowedActions: new[] { "read", "write" }
+);
+
+// Delegate to the client with a ContentType caveat requiring application/json
+var clientCapability = await capabilityService.DelegateCapabilityAsync(
+    parentCapability: jsonApiRoot,
+    newController: clientDid,
+    allowedActions: new[] { "write" },
+    expires: DateTime.UtcNow.AddDays(7),
+    caveats: new Caveat[]
+    {
+        new ContentTypeCaveat { RequiredContentType = "application/json" }
+    }
+);
+
+Console.WriteLine($"Delegated to client: {clientCapability.Id}");
+Console.WriteLine($"  Actions: {string.Join(", ", clientCapability.AllowedAction)}");
+Console.WriteLine($"  Caveat: ContentType must be application/json");
+
+// Client invokes the capability
+var clientInvocation = new Invocation
+{
+    Capability = clientCapability.Id,
+    CapabilityAction = "write",
+    InvocationTarget = "https://api.example.com/v1/records"
+};
+clientInvocation.Proof = await signingService.SignInvocationAsync(clientInvocation, clientDid);
+
+// Verify WITH correct content type injected from the HTTP request context
+Console.WriteLine("\n  With contentType = application/json:");
+var jsonResult = await verificationService.VerifyInvocationAsync(
+    clientInvocation,
+    clientCapability,
+    new Dictionary<string, object> { ["contentType"] = "application/json" });
+Console.WriteLine($"    Invocation valid: {jsonResult} (expected: True)");
+
+// Re-sign with fresh nonce, then verify with wrong content type
+var clientInvocation2 = new Invocation
+{
+    Capability = clientCapability.Id,
+    CapabilityAction = "write",
+    InvocationTarget = "https://api.example.com/v1/records"
+};
+clientInvocation2.Proof = await signingService.SignInvocationAsync(clientInvocation2, clientDid);
+
+Console.WriteLine("\n  With contentType = text/xml:");
+var xmlResult = await verificationService.VerifyInvocationAsync(
+    clientInvocation2,
+    clientCapability,
+    new Dictionary<string, object> { ["contentType"] = "text/xml" });
+Console.WriteLine($"    Invocation valid: {xmlResult} (expected: False — wrong content type)");
+
+// Re-sign with fresh nonce, then verify without any properties (caveat will reject)
+var clientInvocation3 = new Invocation
+{
+    Capability = clientCapability.Id,
+    CapabilityAction = "write",
+    InvocationTarget = "https://api.example.com/v1/records"
+};
+clientInvocation3.Proof = await signingService.SignInvocationAsync(clientInvocation3, clientDid);
+
+Console.WriteLine("\n  Without context properties (fail-closed):");
+var noPropsResult = await verificationService.VerifyInvocationAsync(
+    clientInvocation3,
+    clientCapability);
+Console.WriteLine($"    Invocation valid: {noPropsResult} (expected: False — no properties injected)");
+
+Console.WriteLine();
 Console.WriteLine("===========================================");
 Console.WriteLine("All examples completed successfully!");
 Console.WriteLine("===========================================");
