@@ -735,6 +735,139 @@ public class VerificationServiceTests
         result.Should().BeFalse(); // Caveat should cause failure
     }
 
+    [Fact]
+    public async Task VerifyInvocation_WithContextProperties_ShouldPassToCustomCaveat()
+    {
+        // Arrange
+        var controllerDid = "did:key:z6MkController";
+        _didProvider.GenerateAndRegisterKeyPair(controllerDid);
+
+        var caveat = new ContentTypeCaveat { RequiredContentType = "application/json" };
+
+        var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
+            controllerDid,
+            "https://example.com/resource",
+            new[] { "write" });
+
+        var delegatedCapability = await _capabilityService.DelegateCapabilityAsync(
+            rootCapability,
+            controllerDid,
+            new[] { "write" },
+            DateTime.UtcNow.AddDays(5),
+            new Caveat[] { caveat });
+
+        var invocation = new Invocation
+        {
+            Capability = delegatedCapability.Id,
+            CapabilityAction = "write",
+            InvocationTarget = "https://example.com/resource"
+        };
+        invocation.Proof = await _signingService.SignInvocationAsync(invocation, controllerDid);
+
+        // Act — inject the property the caveat expects
+        var result = await _verificationService.VerifyInvocationAsync(
+            invocation,
+            delegatedCapability,
+            new Dictionary<string, object> { ["contentType"] = "application/json" });
+
+        // Assert
+        result.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task VerifyInvocation_WithContextProperties_WrongValue_ShouldReturnFalse()
+    {
+        // Arrange
+        var controllerDid = "did:key:z6MkController";
+        _didProvider.GenerateAndRegisterKeyPair(controllerDid);
+
+        var caveat = new ContentTypeCaveat { RequiredContentType = "application/json" };
+
+        var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
+            controllerDid,
+            "https://example.com/resource",
+            new[] { "write" });
+
+        var delegatedCapability = await _capabilityService.DelegateCapabilityAsync(
+            rootCapability,
+            controllerDid,
+            new[] { "write" },
+            DateTime.UtcNow.AddDays(5),
+            new Caveat[] { caveat });
+
+        var invocation = new Invocation
+        {
+            Capability = delegatedCapability.Id,
+            CapabilityAction = "write",
+            InvocationTarget = "https://example.com/resource"
+        };
+        invocation.Proof = await _signingService.SignInvocationAsync(invocation, controllerDid);
+
+        // Act — inject a wrong content type
+        var result = await _verificationService.VerifyInvocationAsync(
+            invocation,
+            delegatedCapability,
+            new Dictionary<string, object> { ["contentType"] = "text/plain" });
+
+        // Assert
+        result.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task VerifyInvocation_WithNullContextProperties_ShouldSucceed()
+    {
+        // Arrange — same setup as valid invocation, but call the 3-param overload with null
+        var controllerDid = "did:key:z6MkController";
+        _didProvider.GenerateAndRegisterKeyPair(controllerDid);
+
+        var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
+            controllerDid,
+            "https://example.com/resource",
+            new[] { "read" });
+
+        var invocation = new Invocation
+        {
+            Capability = rootCapability.Id,
+            CapabilityAction = "read",
+            InvocationTarget = "https://example.com/resource"
+        };
+        invocation.Proof = await _signingService.SignInvocationAsync(invocation, controllerDid);
+
+        // Act
+        var result = await _verificationService.VerifyInvocationAsync(invocation, rootCapability, null);
+
+        // Assert
+        result.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task VerifyInvocation_WithEmptyContextProperties_ShouldSucceed()
+    {
+        // Arrange
+        var controllerDid = "did:key:z6MkController";
+        _didProvider.GenerateAndRegisterKeyPair(controllerDid);
+
+        var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
+            controllerDid,
+            "https://example.com/resource",
+            new[] { "read" });
+
+        var invocation = new Invocation
+        {
+            Capability = rootCapability.Id,
+            CapabilityAction = "read",
+            InvocationTarget = "https://example.com/resource"
+        };
+        invocation.Proof = await _signingService.SignInvocationAsync(invocation, controllerDid);
+
+        // Act
+        var result = await _verificationService.VerifyInvocationAsync(
+            invocation, rootCapability, new Dictionary<string, object>());
+
+        // Assert
+        result.Should().BeTrue();
+    }
+
     #endregion
 
     #region Revocation Tests
@@ -898,4 +1031,21 @@ public class VerificationServiceTests
     }
 
     #endregion
+}
+
+/// <summary>
+/// Test caveat that reads "contentType" from InvocationContext.Properties.
+/// Used to verify that contextProperties flow through the verification pipeline.
+/// </summary>
+internal class ContentTypeCaveat : Caveat
+{
+    public override string Type => "ContentType";
+    public string RequiredContentType { get; set; } = string.Empty;
+
+    public override bool IsSatisfied(InvocationContext context)
+    {
+        return context.Properties.TryGetValue("contentType", out var value)
+            && value is string contentType
+            && string.Equals(contentType, RequiredContentType, StringComparison.OrdinalIgnoreCase);
+    }
 }

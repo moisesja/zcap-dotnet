@@ -23,6 +23,17 @@ public interface IVerificationService
     Task<bool> VerifyInvocationAsync(Invocation invocation, Capability capability);
 
     /// <summary>
+    /// Verifies an invocation request with application-specific context properties.
+    /// Properties are merged into <see cref="InvocationContext.Properties"/> before caveat evaluation,
+    /// enabling custom caveats to read request-scoped metadata (e.g. content type, schema URI, caller IP).
+    /// </summary>
+    /// <param name="invocation">The invocation to verify</param>
+    /// <param name="capability">The capability being invoked</param>
+    /// <param name="contextProperties">Application-specific key/value pairs to inject into the invocation context</param>
+    /// <returns>True if the invocation is valid</returns>
+    Task<bool> VerifyInvocationAsync(Invocation invocation, Capability capability, Dictionary<string, object>? contextProperties);
+
+    /// <summary>
     /// Verifies a capability delegation chain
     /// </summary>
     /// <param name="capability">The capability with delegation chain</param>
