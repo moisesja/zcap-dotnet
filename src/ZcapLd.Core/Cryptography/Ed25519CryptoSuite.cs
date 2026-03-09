@@ -5,15 +5,9 @@ namespace ZcapLd.Core.Cryptography;
 /// </summary>
 public class Ed25519CryptoSuite : ICryptoSuite
 {
-    private static readonly byte[] _multicodecPrefix = [0xed, 0x01];
-
     public string ProofType => "Ed25519Signature2020";
 
     public string KeyType => "Ed25519VerificationKey2020";
-
-    public byte[] MulticodecPrefix => _multicodecPrefix;
-
-    public int PublicKeyLength => 32;
 
     public string ContextUrl => "https://w3id.org/security/suites/ed25519-2020/v1";
 

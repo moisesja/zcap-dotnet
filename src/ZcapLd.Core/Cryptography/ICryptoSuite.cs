@@ -20,17 +20,6 @@ public interface ICryptoSuite
     string KeyType { get; }
 
     /// <summary>
-    /// The multicodec prefix bytes that identify this key type in did:key encoding.
-    /// For Ed25519: [0xed, 0x01]. For P-256: [0x80, 0x24].
-    /// </summary>
-    byte[] MulticodecPrefix { get; }
-
-    /// <summary>
-    /// The expected public key length in bytes (e.g. 32 for Ed25519, 33 for compressed P-256).
-    /// </summary>
-    int PublicKeyLength { get; }
-
-    /// <summary>
     /// The JSON-LD context URL for this signature suite
     /// (e.g. "https://w3id.org/security/suites/ed25519-2020/v1").
     /// </summary>

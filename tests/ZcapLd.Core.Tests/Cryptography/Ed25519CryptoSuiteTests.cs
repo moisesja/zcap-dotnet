@@ -21,18 +21,6 @@ public class Ed25519CryptoSuiteTests
     }
 
     [Fact]
-    public void MulticodecPrefix_ShouldBeEd25519Prefix()
-    {
-        _suite.MulticodecPrefix.Should().Equal([0xed, 0x01]);
-    }
-
-    [Fact]
-    public void PublicKeyLength_ShouldBe32()
-    {
-        _suite.PublicKeyLength.Should().Be(32);
-    }
-
-    [Fact]
     public void Sign_ShouldDelegateToEd25519Signer()
     {
         // Arrange
