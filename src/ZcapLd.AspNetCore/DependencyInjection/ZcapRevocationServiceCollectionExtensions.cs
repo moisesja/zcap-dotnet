@@ -40,9 +40,8 @@ public static class ZcapRevocationServiceCollectionExtensions
             return provider;
         });
 
-        // DidKeyResolver depends on ICryptoSuiteProvider for multicodec prefix decoding
-        services.TryAddSingleton<IDidResolver>(sp =>
-            new DidKeyResolver(sp.GetRequiredService<ICryptoSuiteProvider>()));
+        // DidKeyResolver delegates to NetDid's DidKeyMethod for did:key resolution
+        services.TryAddSingleton<IDidResolver>(sp => new DidKeyResolver());
 
         // SigningService depends on IDidSigner + IDidResolver + ICryptoSuiteProvider.
         // No default IDidSigner — consumers must provide their own secure implementation.

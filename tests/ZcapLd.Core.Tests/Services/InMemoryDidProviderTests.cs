@@ -155,8 +155,7 @@ public class InMemoryDidProviderTests
 
         // Act & Assert
         var act = async () => await _provider.ResolvePublicKeyAsync(invalidDidKey);
-        await act.Should().ThrowAsync<CapabilityValidationException>()
-            .WithMessage("*must start with 'z'*");
+        await act.Should().ThrowAsync<CapabilityValidationException>();
     }
 
     #endregion

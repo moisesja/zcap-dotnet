@@ -41,50 +41,6 @@ public class CryptoSuiteProviderTests
     }
 
     [Fact]
-    public void GetByMulticodecPrefix_WhenRegistered_ShouldReturnSuite()
-    {
-        // Arrange
-        var suite = new Ed25519CryptoSuite();
-        _provider.Register(suite);
-        byte[] data = [0xed, 0x01, 0x00, 0x00]; // Ed25519 prefix + extra bytes
-
-        // Act
-        var result = _provider.GetByMulticodecPrefix(data);
-
-        // Assert
-        result.Should().NotBeNull();
-        result.Should().BeSameAs(suite);
-    }
-
-    [Fact]
-    public void GetByMulticodecPrefix_WhenNotRegistered_ShouldReturnNull()
-    {
-        // Arrange
-        _provider.Register(new Ed25519CryptoSuite());
-        byte[] unknownPrefix = [0x80, 0x24, 0x00]; // P-256 prefix, not registered
-
-        // Act
-        var result = _provider.GetByMulticodecPrefix(unknownPrefix);
-
-        // Assert
-        result.Should().BeNull();
-    }
-
-    [Fact]
-    public void GetByMulticodecPrefix_WithShortData_ShouldReturnNull()
-    {
-        // Arrange
-        _provider.Register(new Ed25519CryptoSuite());
-        byte[] tooShort = [0xed]; // Only one byte, prefix is 2 bytes
-
-        // Act
-        var result = _provider.GetByMulticodecPrefix(tooShort);
-
-        // Assert
-        result.Should().BeNull();
-    }
-
-    [Fact]
     public void Register_ShouldReplaceDuplicateProofType()
     {
         // Arrange

@@ -8,15 +8,9 @@ namespace ZcapLd.Core.Cryptography;
 /// </summary>
 public class P256CryptoSuite : ICryptoSuite
 {
-    private static readonly byte[] _multicodecPrefix = [0x80, 0x24];
-
     public string ProofType => "EcdsaSecp256r1Signature2019";
 
     public string KeyType => "EcdsaSecp256r1VerificationKey2019";
-
-    public byte[] MulticodecPrefix => _multicodecPrefix;
-
-    public int PublicKeyLength => 33; // compressed EC point
 
     public string ContextUrl => "https://w3id.org/security/suites/ecdsa-2019/v1";
 

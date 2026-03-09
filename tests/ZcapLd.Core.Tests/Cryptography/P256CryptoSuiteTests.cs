@@ -21,18 +21,6 @@ public class P256CryptoSuiteTests
     }
 
     [Fact]
-    public void MulticodecPrefix_ShouldBeP256Prefix()
-    {
-        _suite.MulticodecPrefix.Should().Equal([0x80, 0x24]);
-    }
-
-    [Fact]
-    public void PublicKeyLength_ShouldBe33()
-    {
-        _suite.PublicKeyLength.Should().Be(33);
-    }
-
-    [Fact]
     public void ContextUrl_ShouldBeEcdsa2019()
     {
         _suite.ContextUrl.Should().Be("https://w3id.org/security/suites/ecdsa-2019/v1");

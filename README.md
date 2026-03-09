@@ -20,6 +20,7 @@ This library provides:
 - Revocation persistence with pluggable storage backends
 - ValidWhileTrue caveat support with HTTP-based remote revocation checking
 - Pluggable crypto suites (Ed25519 and P-256 included, additional curves extensible)
+- DID resolution via [NetDid](https://www.nuget.org/packages/NetDid.Core) (W3C-compliant did:key support)
 - Dynamic JSON-LD context URLs per crypto suite
 - Multibase signature encoding
 
@@ -41,16 +42,10 @@ using ZcapLd.Core.Services;
 // IDidSigner (HSM/Key Vault) and IDidResolver implementations.
 var didProvider = new InMemoryDidProvider(); // test helper: IDidSigner + IDidResolver
 
-var suiteProvider = new CryptoSuiteProvider();
-suiteProvider.Register(new Ed25519CryptoSuite());
-
-var signingService = new SigningService(didProvider, didProvider, suiteProvider);
+var signingService = new SigningService(didProvider, didProvider);
 var capabilityService = new CapabilityService(signingService);
 var caveatProcessor = new CaveatProcessor();
-var revocationService = new RevocationService(new InMemoryRevocationStore());
-var nonceStore = new InMemoryNonceStore();
-var verificationService = new VerificationService(
-    didProvider, caveatProcessor, suiteProvider, revocationService, nonceStore);
+var verificationService = new VerificationService(didProvider, caveatProcessor);
 
 var rootDid = "did:key:z6MkRoot";
 var leafDid = "did:key:z6MkLeaf";
@@ -227,4 +222,5 @@ dotnet pack src/ZcapLd.AspNetCore/ZcapLd.AspNetCore.csproj -c Release
 - No default `IDidSigner` ships in the core package — consumers must provide their own (HSM/KMS/Key Vault).
 - `InMemoryDidProvider` (in examples and tests) stores private keys in plaintext memory and is NOT for production use.
 - Canonicalization currently uses deterministic JSON canonicalization, not full RDF Dataset Canonicalization.
+- DID resolution uses [NetDid](https://www.nuget.org/packages/NetDid.Core) for W3C-compliant did:key support; multibase encoding uses [NetCid](https://www.nuget.org/packages/NetCid).
 - The `ICryptoSuite` abstraction supports pluggable algorithms; Ed25519 and P-256 are registered by default.

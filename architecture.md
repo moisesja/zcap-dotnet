@@ -30,7 +30,7 @@ Primary assembly: `src/ZcapLd.Core`.
 - `ICapabilityService`: create/delegate/validate capabilities
 - `ISigningService`: sign capability and invocation documents
 - `IVerificationService`: verify proof/chain/invocation, resolve keys, revocation API
-- `IDidResolver`: resolve DIDs to public keys (returns `ResolvedKey` with key type); implementations: `DidKeyResolver`, `CompositeDidResolver`
+- `IDidResolver`: resolve DIDs to public keys (returns `ResolvedKey` with key type); implementations: `DidKeyResolver` (wraps NetDid's `DidKeyMethod`), `CompositeDidResolver`
 - `IDidSigner`: sign data using a DID's private key; no default implementation in core — consumers provide their own
 - `ICaveatProcessor`: caveat merge/compatibility/evaluation
 - `INonceStore`: pluggable persistence contract for invocation nonce tracking (replay protection); implementations: `InMemoryNonceStore`, `NullNonceStore` (no-op)
@@ -73,7 +73,7 @@ Primary assembly: `src/ZcapLd.Core`.
 - `Ed25519CryptoSuite`: Ed25519 suite wrapping `Ed25519Signer` static methods
 - `P256CryptoSuite`: NIST P-256 (secp256r1) suite using `System.Security.Cryptography.ECDsa` (zero extra dependencies)
 - `EcPointCompression`: internal helper for P-256 compressed public key encoding/decoding
-- `MultibaseCodec`: algorithm-agnostic multibase encoding/decoding and document canonicalization
+- `MultibaseCodec`: algorithm-agnostic multibase encoding/decoding (delegates to NetCid) and document canonicalization
 - `Ed25519Signer`: low-level Ed25519 sign/verify (static utility)
 - `JsonCanonicalizer`: deterministic JSON canonicalization (RFC 8785)
 - `SignatureVerifier`: helper wrapper for signature checks (accepts `ICryptoSuite`)
@@ -140,7 +140,7 @@ The `ValidWhileTrueCaveat` embeds a URI that the verifier checks at invocation t
 
 ### DID Resolution
 
-Implement `IDidResolver` for additional DID methods (did:web, did:ion, etc.) and register them in `CompositeDidResolver`. The resolver returns `ResolvedKey(byte[] PublicKeyBytes, string KeyType)` so the verification service knows which crypto suite to use.
+DID resolution for did:key is handled by `DidKeyResolver`, which wraps NetDid's `DidKeyMethod`. For additional DID methods (did:web, did:ion, etc.), implement `IDidResolver` and register in `CompositeDidResolver`. The resolver returns `ResolvedKey(byte[] PublicKeyBytes, string KeyType)` so the verification service knows which crypto suite to use.
 
 ### Revocation Storage
 

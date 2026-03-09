@@ -1,10 +1,10 @@
-using SimpleBase;
+using NetCid;
 
 namespace ZcapLd.Core.Cryptography;
 
 /// <summary>
 /// Algorithm-agnostic utilities for multibase encoding/decoding and document canonicalization.
-/// These operations are shared across all crypto suites — they are NOT signature-algorithm-specific.
+/// Delegates multibase operations to NetCid.
 /// </summary>
 public static class MultibaseCodec
 {
@@ -33,8 +33,7 @@ public static class MultibaseCodec
 
         try
         {
-            var base58 = Base58.Bitcoin.Encode(data);
-            return "z" + base58;
+            return Multibase.Encode(data, MultibaseEncoding.Base58Btc);
         }
         catch (Exception ex)
         {
@@ -58,12 +57,15 @@ public static class MultibaseCodec
         {
             if (!encoded.StartsWith("z"))
             {
-                throw new ArgumentException("Multibase string must start with 'z' prefix", nameof(encoded));
+                throw new Exceptions.CryptographicException(
+                    "Multibase string must start with 'z' prefix");
             }
 
-            var base58String = encoded.Substring(1);
-            var decoded = Base58.Bitcoin.Decode(base58String);
-            return decoded.ToArray();
+            return Multibase.Decode(encoded);
+        }
+        catch (Exceptions.CryptographicException)
+        {
+            throw;
         }
         catch (Exception ex)
         {
