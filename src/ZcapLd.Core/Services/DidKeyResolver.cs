@@ -1,4 +1,6 @@
-using ZcapLd.Core.Cryptography;
+using NetCid;
+using NetDid.Core.Crypto;
+using NetDid.Method.Key;
 using ZcapLd.Core.Exceptions;
 using ZcapLd.Core.Models;
 
@@ -6,32 +8,33 @@ namespace ZcapLd.Core.Services;
 
 /// <summary>
 /// Resolves did:key DIDs to their public keys and verification method URIs.
-/// Stateless and secret-free — the public key is encoded directly in the DID string.
-///
-/// Supports any key type registered in the <see cref="ICryptoSuiteProvider"/>
-/// (e.g. Ed25519, P-256, secp256k1) via multicodec prefix matching.
+/// Delegates to NetDid's <see cref="DidKeyMethod"/> for DID document resolution
+/// and adapts the result to ZcapLd's <see cref="IDidResolver"/> interface.
 /// </summary>
 public class DidKeyResolver : IDidResolver
 {
-    private readonly ICryptoSuiteProvider _suiteProvider;
+    private readonly DidKeyMethod _didKeyMethod;
 
     /// <summary>
-    /// Creates a DidKeyResolver that can decode any key type registered in the suite provider.
+    /// Creates a DidKeyResolver with default NetDid key generator support.
     /// </summary>
-    public DidKeyResolver(ICryptoSuiteProvider suiteProvider)
+    public DidKeyResolver()
+        : this(new DidKeyMethod(new DefaultKeyGenerator()))
     {
-        _suiteProvider = suiteProvider ?? throw new ArgumentNullException(nameof(suiteProvider));
     }
 
     /// <summary>
-    /// Creates a DidKeyResolver with Ed25519 support only (backward-compatible default).
+    /// Creates a DidKeyResolver wrapping an existing <see cref="DidKeyMethod"/> instance.
     /// </summary>
-    public DidKeyResolver() : this(CreateDefaultProvider()) { }
+    public DidKeyResolver(DidKeyMethod didKeyMethod)
+    {
+        _didKeyMethod = didKeyMethod ?? throw new ArgumentNullException(nameof(didKeyMethod));
+    }
 
     /// <summary>
     /// Resolves a did:key DID or verification method URI to its public key material.
     /// </summary>
-    public Task<ResolvedKey> ResolvePublicKeyAsync(string didOrVerificationMethod)
+    public async Task<ResolvedKey> ResolvePublicKeyAsync(string didOrVerificationMethod)
     {
         if (string.IsNullOrEmpty(didOrVerificationMethod))
             throw new ArgumentException("DID cannot be null or empty", nameof(didOrVerificationMethod));
@@ -42,34 +45,33 @@ public class DidKeyResolver : IDidResolver
                 $"DidKeyResolver only handles did:key DIDs, got: {didOrVerificationMethod}");
         }
 
-        var keyPart = didOrVerificationMethod.Replace("did:key:", "").Split('#')[0];
-
-        if (!keyPart.StartsWith('z'))
-        {
-            throw new CapabilityValidationException(
-                $"Invalid did:key format (must start with 'z'): {didOrVerificationMethod}");
-        }
+        var baseDid = didOrVerificationMethod.Split('#')[0];
 
         try
         {
-            var decoded = MultibaseCodec.Decode(keyPart);
+            var result = await _didKeyMethod.ResolveAsync(baseDid);
 
-            // Look up suite by multicodec prefix
-            var suite = _suiteProvider.GetByMulticodecPrefix(decoded);
-            if (suite != null)
+            if (result.DidDocument == null || result.ResolutionMetadata.Error != null)
             {
-                var prefixLength = suite.MulticodecPrefix.Length;
-                var expectedTotal = prefixLength + suite.PublicKeyLength;
-
-                if (decoded.Length >= expectedTotal)
-                {
-                    var publicKeyBytes = decoded.AsSpan(prefixLength, suite.PublicKeyLength).ToArray();
-                    return Task.FromResult(new ResolvedKey(publicKeyBytes, suite.KeyType));
-                }
+                throw new CapabilityValidationException(
+                    $"Failed to resolve did:key: {didOrVerificationMethod}");
             }
 
-            throw new CapabilityValidationException(
-                $"Unrecognized multicodec prefix or invalid key length in: {didOrVerificationMethod}");
+            var vm = result.DidDocument.VerificationMethod?.FirstOrDefault()
+                ?? throw new CapabilityValidationException(
+                    $"No verification method found in resolved DID document: {didOrVerificationMethod}");
+
+            if (vm.PublicKeyMultibase == null)
+            {
+                throw new CapabilityValidationException(
+                    $"Verification method has no PublicKeyMultibase: {didOrVerificationMethod}");
+            }
+
+            var decoded = Multibase.Decode(vm.PublicKeyMultibase);
+            var (codec, rawKey) = Multicodec.Decode(decoded);
+            var keyType = KeyTypeExtensions.ToKeyType(codec);
+
+            return new ResolvedKey(rawKey, MapKeyType(keyType));
         }
         catch (CapabilityValidationException)
         {
@@ -101,11 +103,17 @@ public class DidKeyResolver : IDidResolver
         return Task.FromResult($"{did}#{keyId}");
     }
 
-    private static ICryptoSuiteProvider CreateDefaultProvider()
+    /// <summary>
+    /// Maps NetDid's <see cref="KeyType"/> enum to ZcapLd key type strings
+    /// used by <see cref="Cryptography.ICryptoSuite"/>.
+    /// </summary>
+    internal static string MapKeyType(KeyType keyType) => keyType switch
     {
-        var provider = new CryptoSuiteProvider();
-        provider.Register(new Ed25519CryptoSuite());
-        provider.Register(new P256CryptoSuite());
-        return provider;
-    }
+        KeyType.Ed25519 => "Ed25519VerificationKey2020",
+        KeyType.P256 => "EcdsaSecp256r1VerificationKey2019",
+        KeyType.P384 => "EcdsaSecp384r1VerificationKey2019",
+        KeyType.Secp256k1 => "EcdsaSecp256k1VerificationKey2019",
+        KeyType.X25519 => "X25519KeyAgreementKey2020",
+        _ => throw new CapabilityValidationException($"Unsupported key type: {keyType}")
+    };
 }

@@ -32,8 +32,9 @@ zcap-dotnet/
 ├── src/
 │   ├── ZcapLd.Core/                    # Core library (NuGet package)
 │   │   ├── Cryptography/               # ICryptoSuite, CryptoSuiteProvider, Ed25519CryptoSuite,
-│   │   │                               #   P256CryptoSuite, MultibaseCodec, JsonCanonicalizer,
-│   │   │                               #   EcPointCompression, Ed25519Signer, SignatureVerifier
+│   │   │                               #   P256CryptoSuite, MultibaseCodec (delegates to NetCid),
+│   │   │                               #   JsonCanonicalizer, EcPointCompression, Ed25519Signer,
+│   │   │                               #   SignatureVerifier
 │   │   ├── Models/                     # Capability, Proof, Invocation, Caveat, ValidWhileTrueCaveat,
 │   │   │                               #   InvocationContext, ResolvedKey, SignatureResult,
 │   │   │                               #   RevocationRecord, RevocationRequest
@@ -48,7 +49,7 @@ zcap-dotnet/
 │       ├── Endpoints/                  # MapZcapRevocationEndpoints()
 │       ├── Services/                   # HttpValidWhileTrueHandler
 │       └── Contracts/                  # RevokeCapabilityHttpRequest, RevocationStatusHttpResponse
-├── tests/ZcapLd.Core.Tests/           # xUnit + FluentAssertions (266 tests)
+├── tests/ZcapLd.Core.Tests/           # xUnit + FluentAssertions
 │   ├── Cryptography/                   # Ed25519, P256, JsonCanonicalizer, MultibaseCodec, etc.
 │   ├── Services/                       # CapabilityService, VerificationService, Revocation, Replay, etc.
 │   ├── Models/                         # Capability serialization tests
@@ -71,7 +72,7 @@ zcap-dotnet/
 ```bash
 dotnet restore                                                         # Restore NuGet packages
 dotnet build ZcapLd.sln                                                # Build entire solution
-dotnet test ZcapLd.sln                                                 # Run all 266 tests
+dotnet test ZcapLd.sln                                                 # Run all tests
 dotnet pack src/ZcapLd.Core/ZcapLd.Core.csproj -c Release             # Pack core library
 dotnet pack src/ZcapLd.AspNetCore/ZcapLd.AspNetCore.csproj -c Release  # Pack ASP.NET adapter
 dotnet run --project examples/ZcapLd.Examples                          # Run console examples
@@ -80,10 +81,11 @@ dotnet run --project examples/ZcapLd.Examples                          # Run con
 ## Architecture Notes
 
 - **Target framework**: .NET 10 (`net10.0`)
-- **Specification**: W3C ZCAP-LD v0.3 (CG-DRAFT), 95%+ compliance (266 tests)
+- **Specification**: W3C ZCAP-LD v0.3 (CG-DRAFT), 95%+ compliance (283 tests)
 - **Crypto suites**: Ed25519 (NSec.Cryptography) and P-256 (System.Security.Cryptography), extensible via `ICryptoSuite` / `ICryptoSuiteProvider`
 - **Key management**: No default `IDidSigner` — consumers must provide their own (HSM/KMS/Key Vault)
-- **DID resolution**: `DidKeyResolver` (did:key), `CompositeDidResolver` (multi-method routing); returns `ResolvedKey(byte[] PublicKeyBytes, string KeyType)`
+- **DID resolution**: `DidKeyResolver` (wraps NetDid's `DidKeyMethod`), `CompositeDidResolver` (multi-method routing); returns `ResolvedKey(byte[] PublicKeyBytes, string KeyType)`
+- **DID packages**: [NetDid.Core](https://www.nuget.org/packages/NetDid.Core) + [NetDid.Method.Key](https://www.nuget.org/packages/NetDid.Method.Key) for W3C-compliant did:key creation/resolution; multibase via [NetCid](https://www.nuget.org/packages/NetCid)
 - **Signing**: `SigningService` delegates to `IDidSigner`; resolves verification methods via `IDidResolver` and context URLs via `ICryptoSuiteProvider`
 - **Verification**: `VerificationService` dispatches to correct `ICryptoSuite` by proof type; enforces chain validity, attenuation, caveats, revocation, and replay protection
 - **Revocation**: `IRevocationService` / `IRevocationStore` abstractions; `InMemoryRevocationStore` for dev; ASP.NET endpoints via `ZcapLd.AspNetCore`

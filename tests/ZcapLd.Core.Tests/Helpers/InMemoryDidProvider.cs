@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using NetDid.Core.Crypto;
 using ZcapLd.Core.Cryptography;
 using ZcapLd.Core.Models;
 using ZcapLd.Core.Services;
@@ -83,17 +84,11 @@ public class InMemoryDidProvider : IDidSigner, IDidResolver
 
     public string GenerateDidKey()
     {
-        var (privateKey, publicKey) = Ed25519Signer.GenerateKeyPair();
+        var keyGen = new DefaultKeyGenerator();
+        var keyPair = keyGen.Generate(KeyType.Ed25519);
+        var did = $"did:key:{keyPair.MultibasePublicKey}";
 
-        var prefixed = new byte[34];
-        prefixed[0] = 0xed;
-        prefixed[1] = 0x01;
-        Buffer.BlockCopy(publicKey, 0, prefixed, 2, 32);
-
-        var multibaseKey = MultibaseCodec.Encode(prefixed);
-        var did = $"did:key:{multibaseKey}";
-
-        RegisterKey(did, privateKey);
+        RegisterKey(did, keyPair.PrivateKey);
         return did;
     }
 }
