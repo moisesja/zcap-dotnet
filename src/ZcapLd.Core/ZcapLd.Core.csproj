@@ -51,7 +51,7 @@
     <PackageReference Include="NetDid.Method.Key" Version="1.0.0" />
 
     <!-- Embed source and commit metadata for debugging/open-source distribution -->
-    <PackageReference Include="Microsoft.SourceLink.GitHub" Version="8.0.0" PrivateAssets="All" />
+    <PackageReference Include="Microsoft.SourceLink.GitHub" Version="10.0.201" PrivateAssets="All" />
   </ItemGroup>
 
   <ItemGroup>
