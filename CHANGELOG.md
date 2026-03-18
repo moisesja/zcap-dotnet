@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- Replaced `Ed25519CryptoSuite`, `P256CryptoSuite`, `Ed25519Signer`, and `EcPointCompression` with single parameterized `CryptoSuite` class delegating to NetDid's `DefaultCryptoProvider` (Issue #23)
+- `CryptoSuite.Ed25519()` and `CryptoSuite.P256()` static factory methods replace individual suite classes
+
+### Removed
+
+- `Ed25519Signer` static class (replaced by `DefaultCryptoProvider`)
+- `EcPointCompression` internal class (replaced by NetDid's `DecompressEcPoint`)
+- `Ed25519CryptoSuite` class (replaced by `CryptoSuite.Ed25519()`)
+- `P256CryptoSuite` class (replaced by `CryptoSuite.P256()`)
+- Direct `NSec.Cryptography` dependency (now transitive via NetDid.Core)
+
 ## [1.0.0] - Released
 
 ### Added

@@ -26,8 +26,8 @@ public static class ZcapRevocationServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(services);
 
         // Register built-in crypto suites by default; additional suites can be added via AddZcapCryptoSuite<T>()
-        services.TryAddEnumerable(ServiceDescriptor.Singleton<ICryptoSuite, Ed25519CryptoSuite>());
-        services.TryAddEnumerable(ServiceDescriptor.Singleton<ICryptoSuite, P256CryptoSuite>());
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<ICryptoSuite>(CryptoSuite.Ed25519()));
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<ICryptoSuite>(CryptoSuite.P256()));
 
         // Build ICryptoSuiteProvider from all registered ICryptoSuite instances
         services.TryAddSingleton<ICryptoSuiteProvider>(sp =>

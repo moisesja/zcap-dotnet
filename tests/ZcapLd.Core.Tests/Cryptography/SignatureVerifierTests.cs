@@ -11,7 +11,7 @@ public class SignatureVerifierTests
 {
     private readonly InMemoryDidProvider _didProvider = new();
     private readonly SigningService _signingService;
-    private readonly Ed25519CryptoSuite _suite = new();
+    private readonly ICryptoSuite _suite = CryptoSuite.Ed25519();
 
     public SignatureVerifierTests()
     {

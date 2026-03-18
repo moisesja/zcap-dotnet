@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using NetDid.Core.Crypto;
 using ZcapLd.Core.Cryptography;
 using ZcapLd.Core.Models;
 using ZcapLd.Core.Services;
@@ -15,6 +16,8 @@ namespace ZcapLd.Examples;
 /// </summary>
 public class InMemoryDidProvider : IDidSigner, IDidResolver
 {
+    private static readonly DefaultCryptoProvider Crypto = new();
+    private static readonly DefaultKeyGenerator KeyGen = new();
     private readonly ConcurrentDictionary<string, byte[]> _keyStore = new();
     private readonly DidKeyResolver _didKeyResolver = new();
 
@@ -23,7 +26,7 @@ public class InMemoryDidProvider : IDidSigner, IDidResolver
         if (!_keyStore.TryGetValue(did, out var privateKey))
             throw new InvalidOperationException($"No private key registered for DID: {did}");
 
-        var signatureBytes = Ed25519Signer.Sign(data, privateKey);
+        var signatureBytes = Crypto.Sign(KeyType.Ed25519, privateKey, data);
         return Task.FromResult(new SignatureResult(signatureBytes, "Ed25519Signature2020"));
     }
 
@@ -31,7 +34,10 @@ public class InMemoryDidProvider : IDidSigner, IDidResolver
     {
         var baseDid = didOrVerificationMethod.Split('#')[0];
         if (_keyStore.TryGetValue(baseDid, out var privateKey))
-            return Task.FromResult(new ResolvedKey(Ed25519Signer.GetPublicKey(privateKey), "Ed25519VerificationKey2020"));
+        {
+            var publicKey = KeyGen.FromPrivateKey(KeyType.Ed25519, privateKey).PublicKey;
+            return Task.FromResult(new ResolvedKey(publicKey, "Ed25519VerificationKey2020"));
+        }
 
         return _didKeyResolver.ResolvePublicKeyAsync(didOrVerificationMethod);
     }
@@ -46,8 +52,8 @@ public class InMemoryDidProvider : IDidSigner, IDidResolver
 
     public void GenerateAndRegisterKeyPair(string did)
     {
-        // Notice that is is unsecured. Make sure to use a secure key management solution in production.
-        var (privateKey, _) = Ed25519Signer.GenerateKeyPair();
-        _keyStore[did] = privateKey;
+        // Notice that this is unsecured. Make sure to use a secure key management solution in production.
+        var kp = KeyGen.Generate(KeyType.Ed25519);
+        _keyStore[did] = kp.PrivateKey;
     }
 }
