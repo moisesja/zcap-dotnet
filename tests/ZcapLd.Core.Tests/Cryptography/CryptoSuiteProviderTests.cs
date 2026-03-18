@@ -12,7 +12,7 @@ public class CryptoSuiteProviderTests
     public void GetByProofType_WhenRegistered_ShouldReturnSuite()
     {
         // Arrange
-        var suite = new Ed25519CryptoSuite();
+        var suite = CryptoSuite.Ed25519();
         _provider.Register(suite);
 
         // Act
@@ -44,8 +44,8 @@ public class CryptoSuiteProviderTests
     public void Register_ShouldReplaceDuplicateProofType()
     {
         // Arrange
-        var suite1 = new Ed25519CryptoSuite();
-        var suite2 = new Ed25519CryptoSuite();
+        var suite1 = CryptoSuite.Ed25519();
+        var suite2 = CryptoSuite.Ed25519();
         _provider.Register(suite1);
 
         // Act

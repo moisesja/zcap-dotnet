@@ -1,4 +1,5 @@
 using FluentAssertions;
+using NetDid.Core.Crypto;
 using Xunit;
 using ZcapLd.Core.Cryptography;
 using ZcapLd.Core.Exceptions;
@@ -8,6 +9,8 @@ namespace ZcapLd.Core.Tests.Services;
 
 public class InMemoryDidProviderTests
 {
+    private static readonly DefaultCryptoProvider Crypto = new();
+    private static readonly DefaultKeyGenerator KeyGen = new();
     private readonly InMemoryDidProvider _provider;
 
     public InMemoryDidProviderTests()
@@ -79,7 +82,7 @@ public class InMemoryDidProviderTests
         var result = await _provider.SignAsync(did, data);
 
         // Assert - verify signature with public key
-        Ed25519Signer.Verify(data, result.Signature, publicKey).Should().BeTrue();
+        Crypto.Verify(KeyType.Ed25519, publicKey, data, result.Signature).Should().BeTrue();
     }
 
     #endregion
@@ -205,10 +208,10 @@ public class InMemoryDidProviderTests
     {
         // Arrange
         var did = "did:key:z6MkTest";
-        var (privateKey, _) = Ed25519Signer.GenerateKeyPair();
+        var kp = KeyGen.Generate(KeyType.Ed25519);
 
         // Act
-        _provider.RegisterKey(did, privateKey);
+        _provider.RegisterKey(did, kp.PrivateKey);
 
         // Assert - should not throw, and key should be usable
         var act = async () => await _provider.SignAsync(did, "test"u8.ToArray());
@@ -232,10 +235,10 @@ public class InMemoryDidProviderTests
     public void RegisterKey_WithEmptyDid_ShouldThrow()
     {
         // Arrange
-        var (privateKey, _) = Ed25519Signer.GenerateKeyPair();
+        var kp = KeyGen.Generate(KeyType.Ed25519);
 
         // Act & Assert
-        var act = () => _provider.RegisterKey("", privateKey);
+        var act = () => _provider.RegisterKey("", kp.PrivateKey);
         act.Should().Throw<ArgumentException>();
     }
 

@@ -12,6 +12,8 @@ namespace ZcapLd.Core.Tests.Helpers;
 /// </summary>
 public class InMemoryDidProvider : IDidSigner, IDidResolver
 {
+    private static readonly DefaultCryptoProvider Crypto = new();
+    private static readonly DefaultKeyGenerator KeyGen = new();
     private readonly ConcurrentDictionary<string, byte[]> _keyStore = new();
     private readonly DidKeyResolver _didKeyResolver = new();
 
@@ -27,7 +29,7 @@ public class InMemoryDidProvider : IDidSigner, IDidResolver
         if (!_keyStore.TryGetValue(did, out var privateKey))
             throw new InvalidOperationException($"No private key registered for DID: {did}");
 
-        var signatureBytes = Ed25519Signer.Sign(data, privateKey);
+        var signatureBytes = Crypto.Sign(KeyType.Ed25519, privateKey, data);
         return Task.FromResult(new SignatureResult(signatureBytes, "Ed25519Signature2020"));
     }
 
@@ -42,7 +44,8 @@ public class InMemoryDidProvider : IDidSigner, IDidResolver
         var baseDid = didOrVerificationMethod.Split('#')[0];
         if (_keyStore.TryGetValue(baseDid, out var privateKey))
         {
-            return Task.FromResult(new ResolvedKey(Ed25519Signer.GetPublicKey(privateKey), "Ed25519VerificationKey2020"));
+            var publicKey = KeyGen.FromPrivateKey(KeyType.Ed25519, privateKey).PublicKey;
+            return Task.FromResult(new ResolvedKey(publicKey, "Ed25519VerificationKey2020"));
         }
 
         // Fall back to did:key resolver for public-key-in-DID resolution
@@ -77,15 +80,14 @@ public class InMemoryDidProvider : IDidSigner, IDidResolver
 
     public (byte[] PrivateKey, byte[] PublicKey) GenerateAndRegisterKeyPair(string did)
     {
-        var (privateKey, publicKey) = Ed25519Signer.GenerateKeyPair();
-        RegisterKey(did, privateKey);
-        return (privateKey, publicKey);
+        var kp = KeyGen.Generate(KeyType.Ed25519);
+        RegisterKey(did, kp.PrivateKey);
+        return (kp.PrivateKey, kp.PublicKey);
     }
 
     public string GenerateDidKey()
     {
-        var keyGen = new DefaultKeyGenerator();
-        var keyPair = keyGen.Generate(KeyType.Ed25519);
+        var keyPair = KeyGen.Generate(KeyType.Ed25519);
         var did = $"did:key:{keyPair.MultibasePublicKey}";
 
         RegisterKey(did, keyPair.PrivateKey);

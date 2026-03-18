@@ -43,12 +43,9 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- Cryptography for Ed25519 signing/verification -->
-    <PackageReference Include="NSec.Cryptography" Version="25.4.0" />
-
-    <!-- W3C DID Core and did:key method (replaces hand-rolled DID resolution and SimpleBase multibase) -->
-    <PackageReference Include="NetDid.Core" Version="1.0.0" />
-    <PackageReference Include="NetDid.Method.Key" Version="1.0.0" />
+    <!-- W3C DID Core and did:key method (provides crypto, DID resolution, and multibase) -->
+    <PackageReference Include="NetDid.Core" Version="1.1.1" />
+    <PackageReference Include="NetDid.Method.Key" Version="1.1.1" />
 
     <!-- Embed source and commit metadata for debugging/open-source distribution -->
     <PackageReference Include="Microsoft.SourceLink.GitHub" Version="10.0.201" PrivateAssets="All" />

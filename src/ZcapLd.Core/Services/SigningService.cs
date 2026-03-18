@@ -36,8 +36,8 @@ public class SigningService : ISigningService
     private static ICryptoSuiteProvider CreateDefaultSuiteProvider()
     {
         var provider = new CryptoSuiteProvider();
-        provider.Register(new Ed25519CryptoSuite());
-        provider.Register(new P256CryptoSuite());
+        provider.Register(CryptoSuite.Ed25519());
+        provider.Register(CryptoSuite.P256());
         return provider;
     }
 
