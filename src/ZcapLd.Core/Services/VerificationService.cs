@@ -17,6 +17,7 @@ public class VerificationService : IVerificationService
     private readonly ICryptoSuiteProvider _suiteProvider;
     private readonly IRevocationService _revocationService;
     private readonly INonceStore _nonceStore;
+    private readonly IDocumentCanonicalizerProvider _canonicalizerProvider;
     private readonly TimeSpan _nonceWindow;
     private const int MaxChainLength = 10; // Per spec: SHOULD limit to 10
 
@@ -71,7 +72,7 @@ public class VerificationService : IVerificationService
     }
 
     /// <summary>
-    /// Full constructor with all dependencies including replay protection.
+    /// Constructor with all dependencies including replay protection (JCS canonicalization).
     /// </summary>
     public VerificationService(
         IDidResolver didResolver,
@@ -80,12 +81,29 @@ public class VerificationService : IVerificationService
         IRevocationService revocationService,
         INonceStore nonceStore,
         TimeSpan? nonceWindow = null)
+        : this(didResolver, caveatProcessor, suiteProvider, revocationService,
+               nonceStore, SigningService.CreateDefaultCanonicalizerProvider(), nonceWindow)
+    {
+    }
+
+    /// <summary>
+    /// Full constructor with all dependencies including canonicalizer provider.
+    /// </summary>
+    public VerificationService(
+        IDidResolver didResolver,
+        ICaveatProcessor caveatProcessor,
+        ICryptoSuiteProvider suiteProvider,
+        IRevocationService revocationService,
+        INonceStore nonceStore,
+        IDocumentCanonicalizerProvider canonicalizerProvider,
+        TimeSpan? nonceWindow = null)
     {
         _didResolver = didResolver ?? throw new ArgumentNullException(nameof(didResolver));
         _caveatProcessor = caveatProcessor ?? throw new ArgumentNullException(nameof(caveatProcessor));
         _suiteProvider = suiteProvider ?? throw new ArgumentNullException(nameof(suiteProvider));
         _revocationService = revocationService ?? throw new ArgumentNullException(nameof(revocationService));
         _nonceStore = nonceStore ?? throw new ArgumentNullException(nameof(nonceStore));
+        _canonicalizerProvider = canonicalizerProvider ?? throw new ArgumentNullException(nameof(canonicalizerProvider));
         _nonceWindow = nonceWindow ?? DefaultNonceWindow;
     }
 
@@ -178,10 +196,12 @@ public class VerificationService : IVerificationService
             ?? throw new CapabilityValidationException(
                 $"Unsupported proof type: {capability.Proof.Type}");
 
+        var canonicalizer = ResolveCanonicalizer(suite);
         var capabilityWithoutProof = ProofSigningPayloadBuilder.CloneCapabilityWithoutProof(capability);
         var canonicalBytes = ProofSigningPayloadBuilder.CanonicalizeCapabilityPayload(
             capabilityWithoutProof,
-            capability.Proof);
+            capability.Proof,
+            canonicalizer);
         var signatureBytes = MultibaseCodec.Decode(capability.Proof.ProofValue);
 
         return suite.Verify(canonicalBytes, signatureBytes, resolvedKey.PublicKeyBytes);
@@ -245,10 +265,12 @@ public class VerificationService : IVerificationService
                 ?? throw new CapabilityValidationException(
                     $"Unsupported proof type: {invocation.Proof.Type}");
 
+            var canonicalizer = ResolveCanonicalizer(suite);
             var invocationWithoutProof = ProofSigningPayloadBuilder.CloneInvocationWithoutProof(invocation);
             var canonicalBytes = ProofSigningPayloadBuilder.CanonicalizeInvocationPayload(
                 invocationWithoutProof,
-                invocation.Proof);
+                invocation.Proof,
+                canonicalizer);
             var signatureBytes = MultibaseCodec.Decode(invocation.Proof.ProofValue);
 
             if (!suite.Verify(canonicalBytes, signatureBytes, resolvedKey.PublicKeyBytes))
@@ -608,6 +630,13 @@ public class VerificationService : IVerificationService
         }
 
         return null;
+    }
+
+    private IDocumentCanonicalizer ResolveCanonicalizer(ICryptoSuite suite)
+    {
+        return _canonicalizerProvider.GetByMethod(suite.CanonicalizationMethod)
+            ?? throw new CryptographicException(
+                $"No canonicalizer registered for method: {suite.CanonicalizationMethod}");
     }
 
     /// <summary>

@@ -221,6 +221,6 @@ dotnet pack src/ZcapLd.AspNetCore/ZcapLd.AspNetCore.csproj -c Release
 
 - No default `IDidSigner` ships in the core package — consumers must provide their own (HSM/KMS/Key Vault).
 - `InMemoryDidProvider` (in examples and tests) stores private keys in plaintext memory and is NOT for production use.
-- Canonicalization currently uses deterministic JSON canonicalization, not full RDF Dataset Canonicalization.
+- Canonicalization supports both JCS (JSON Canonicalization Scheme, RFC 8785) and RDFC-1.0 (W3C RDF Dataset Canonicalization) via pluggable `IDocumentCanonicalizer`. JCS is the default; known W3C JSON-LD contexts are embedded for offline operation.
 - DID resolution uses [NetDid](https://www.nuget.org/packages/NetDid.Core) for W3C-compliant did:key support; multibase encoding uses [NetCid](https://www.nuget.org/packages/NetCid).
 - The `ICryptoSuite` abstraction supports pluggable algorithms; Ed25519 and P-256 are registered by default.

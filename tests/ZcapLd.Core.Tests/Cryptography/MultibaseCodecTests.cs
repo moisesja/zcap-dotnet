@@ -82,7 +82,7 @@ public class MultibaseCodecTests
     }
 
     [Fact]
-    public void CanonicalizeDocument_ShouldProduceDeterministicOutput()
+    public void JcsCanonicalizer_ShouldProduceDeterministicOutput()
     {
         var document = new
         {
@@ -91,8 +91,9 @@ public class MultibaseCodecTests
             invocationTarget = "https://example.com/foo"
         };
 
-        var canonical1 = MultibaseCodec.CanonicalizeDocument(document);
-        var canonical2 = MultibaseCodec.CanonicalizeDocument(document);
+        var canonicalizer = new JcsDocumentCanonicalizer();
+        var canonical1 = canonicalizer.Canonicalize(document);
+        var canonical2 = canonicalizer.Canonicalize(document);
 
         canonical1.Should().Equal(canonical2);
     }

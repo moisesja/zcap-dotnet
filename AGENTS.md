@@ -31,10 +31,11 @@ zcap-dotnet/
 ├── ZcapLd.sln
 ├── src/
 │   ├── ZcapLd.Core/                    # Core library (NuGet package)
-│   │   ├── Cryptography/               # ICryptoSuite, CryptoSuiteProvider, Ed25519CryptoSuite,
-│   │   │                               #   P256CryptoSuite, MultibaseCodec (delegates to NetCid),
-│   │   │                               #   JsonCanonicalizer, EcPointCompression, Ed25519Signer,
-│   │   │                               #   SignatureVerifier
+│   │   ├── Cryptography/               # ICryptoSuite, CryptoSuiteProvider, CryptoSuite,
+│   │   │                               #   IDocumentCanonicalizer, JcsDocumentCanonicalizer,
+│   │   │                               #   RdfcDocumentCanonicalizer, DocumentCanonicalizerProvider,
+│   │   │                               #   MultibaseCodec, JsonCanonicalizer, SignatureVerifier,
+│   │   │                               #   ProofSigningPayloadBuilder
 │   │   ├── Models/                     # Capability, Proof, Invocation, Caveat, ValidWhileTrueCaveat,
 │   │   │                               #   InvocationContext, ResolvedKey, SignatureResult,
 │   │   │                               #   RevocationRecord, RevocationRequest
@@ -90,9 +91,9 @@ dotnet run --project examples/ZcapLd.Examples                          # Run con
 - **Verification**: `VerificationService` dispatches to correct `ICryptoSuite` by proof type; enforces chain validity, attenuation, caveats, revocation, and replay protection
 - **Revocation**: `IRevocationService` / `IRevocationStore` abstractions; `InMemoryRevocationStore` for dev; ASP.NET endpoints via `ZcapLd.AspNetCore`
 - **Replay protection**: `INonceStore` interface; `InMemoryNonceStore` (default), `NullNonceStore` (opt-out)
-- **Canonicalization**: RFC 8785 JSON Canonicalization (not full URDNA2015 — documented limitation)
+- **Canonicalization**: `IDocumentCanonicalizer` interface with `JcsDocumentCanonicalizer` (RFC 8785) and `RdfcDocumentCanonicalizer` (W3C RDFC-1.0 via dotNetRdf); suite-specific via `ICryptoSuite.CanonicalizationMethod`
 - **ValidWhileTrue**: `ValidWhileTrueCaveat` model + `IValidWhileTrueHandler` interface in Core; `HttpValidWhileTrueHandler` in AspNetCore; `AddZcapValidWhileTrueSupport()` for DI; fail-closed when no handler configured
-- **ASP.NET integration**: `AddZcapServices()` registers all core services; `AddZcapDidSigner<T>()` for signer; `AddZcapRevocationSupport()` and `MapZcapRevocationEndpoints()` for revocation; `AddZcapValidWhileTrueSupport()` for remote revocation checking
+- **ASP.NET integration**: `AddZcapServices()` registers all core services; `AddZcapDidSigner<T>()` for signer; `AddZcapRevocationSupport()` and `MapZcapRevocationEndpoints()` for revocation; `AddZcapValidWhileTrueSupport()` for remote revocation checking; `AddZcapRdfcCanonicalization()` to enable RDFC-1.0
 
 ## Workflow Orchestration
 

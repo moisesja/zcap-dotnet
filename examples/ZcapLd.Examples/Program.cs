@@ -1,3 +1,4 @@
+using ZcapLd.Core.Cryptography;
 using ZcapLd.Core.Models;
 using ZcapLd.Core.Services;
 using ZcapLd.Examples;
@@ -544,6 +545,102 @@ var noPropsResult = await verificationService.VerifyInvocationAsync(
     clientInvocation3,
     clientCapability);
 Console.WriteLine($"    Invocation valid: {noPropsResult} (expected: False — no properties injected)");
+
+Console.WriteLine();
+
+// ===================================================
+// Example 10: RDFC-1.0 vs JCS Canonicalization
+// ===================================================
+Console.WriteLine("Example 10: RDFC-1.0 vs JCS Canonicalization");
+Console.WriteLine("----------------------------------------------");
+
+// ZCAP-LD proofs can use different canonicalization methods depending on the
+// crypto suite. By default, all built-in suites use JCS (JSON Canonicalization Scheme,
+// RFC 8785). To use RDFC-1.0 (W3C RDF Dataset Canonicalization), you:
+//   1. Create a crypto suite that declares CanonicalizationMethod = "RDFC-1.0"
+//   2. Register both JCS and RDFC-1.0 canonicalizers in a DocumentCanonicalizerProvider
+//   3. Pass the providers to SigningService and VerificationService full constructors
+
+// --- Setup: register both canonicalizers ---
+var canonicalizerProvider = new DocumentCanonicalizerProvider();
+canonicalizerProvider.Register(new JcsDocumentCanonicalizer());     // always needed as fallback
+canonicalizerProvider.Register(new RdfcDocumentCanonicalizer());    // RDFC-1.0 support
+
+// --- Setup: register both crypto suites ---
+var suiteProvider = new CryptoSuiteProvider();
+suiteProvider.Register(CryptoSuite.Ed25519());       // default Ed25519 (JCS)
+suiteProvider.Register(new RdfcEd25519CryptoSuite()); // Ed25519 with RDFC-1.0
+
+// Note: Both suites have the same ProofType ("Ed25519Signature2020"), so the last
+// registered wins in the provider lookup. This means signing will use RDFC-1.0 and
+// verification will also resolve to RDFC-1.0 for Ed25519Signature2020 proofs.
+//
+// In practice, you would use one canonicalization method per deployment, or use
+// different proof types to distinguish suites.
+
+// --- Wire services with the full constructors ---
+var rdfcDidProvider = new InMemoryDidProvider();
+var rdfcSigningService = new SigningService(
+    rdfcDidProvider, rdfcDidProvider, suiteProvider, canonicalizerProvider);
+var rdfcVerificationService = new VerificationService(
+    rdfcDidProvider, caveatProcessor, suiteProvider,
+    new RevocationService(new InMemoryRevocationStore()),
+    new InMemoryNonceStore(), canonicalizerProvider);
+
+// --- Create and delegate a capability using RDFC-1.0 ---
+var rdfcOwnerDid = "did:key:z6MkRdfcOwner";
+var rdfcDelegateDid = "did:key:z6MkRdfcDelegate";
+rdfcDidProvider.GenerateAndRegisterKeyPair(rdfcOwnerDid);
+rdfcDidProvider.GenerateAndRegisterKeyPair(rdfcDelegateDid);
+
+var rdfcCapabilityService = new CapabilityService(rdfcSigningService);
+
+var rdfcRoot = await rdfcCapabilityService.CreateRootCapabilityAsync(
+    controller: rdfcOwnerDid,
+    invocationTarget: "https://storage.example.com/rdfc-documents",
+    allowedActions: new[] { "read", "write" }
+);
+
+var rdfcDelegated = await rdfcCapabilityService.DelegateCapabilityAsync(
+    parentCapability: rdfcRoot,
+    newController: rdfcDelegateDid,
+    allowedActions: new[] { "read" },
+    expires: DateTime.UtcNow.AddDays(7)
+);
+
+Console.WriteLine($"Root Capability:      {rdfcRoot.Id}");
+Console.WriteLine($"Delegated Capability: {rdfcDelegated.Id}");
+Console.WriteLine($"Proof Type:           {rdfcDelegated.Proof?.Type}");
+
+// Verify the RDFC-1.0 delegation chain
+var rdfcChainValid = await rdfcVerificationService.VerifyCapabilityChainAsync(rdfcDelegated);
+Console.WriteLine($"RDFC-1.0 Chain Valid: {rdfcChainValid}");
+
+// --- Invoke and verify using RDFC-1.0 ---
+var rdfcInvocation = new Invocation
+{
+    Capability = rdfcDelegated.Id,
+    CapabilityAction = "read",
+    InvocationTarget = "https://storage.example.com/rdfc-documents"
+};
+rdfcInvocation.Proof = await rdfcSigningService.SignInvocationAsync(rdfcInvocation, rdfcDelegateDid);
+
+var rdfcInvocationValid = await rdfcVerificationService.VerifyInvocationAsync(rdfcInvocation, rdfcDelegated);
+Console.WriteLine($"RDFC-1.0 Invocation Valid: {rdfcInvocationValid}");
+
+// --- Compare: show that JCS and RDFC-1.0 produce different proofs ---
+Console.WriteLine("\nComparing JCS vs RDFC-1.0 canonicalization:");
+
+var jcsCanonicalizer = new JcsDocumentCanonicalizer();
+var rdfcCanonicalizer = new RdfcDocumentCanonicalizer();
+
+// Canonicalize the same root capability with both methods
+var jcsBytes = jcsCanonicalizer.Canonicalize(rdfcRoot);
+var rdfcBytes = rdfcCanonicalizer.Canonicalize(rdfcRoot);
+
+Console.WriteLine($"  JCS output size:      {jcsBytes.Length} bytes (compact JSON)");
+Console.WriteLine($"  RDFC-1.0 output size: {rdfcBytes.Length} bytes (N-Quads)");
+Console.WriteLine($"  Same output:          {jcsBytes.SequenceEqual(rdfcBytes)} (expected: False)");
 
 Console.WriteLine();
 Console.WriteLine("===========================================");

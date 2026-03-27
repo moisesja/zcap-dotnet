@@ -40,16 +40,31 @@ public static class ZcapRevocationServiceCollectionExtensions
             return provider;
         });
 
+        // Register JCS canonicalizer by default; RDFC-1.0 can be added via AddZcapRdfcCanonicalization()
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IDocumentCanonicalizer, JcsDocumentCanonicalizer>());
+
+        // Build IDocumentCanonicalizerProvider from all registered IDocumentCanonicalizer instances
+        services.TryAddSingleton<IDocumentCanonicalizerProvider>(sp =>
+        {
+            var provider = new DocumentCanonicalizerProvider();
+            foreach (var canonicalizer in sp.GetServices<IDocumentCanonicalizer>())
+            {
+                provider.Register(canonicalizer);
+            }
+            return provider;
+        });
+
         // DidKeyResolver delegates to NetDid's DidKeyMethod for did:key resolution
         services.TryAddSingleton<IDidResolver>(sp => new DidKeyResolver());
 
-        // SigningService depends on IDidSigner + IDidResolver + ICryptoSuiteProvider.
+        // SigningService depends on IDidSigner + IDidResolver + ICryptoSuiteProvider + IDocumentCanonicalizerProvider.
         // No default IDidSigner — consumers must provide their own secure implementation.
         services.TryAddSingleton<ISigningService>(sp =>
             new SigningService(
                 sp.GetRequiredService<IDidSigner>(),
                 sp.GetRequiredService<IDidResolver>(),
-                sp.GetRequiredService<ICryptoSuiteProvider>()));
+                sp.GetRequiredService<ICryptoSuiteProvider>(),
+                sp.GetRequiredService<IDocumentCanonicalizerProvider>()));
         // CaveatProcessor: use factory to optionally inject IValidWhileTrueHandler
         // If AddZcapValidWhileTrueSupport() was called, the handler is available;
         // otherwise GetService returns null and the processor operates fail-closed.
@@ -60,15 +75,17 @@ public static class ZcapRevocationServiceCollectionExtensions
         services.TryAddSingleton<IRevocationService, RevocationService>();
         services.TryAddSingleton<INonceStore, InMemoryNonceStore>();
 
-        // VerificationService depends on ICryptoSuiteProvider for proof type dispatch
-        // and INonceStore for invocation replay protection
+        // VerificationService depends on ICryptoSuiteProvider for proof type dispatch,
+        // INonceStore for invocation replay protection, and IDocumentCanonicalizerProvider
+        // for suite-specific canonicalization
         services.TryAddSingleton<IVerificationService>(sp =>
             new VerificationService(
                 sp.GetRequiredService<IDidResolver>(),
                 sp.GetRequiredService<ICaveatProcessor>(),
                 sp.GetRequiredService<ICryptoSuiteProvider>(),
                 sp.GetRequiredService<IRevocationService>(),
-                sp.GetRequiredService<INonceStore>()));
+                sp.GetRequiredService<INonceStore>(),
+                sp.GetRequiredService<IDocumentCanonicalizerProvider>()));
 
         return services;
     }
@@ -84,6 +101,20 @@ public static class ZcapRevocationServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(services);
 
         services.TryAddEnumerable(ServiceDescriptor.Singleton<ICryptoSuite, TSuite>());
+        return services;
+    }
+
+    /// <summary>
+    /// Registers RDFC-1.0 (W3C RDF Dataset Canonicalization) support.
+    /// When enabled, crypto suites that declare <c>CanonicalizationMethod = "RDFC-1.0"</c>
+    /// will use the RDFC-1.0 canonicalizer for signing and verification.
+    /// </summary>
+    public static IServiceCollection AddZcapRdfcCanonicalization(this IServiceCollection services)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        services.TryAddEnumerable(
+            ServiceDescriptor.Singleton<IDocumentCanonicalizer, RdfcDocumentCanonicalizer>());
         return services;
     }
 
