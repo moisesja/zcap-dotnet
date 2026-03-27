@@ -14,9 +14,10 @@ public class SigningService : ISigningService
     private readonly IDidSigner _signer;
     private readonly IDidResolver _resolver;
     private readonly ICryptoSuiteProvider _suiteProvider;
+    private readonly IDocumentCanonicalizerProvider _canonicalizerProvider;
 
     /// <summary>
-    /// Backward-compatible constructor (Ed25519 only).
+    /// Backward-compatible constructor (Ed25519 only, JCS canonicalization).
     /// </summary>
     public SigningService(IDidSigner signer, IDidResolver resolver)
         : this(signer, resolver, CreateDefaultSuiteProvider())
@@ -24,13 +25,26 @@ public class SigningService : ISigningService
     }
 
     /// <summary>
-    /// Full constructor with explicit crypto suite provider.
+    /// Constructor with explicit crypto suite provider (JCS canonicalization).
     /// </summary>
     public SigningService(IDidSigner signer, IDidResolver resolver, ICryptoSuiteProvider suiteProvider)
+        : this(signer, resolver, suiteProvider, CreateDefaultCanonicalizerProvider())
+    {
+    }
+
+    /// <summary>
+    /// Full constructor with all dependencies.
+    /// </summary>
+    public SigningService(
+        IDidSigner signer,
+        IDidResolver resolver,
+        ICryptoSuiteProvider suiteProvider,
+        IDocumentCanonicalizerProvider canonicalizerProvider)
     {
         _signer = signer ?? throw new ArgumentNullException(nameof(signer));
         _resolver = resolver ?? throw new ArgumentNullException(nameof(resolver));
         _suiteProvider = suiteProvider ?? throw new ArgumentNullException(nameof(suiteProvider));
+        _canonicalizerProvider = canonicalizerProvider ?? throw new ArgumentNullException(nameof(canonicalizerProvider));
     }
 
     private static ICryptoSuiteProvider CreateDefaultSuiteProvider()
@@ -38,6 +52,13 @@ public class SigningService : ISigningService
         var provider = new CryptoSuiteProvider();
         provider.Register(CryptoSuite.Ed25519());
         provider.Register(CryptoSuite.P256());
+        return provider;
+    }
+
+    internal static IDocumentCanonicalizerProvider CreateDefaultCanonicalizerProvider()
+    {
+        var provider = new DocumentCanonicalizerProvider();
+        provider.Register(new JcsDocumentCanonicalizer());
         return provider;
     }
 
@@ -61,6 +82,7 @@ public class SigningService : ISigningService
 
         var capabilityWithoutProof = ProofSigningPayloadBuilder.CloneCapabilityWithoutProof(capability);
         var suite = await ResolveSuiteForDidAsync(signerDid);
+        var canonicalizer = ResolveCanonicalizer(suite);
         var verificationMethod = await _resolver.GetVerificationMethodAsync(signerDid);
         var created = DateTime.UtcNow;
         var proofType = suite.ProofType;
@@ -76,7 +98,8 @@ public class SigningService : ISigningService
             ProofValue = string.Empty
         };
 
-        var canonicalBytes = ProofSigningPayloadBuilder.CanonicalizeCapabilityPayload(capabilityWithoutProof, proof);
+        var canonicalBytes = ProofSigningPayloadBuilder.CanonicalizeCapabilityPayload(
+            capabilityWithoutProof, proof, canonicalizer);
         var result = await _signer.SignAsync(signerDid, canonicalBytes);
         ValidateSignatureType(result.SignatureType, proofType);
         proof.ProofValue = MultibaseCodec.Encode(result.Signature);
@@ -97,6 +120,7 @@ public class SigningService : ISigningService
 
         var invocationWithoutProof = ProofSigningPayloadBuilder.CloneInvocationWithoutProof(invocation);
         var suite = await ResolveSuiteForDidAsync(signerDid);
+        var canonicalizer = ResolveCanonicalizer(suite);
         var verificationMethod = await _resolver.GetVerificationMethodAsync(signerDid);
         var created = DateTime.UtcNow;
         var proofType = suite.ProofType;
@@ -117,7 +141,8 @@ public class SigningService : ISigningService
             CapabilityAction = invocation.CapabilityAction
         };
 
-        var canonicalBytes = ProofSigningPayloadBuilder.CanonicalizeInvocationPayload(invocationWithoutProof, proof);
+        var canonicalBytes = ProofSigningPayloadBuilder.CanonicalizeInvocationPayload(
+            invocationWithoutProof, proof, canonicalizer);
         var result = await _signer.SignAsync(signerDid, canonicalBytes);
         ValidateSignatureType(result.SignatureType, proofType);
         proof.ProofValue = MultibaseCodec.Encode(result.Signature);
@@ -144,6 +169,13 @@ public class SigningService : ISigningService
         return _suiteProvider.GetByKeyType(resolvedKey.KeyType)
             ?? throw new CryptographicException(
                 $"No crypto suite registered for key type: {resolvedKey.KeyType}");
+    }
+
+    private IDocumentCanonicalizer ResolveCanonicalizer(ICryptoSuite suite)
+    {
+        return _canonicalizerProvider.GetByMethod(suite.CanonicalizationMethod)
+            ?? throw new CryptographicException(
+                $"No canonicalizer registered for method: {suite.CanonicalizationMethod}");
     }
 
     private static void ValidateSignatureType(string actualType, string expectedType)

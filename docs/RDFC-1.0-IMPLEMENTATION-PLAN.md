@@ -1,6 +1,6 @@
 # Add RDFC-1.0 Canonicalization Support (Suite-Specific)
 
-Status: **Planned** (not yet implemented)
+Status: **Implemented** (v1.2.0, Issue #29)
 
 ## Context
 

@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.2.0] - Released
+
+### Added
+
+- RDFC-1.0 (W3C RDF Dataset Canonicalization) support via dotNetRdf.Core v3.5.1 (Issue #29)
+- `IDocumentCanonicalizer` interface for pluggable canonicalization methods
+- `JcsDocumentCanonicalizer` (RFC 8785 JSON Canonicalization Scheme)
+- `RdfcDocumentCanonicalizer` (RDFC-1.0 via dotNetRdf: JSON-LD → N-Quads)
+- `IDocumentCanonicalizerProvider` / `DocumentCanonicalizerProvider` registry
+- `ICryptoSuite.CanonicalizationMethod` default interface method (returns `"JCS"` for backward compatibility)
+- `AddZcapRdfcCanonicalization()` ASP.NET Core DI extension to enable RDFC-1.0
+- 24 new tests for canonicalization abstractions and RDFC-1.0 integration
+
+### Changed
+
+- `ProofSigningPayloadBuilder` supports suite-specific canonicalization: JCS (combined object) or RDFC-1.0 (separate document + proof options, SHA-256 hash concatenation per W3C Data Integrity spec)
+- `SigningService` and `VerificationService` accept `IDocumentCanonicalizerProvider` to resolve per-suite canonicalizer
+- `SignatureVerifier` accepts optional `IDocumentCanonicalizer` parameter
+- `MultibaseCodec.CanonicalizeDocument()` removed (replaced by `IDocumentCanonicalizer`)
+
 ## [1.1.0] - Released
 
 ### Changed

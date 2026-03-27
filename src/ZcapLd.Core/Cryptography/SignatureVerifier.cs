@@ -13,8 +13,13 @@ public class SignatureVerifier
     /// <param name="capability">The capability to verify</param>
     /// <param name="publicKey">The public key for verification</param>
     /// <param name="suite">The crypto suite to use for verification</param>
+    /// <param name="canonicalizer">Optional canonicalizer (defaults to JCS)</param>
     /// <returns>True if signature is valid</returns>
-    public static bool VerifyCapabilitySignature(Capability capability, byte[] publicKey, ICryptoSuite suite)
+    public static bool VerifyCapabilitySignature(
+        Capability capability,
+        byte[] publicKey,
+        ICryptoSuite suite,
+        IDocumentCanonicalizer? canonicalizer = null)
     {
         if (capability.Proof == null)
             return false;
@@ -24,7 +29,8 @@ public class SignatureVerifier
             var capabilityForVerification = ProofSigningPayloadBuilder.CloneCapabilityWithoutProof(capability);
             var canonicalizedData = ProofSigningPayloadBuilder.CanonicalizeCapabilityPayload(
                 capabilityForVerification,
-                capability.Proof);
+                capability.Proof,
+                canonicalizer);
 
             // Decode the signature
             var signature = MultibaseCodec.Decode(capability.Proof.ProofValue);
@@ -44,8 +50,13 @@ public class SignatureVerifier
     /// <param name="invocation">The invocation to verify</param>
     /// <param name="publicKey">The public key for verification</param>
     /// <param name="suite">The crypto suite to use for verification</param>
+    /// <param name="canonicalizer">Optional canonicalizer (defaults to JCS)</param>
     /// <returns>True if signature is valid</returns>
-    public static bool VerifyInvocationSignature(Invocation invocation, byte[] publicKey, ICryptoSuite suite)
+    public static bool VerifyInvocationSignature(
+        Invocation invocation,
+        byte[] publicKey,
+        ICryptoSuite suite,
+        IDocumentCanonicalizer? canonicalizer = null)
     {
         if (invocation.Proof == null)
             return false;
@@ -55,7 +66,8 @@ public class SignatureVerifier
             var invocationForVerification = ProofSigningPayloadBuilder.CloneInvocationWithoutProof(invocation);
             var canonicalizedData = ProofSigningPayloadBuilder.CanonicalizeInvocationPayload(
                 invocationForVerification,
-                invocation.Proof);
+                invocation.Proof,
+                canonicalizer);
 
             // Decode the signature
             var signature = MultibaseCodec.Decode(invocation.Proof.ProofValue);

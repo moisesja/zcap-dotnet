@@ -68,15 +68,17 @@ Primary assembly: `src/ZcapLd.Core`.
 
 ### Crypto (`src/ZcapLd.Core/Cryptography`)
 
-- `ICryptoSuite`: algorithm-specific sign/verify interface (proof type, key type, multicodec prefix, context URL)
-- `ICryptoSuiteProvider` / `CryptoSuiteProvider`: registry for lookup by proof type, multicodec prefix, or key type
-- `Ed25519CryptoSuite`: Ed25519 suite wrapping `Ed25519Signer` static methods
-- `P256CryptoSuite`: NIST P-256 (secp256r1) suite using `System.Security.Cryptography.ECDsa` (zero extra dependencies)
-- `EcPointCompression`: internal helper for P-256 compressed public key encoding/decoding
-- `MultibaseCodec`: algorithm-agnostic multibase encoding/decoding (delegates to NetCid) and document canonicalization
-- `Ed25519Signer`: low-level Ed25519 sign/verify (static utility)
+- `ICryptoSuite`: algorithm-specific sign/verify interface (proof type, key type, context URL, canonicalization method)
+- `ICryptoSuiteProvider` / `CryptoSuiteProvider`: registry for lookup by proof type or key type
+- `CryptoSuite`: parameterized implementation delegating to NetDid's `DefaultCryptoProvider`; static factories `Ed25519()` and `P256()`
+- `IDocumentCanonicalizer` / `IDocumentCanonicalizerProvider`: abstraction for pluggable canonicalization methods
+- `JcsDocumentCanonicalizer`: RFC 8785 JSON Canonicalization Scheme (wraps `JsonCanonicalizer`)
+- `RdfcDocumentCanonicalizer`: W3C RDFC-1.0 RDF Dataset Canonicalization (uses dotNetRdf for JSON-LD → N-Quads)
+- `DocumentCanonicalizerProvider`: dictionary-backed canonicalizer registry
+- `MultibaseCodec`: algorithm-agnostic multibase encoding/decoding (delegates to NetCid)
 - `JsonCanonicalizer`: deterministic JSON canonicalization (RFC 8785)
-- `SignatureVerifier`: helper wrapper for signature checks (accepts `ICryptoSuite`)
+- `ProofSigningPayloadBuilder`: builds signing payloads; JCS combines doc+proof into single object, RDFC-1.0 canonicalizes separately and concatenates SHA-256 hashes (per W3C Data Integrity spec)
+- `SignatureVerifier`: helper wrapper for signature checks (accepts `ICryptoSuite` + optional `IDocumentCanonicalizer`)
 
 ### Exceptions (`src/ZcapLd.Core/Exceptions`)
 
@@ -124,7 +126,7 @@ Production recommendation:
 
 ### Custom Crypto Suites
 
-Implement `ICryptoSuite` for new signature algorithms and register via `CryptoSuiteProvider.Register()` or `AddZcapCryptoSuite<T>()` in ASP.NET DI. Built-in suites: `Ed25519CryptoSuite` and `P256CryptoSuite`. The `DidKeyResolver` automatically decodes any registered multicodec prefix, `VerificationService` dispatches verification by `proof.type`, and `CapabilityService` resolves the correct JSON-LD context URL per suite.
+Implement `ICryptoSuite` for new signature algorithms and register via `CryptoSuiteProvider.Register()` or `AddZcapCryptoSuite<T>()` in ASP.NET DI. Built-in suites: `CryptoSuite.Ed25519()` and `CryptoSuite.P256()`. Override the `CanonicalizationMethod` default interface method to use `"RDFC-1.0"` instead of `"JCS"` for suites that require RDF canonicalization.
 
 ### Custom Caveats
 
@@ -186,10 +188,13 @@ Reference implementation guide: `docs/REVOCATION-INTEGRATION.md`.
 
 Library is in-process first. Service methods are interface-driven and can be wrapped by gRPC/HTTP without changing core models.
 
+### Custom Canonicalization
+
+Implement `IDocumentCanonicalizer` for additional canonicalization methods and register via `DocumentCanonicalizerProvider.Register()` or `AddZcapRdfcCanonicalization()` in ASP.NET DI. Built-in canonicalizers: `JcsDocumentCanonicalizer` (RFC 8785) and `RdfcDocumentCanonicalizer` (W3C RDFC-1.0 via dotNetRdf).
+
 ## Non-Goals and Current Limitations
 
-- Full RDF Dataset Canonicalization (URDNA2015) is not yet implemented.
-- Proof metadata binding follows current implementation behavior and should be reviewed for strict Data Integrity interoperability requirements.
+- dotNetRdf has not passed the W3C RDFC-1.0 conformance test suite (86 test cases); smoke tests verify basic correctness.
 - No default distributed revocation backend is shipped; consumers provide their own `IRevocationStore` for production.
 
 ## Thread Safety

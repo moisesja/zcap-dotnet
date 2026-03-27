@@ -4,8 +4,8 @@ namespace ZcapLd.Core.Cryptography;
 /// Bundles algorithm-specific cryptographic operations for a single signature suite.
 /// Implementations are stateless and thread-safe.
 ///
-/// Note: Canonicalization (RFC 8785) and multibase encoding/decoding are NOT
-/// algorithm-specific — they live in <see cref="MultibaseCodec"/>.
+/// Note: Multibase encoding/decoding lives in <see cref="MultibaseCodec"/>.
+/// Canonicalization method is determined per suite via <see cref="CanonicalizationMethod"/>.
 /// </summary>
 public interface ICryptoSuite
 {
@@ -34,4 +34,10 @@ public interface ICryptoSuite
     /// Verifies a signature against data and a public key.
     /// </summary>
     bool Verify(byte[] data, byte[] signature, byte[] publicKey);
+
+    /// <summary>
+    /// The canonicalization method this suite requires (e.g. "JCS", "RDFC-1.0").
+    /// Defaults to "JCS" for backward compatibility.
+    /// </summary>
+    string CanonicalizationMethod => "JCS";
 }

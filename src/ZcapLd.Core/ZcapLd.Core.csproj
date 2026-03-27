@@ -44,6 +44,7 @@
 
   <ItemGroup>
     <!-- W3C DID Core and did:key method (provides crypto, DID resolution, and multibase) -->
+    <PackageReference Include="dotNetRdf.Core" Version="3.5.1" />
     <PackageReference Include="NetDid.Core" Version="1.1.1" />
     <PackageReference Include="NetDid.Method.Key" Version="1.1.1" />
 

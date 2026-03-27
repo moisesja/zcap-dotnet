@@ -3,21 +3,11 @@ using NetCid;
 namespace ZcapLd.Core.Cryptography;
 
 /// <summary>
-/// Algorithm-agnostic utilities for multibase encoding/decoding and document canonicalization.
+/// Algorithm-agnostic utilities for multibase encoding/decoding.
 /// Delegates multibase operations to NetCid.
 /// </summary>
 public static class MultibaseCodec
 {
-    /// <summary>
-    /// Canonicalizes a JSON document for signing using deterministic serialization (RFC 8785 style).
-    /// </summary>
-    /// <param name="document">The JSON document to canonicalize</param>
-    /// <returns>Canonicalized bytes</returns>
-    public static byte[] CanonicalizeDocument(object document)
-    {
-        return JsonCanonicalizer.Canonicalize(document);
-    }
-
     /// <summary>
     /// Encodes raw bytes as a base58-btc multibase string.
     /// Format: 'z' prefix + base58-btc encoded data.
