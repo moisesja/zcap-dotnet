@@ -166,7 +166,7 @@ Key differences:
 
 1. **RDFC-1.0 requires valid JSON-LD**: The `Capability` model has `@context` and is valid JSON-LD. The proof options object needs `@context` added for RDFC-1.0 canonicalization. `ProofSigningPayloadBuilder` will handle this when `method == "RDFC-1.0"`.
 2. **dotNetRdf.Core dependency weight**: ~1MB + 12 transitives (Newtonsoft.Json, AngleSharp, etc.). Can be extracted to a separate package later; the interface-based design makes this trivial.
-3. **dotNetRdf NOT in W3C conformance report**: We'll add smoke tests using official W3C test vectors to verify correctness.
+3. **dotNetRdf NOT in W3C conformance report**: Smoke tests using official W3C test vectors (test002, test003, test006) verify blank-node renaming, lexicographic sorting, and identity preservation. See `RdfcComplianceTests.cs`.
 
 ## Verification
 
