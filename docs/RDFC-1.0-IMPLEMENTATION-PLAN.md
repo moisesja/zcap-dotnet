@@ -130,6 +130,38 @@ Unlike JCS (which only sorts JSON keys), RDFC-1.0 **understands JSON-LD semantic
 | `src/ZcapLd.Core/Cryptography/ICryptoSuite.cs` | Gets `CanonicalizationMethod` property |
 | `src/ZcapLd.AspNetCore/DependencyInjection/ZcapRevocationServiceCollectionExtensions.cs` | DI wiring |
 
+## Canonical Output Comparison
+
+Given the same ZCAP-LD root capability, JCS and RDFC-1.0 produce structurally different canonical forms:
+
+**Input (Capability object):**
+```json
+{
+  "@context": ["https://w3id.org/zcap/v1"],
+  "id": "urn:zcap:root:https%3A%2F%2Fstorage.example.com%2Frdfc-documents",
+  "controller": "did:key:z6MkRdfcOwner",
+  "invocationTarget": "https://storage.example.com/rdfc-documents",
+  "allowedAction": ["read", "write"]
+}
+```
+
+**JCS output (243 bytes) — compact JSON with sorted keys:**
+```json
+{"@context":["https://w3id.org/zcap/v1"],"allowedAction":["read","write"],"caveat":[],"controller":"did:key:z6MkRdfcOwner","id":"urn:zcap:root:https%3A%2F%2Fstorage.example.com%2Frdfc-documents","invocationTarget":"https://storage.example.com/rdfc-documents"}
+```
+
+**RDFC-1.0 output (291 bytes) — sorted N-Quads (RDF triples):**
+```nquads
+<urn:zcap:root:https%3A%2F%2Fstorage.example.com%2Frdfc-documents> <https://w3id.org/security#allowedAction> "read" .
+<urn:zcap:root:https%3A%2F%2Fstorage.example.com%2Frdfc-documents> <https://w3id.org/security#allowedAction> "write" .
+<urn:zcap:root:https%3A%2F%2Fstorage.example.com%2Frdfc-documents> <https://w3id.org/security#controller> <did:key:z6MkRdfcOwner> .
+<urn:zcap:root:https%3A%2F%2Fstorage.example.com%2Frdfc-documents> <https://w3id.org/security#invocationTarget> <https://storage.example.com/rdfc-documents> .
+```
+
+Key differences:
+- **JCS** treats the document as opaque JSON — sorts keys alphabetically, normalizes whitespace. Fast but has no understanding of JSON-LD semantics.
+- **RDFC-1.0** expands JSON-LD to RDF quads using `@context`, resolves compact IRIs (e.g. `controller` → `https://w3id.org/security#controller`), canonicalizes blank node identifiers, and sorts quads lexicographically. This enables cross-implementation interoperability with any system that supports the same cryptosuite.
+
 ## Known Challenges
 
 1. **RDFC-1.0 requires valid JSON-LD**: The `Capability` model has `@context` and is valid JSON-LD. The proof options object needs `@context` added for RDFC-1.0 canonicalization. `ProofSigningPayloadBuilder` will handle this when `method == "RDFC-1.0"`.

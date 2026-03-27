@@ -53,6 +53,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <EmbeddedResource Include="Cryptography/Contexts/*.jsonld" />
+  </ItemGroup>
+
+  <ItemGroup>
     <None Include="PACKAGE_README.md" Pack="true" PackagePath="\" />
     <None Include="../../LICENSE" Pack="true" PackagePath="\" Visible="false" />
   </ItemGroup>
