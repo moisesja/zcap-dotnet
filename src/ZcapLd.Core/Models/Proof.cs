@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using ZcapLd.Core.Cryptography;
 
 namespace ZcapLd.Core.Models;
 
@@ -17,6 +18,7 @@ public class Proof
     /// Timestamp when the proof was created
     /// </summary>
     [JsonPropertyName("created")]
+    [JsonConverter(typeof(IsoUtcMicrosecondDateTimeConverter))]
     public DateTime Created { get; set; }
 
     /// <summary>

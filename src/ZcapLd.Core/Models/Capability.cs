@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using ZcapLd.Core.Cryptography;
 
 namespace ZcapLd.Core.Models;
 
@@ -41,6 +42,7 @@ public class Capability
     /// Optional expiration timestamp for this capability
     /// </summary>
     [JsonPropertyName("expires")]
+    [JsonConverter(typeof(IsoUtcMicrosecondDateTimeConverter))]
     public DateTime? Expires { get; set; }
 
     /// <summary>

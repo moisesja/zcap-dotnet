@@ -1,21 +1,43 @@
 using System.Security.Cryptography;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using ZcapLd.Core.Models;
 
 namespace ZcapLd.Core.Cryptography;
 
 /// <summary>
 /// Builds deterministic signing payloads for capabilities and invocations.
-/// Proof metadata (excluding proofValue) is included so metadata tampering
-/// invalidates signatures.
 ///
-/// Supports two canonicalization strategies:
-/// - JCS: combines document + proof into single anonymous object, canonicalizes once (default)
-/// - RDFC-1.0: canonicalizes document and proof options separately, hashes each with SHA-256,
-///   then concatenates the hashes (per W3C Data Integrity spec)
+/// W3C Verifiable Credentials Data Integrity convention: the verification payload
+/// is the document's own top-level fields plus a "proof" field containing every
+/// proof field except "proofValue". Cross-stack interop (zcap-py, JS, Rust)
+/// relies on this exact shape — any wrapper or hand-picked proof-field whitelist
+/// breaks signature compatibility silently.
+///
+/// Two canonicalization strategies are supported:
+/// - JCS: serialize the flat verification payload through JSON-then-canonicalize
+///   (RFC 8785 — alphabetically sorted keys, no whitespace).
+/// - RDFC-1.0: canonicalize document and proof options separately, SHA-256 each,
+///   concatenate (per W3C Data Integrity spec).
 /// </summary>
 internal static class ProofSigningPayloadBuilder
 {
     private static readonly JcsDocumentCanonicalizer DefaultJcs = new();
+
+    /// <summary>
+    /// Round-trips Capability / Proof / Invocation through System.Text.Json so that
+    /// model properties contribute only the field names and value shapes their
+    /// [JsonPropertyName] / [JsonIgnore(WhenWritingNull)] / [JsonConverter] attributes
+    /// dictate. The result matches the on-the-wire JSON byte-for-byte (after JCS
+    /// alphabetic sort), which is what every other Data Integrity verifier sees.
+    /// </summary>
+    private static readonly JsonSerializerOptions ModelSerializerOptions = new()
+    {
+        WriteIndented = false,
+        PropertyNamingPolicy = null,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+    };
 
     public static Capability CloneCapabilityWithoutProof(Capability capability)
     {
@@ -85,72 +107,36 @@ internal static class ProofSigningPayloadBuilder
         return CanonicalizeInvocationJcs(invocationWithoutProof, proof, canonicalizer);
     }
 
-    // ─── JCS path (current behavior) ───────────────────────────────────
+    // ─── JCS — W3C Data Integrity flat shape ───────────────────────────
 
     private static byte[] CanonicalizeCapabilityJcs(
         Capability capabilityWithoutProof, Proof proof, IDocumentCanonicalizer canonicalizer)
     {
-        var payload = new
-        {
-            capability = capabilityWithoutProof,
-            proof = new
-            {
-                type = proof.Type,
-                created = proof.Created,
-                proofPurpose = proof.ProofPurpose,
-                verificationMethod = proof.VerificationMethod,
-                capabilityChain = proof.CapabilityChain
-            }
-        };
-
-        return canonicalizer.Canonicalize(payload);
+        var doc = ToFieldDictionary(capabilityWithoutProof);
+        doc["proof"] = ToFieldDictionary(proof, exclude: "proofValue");
+        return canonicalizer.Canonicalize(doc);
     }
 
     private static byte[] CanonicalizeInvocationJcs(
         Invocation invocationWithoutProof, Proof proof, IDocumentCanonicalizer canonicalizer)
     {
-        var payload = new
-        {
-            invocation = new
-            {
-                id = invocationWithoutProof.Id,
-                capability = invocationWithoutProof.Capability,
-                capabilityAction = invocationWithoutProof.CapabilityAction,
-                invocationTarget = invocationWithoutProof.InvocationTarget
-            },
-            proof = new
-            {
-                type = proof.Type,
-                created = proof.Created,
-                proofPurpose = proof.ProofPurpose,
-                verificationMethod = proof.VerificationMethod,
-                capability = proof.Capability,
-                capabilityAction = proof.CapabilityAction,
-                invocationTarget = proof.InvocationTarget,
-                capabilityChain = proof.CapabilityChain
-            }
-        };
-
-        return canonicalizer.Canonicalize(payload);
+        var doc = ToFieldDictionary(invocationWithoutProof);
+        doc["proof"] = ToFieldDictionary(proof, exclude: "proofValue");
+        return canonicalizer.Canonicalize(doc);
     }
 
-    // ─── RDFC-1.0 path (W3C Data Integrity spec) ──────────────────────
+    // ─── RDFC-1.0 — W3C Data Integrity hash-concat shape ───────────────
     // Per spec: canonicalize document and proof options separately,
     // SHA-256 hash each, concatenate hashes → signing input.
 
     private static byte[] CanonicalizeCapabilityRdfc(
         Capability capabilityWithoutProof, Proof proof, IDocumentCanonicalizer canonicalizer)
     {
-        // Proof options document — needs @context from the capability for JSON-LD processing
-        var proofOptions = new Dictionary<string, object?>
-        {
-            ["@context"] = capabilityWithoutProof.Context,
-            ["type"] = proof.Type,
-            ["created"] = proof.Created,
-            ["proofPurpose"] = proof.ProofPurpose,
-            ["verificationMethod"] = proof.VerificationMethod,
-            ["capabilityChain"] = proof.CapabilityChain
-        };
+        // Proof options carry every proof field except proofValue, plus the document's @context
+        // so JSON-LD processing has the same vocabulary the document uses.
+        var proofOptions = ToFieldDictionary(proof, exclude: "proofValue");
+        proofOptions["@context"] = JsonSerializer.SerializeToElement(
+            capabilityWithoutProof.Context, ModelSerializerOptions);
 
         return ConcatenateHashes(
             canonicalizer.Canonicalize(capabilityWithoutProof),
@@ -160,28 +146,14 @@ internal static class ProofSigningPayloadBuilder
     private static byte[] CanonicalizeInvocationRdfc(
         Invocation invocationWithoutProof, Proof proof, IDocumentCanonicalizer canonicalizer)
     {
-        // Invocation document — add @context for JSON-LD processing
-        var invocationDoc = new Dictionary<string, object?>
-        {
-            ["@context"] = "https://w3id.org/zcap/v1",
-            ["id"] = invocationWithoutProof.Id,
-            ["capability"] = invocationWithoutProof.Capability,
-            ["capabilityAction"] = invocationWithoutProof.CapabilityAction,
-            ["invocationTarget"] = invocationWithoutProof.InvocationTarget
-        };
+        // Invocations don't carry @context on the model, so add the ZCAP-LD default for JSON-LD processing.
+        const string ZcapContext = "https://w3id.org/zcap/v1";
 
-        var proofOptions = new Dictionary<string, object?>
-        {
-            ["@context"] = "https://w3id.org/zcap/v1",
-            ["type"] = proof.Type,
-            ["created"] = proof.Created,
-            ["proofPurpose"] = proof.ProofPurpose,
-            ["verificationMethod"] = proof.VerificationMethod,
-            ["capability"] = proof.Capability,
-            ["capabilityAction"] = proof.CapabilityAction,
-            ["invocationTarget"] = proof.InvocationTarget,
-            ["capabilityChain"] = proof.CapabilityChain
-        };
+        var invocationDoc = ToFieldDictionary(invocationWithoutProof);
+        invocationDoc["@context"] = JsonSerializer.SerializeToElement(ZcapContext, ModelSerializerOptions);
+
+        var proofOptions = ToFieldDictionary(proof, exclude: "proofValue");
+        proofOptions["@context"] = JsonSerializer.SerializeToElement(ZcapContext, ModelSerializerOptions);
 
         return ConcatenateHashes(
             canonicalizer.Canonicalize(invocationDoc),
@@ -200,5 +172,23 @@ internal static class ProofSigningPayloadBuilder
         proofHash.CopyTo(result, 0);
         docHash.CopyTo(result, proofHash.Length);
         return result;
+    }
+
+    /// <summary>
+    /// Round-trips a model object to a string-keyed dictionary of JSON elements,
+    /// honoring [JsonPropertyName], [JsonIgnore(WhenWritingNull)], and [JsonConverter]
+    /// on the model. The dictionary is what gets fed into the canonicalizer; key order
+    /// is irrelevant because JCS sorts alphabetically.
+    /// </summary>
+    private static Dictionary<string, object> ToFieldDictionary<T>(T value, string? exclude = null)
+    {
+        var element = JsonSerializer.SerializeToElement(value, ModelSerializerOptions);
+        var dict = new Dictionary<string, object>(StringComparer.Ordinal);
+        foreach (var prop in element.EnumerateObject())
+        {
+            if (exclude is not null && prop.Name == exclude) continue;
+            dict[prop.Name] = prop.Value;
+        }
+        return dict;
     }
 }
