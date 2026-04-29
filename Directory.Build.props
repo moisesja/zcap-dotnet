@@ -1,6 +1,6 @@
 <Project>
   <PropertyGroup>
     <!-- Shared package/library version for ZcapLd.Core and ZcapLd.AspNetCore -->
-    <ZcapLdVersion>1.2.0</ZcapLdVersion>
+    <ZcapLdVersion>2.0.0</ZcapLdVersion>
   </PropertyGroup>
 </Project>
