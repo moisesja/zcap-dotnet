@@ -59,7 +59,7 @@ public class RdfcCanonicalizeIntegrationTests
         var proof = new Proof
         {
             Type = "Ed25519Signature2020",
-            Created = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+            Created = "2024-01-01T00:00:00.000000Z",
             ProofPurpose = "capabilityDelegation",
             VerificationMethod = "did:key:example#key-1",
             CapabilityChain = new object[] { "urn:zcap:root:https%3A%2F%2Fexample.com%2Ffoo" }
@@ -89,7 +89,7 @@ public class RdfcCanonicalizeIntegrationTests
         var proof = new Proof
         {
             Type = "Ed25519Signature2020",
-            Created = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+            Created = "2024-01-01T00:00:00.000000Z",
             ProofPurpose = "capabilityDelegation",
             VerificationMethod = "did:key:example#key-1",
             CapabilityChain = new object[] { "urn:zcap:root:https%3A%2F%2Fexample.com%2Ffoo" }

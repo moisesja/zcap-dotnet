@@ -280,7 +280,7 @@ public class VerificationServiceTests
             Controller = childDid,
             InvocationTarget = rootCapability.InvocationTarget,
             AllowedAction = new[] { "read" },
-            Expires = DateTime.UtcNow.AddDays(5)
+            Expires = ZcapTimestamps.Format(DateTime.UtcNow.AddDays(5))
         };
 
         // Malicious chain omits the embedded immediate parent object.

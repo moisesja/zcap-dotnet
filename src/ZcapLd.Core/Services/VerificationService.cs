@@ -363,7 +363,8 @@ public class VerificationService : IVerificationService
                     return false;
 
                 // Verify expiration hasn't passed
-                if (child.Expires.HasValue && child.Expires.Value < DateTime.UtcNow)
+                var childExpiresAt = child.ExpiresAt;
+                if (childExpiresAt.HasValue && childExpiresAt.Value < DateTime.UtcNow)
                     return false;
 
                 // Verify caveats are compatible
@@ -515,9 +516,11 @@ public class VerificationService : IVerificationService
             return false;
 
         // 2. Expiration must not be later than parent
-        if (child.Expires.HasValue && parent.Expires.HasValue)
+        var childExpires = child.ExpiresAt;
+        var parentExpires = parent.ExpiresAt;
+        if (childExpires.HasValue && parentExpires.HasValue)
         {
-            if (child.Expires.Value > parent.Expires.Value)
+            if (childExpires.Value > parentExpires.Value)
                 return false;
         }
 

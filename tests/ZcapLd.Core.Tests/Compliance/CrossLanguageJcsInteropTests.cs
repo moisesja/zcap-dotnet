@@ -16,7 +16,8 @@ namespace ZcapLd.Core.Tests.Compliance;
 /// signatures produced by zcap-dotnet stop verifying in zcap-py and vice versa. This
 /// fixture is the only test in the suite that catches that drift, because every
 /// in-process round-trip would still pass even with the wrong shape (the same wrong
-/// shape is on both sides). See https://github.com/moisesja/zcap-dotnet/issues/34.
+/// shape is on both sides). See https://github.com/moisesja/zcap-dotnet/issues/34
+/// and https://github.com/moisesja/zcap-dotnet/issues/36.
 /// </summary>
 public class CrossLanguageJcsInteropTests
 {
@@ -30,7 +31,7 @@ public class CrossLanguageJcsInteropTests
             Controller = "did:key:z6MkfixedController",
             InvocationTarget = "https://example.com/api/resource",
             AllowedAction = new[] { "read" },
-            Expires = new DateTime(2027, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+            Expires = "2027-01-01T00:00:00.000000Z",
             ParentCapability = "urn:zcap:root:fixed",
             Caveat = Array.Empty<Caveat>(),
             Proof = null
@@ -38,7 +39,7 @@ public class CrossLanguageJcsInteropTests
         var proof = new Proof
         {
             Type = "Ed25519Signature2020",
-            Created = new DateTime(2026, 4, 29, 12, 0, 0, DateTimeKind.Utc),
+            Created = "2026-04-29T12:00:00.000000Z",
             ProofPurpose = "capabilityDelegation",
             VerificationMethod = "did:key:z6MkfixedSigner#z6MkfixedSigner",
             CapabilityChain = new object[] { "urn:zcap:root:fixed" },
@@ -50,7 +51,7 @@ public class CrossLanguageJcsInteropTests
 
         // Flat W3C Data Integrity shape: capability's own top-level fields plus a
         // "proof" field carrying the on-document proof minus proofValue.
-        // Keys alphabetically sorted (JCS / RFC 8785). Six-digit microsecond DateTimes.
+        // Keys alphabetically sorted (JCS / RFC 8785). Timestamps preserved verbatim.
         const string Expected =
             "{" +
                 "\"@context\":\"https://w3id.org/zcap/v1\"," +
@@ -89,7 +90,7 @@ public class CrossLanguageJcsInteropTests
         var proof = new Proof
         {
             Type = "Ed25519Signature2020",
-            Created = new DateTime(2026, 4, 29, 12, 0, 0, DateTimeKind.Utc),
+            Created = "2026-04-29T12:00:00.000000Z",
             ProofPurpose = "capabilityInvocation",
             VerificationMethod = "did:key:z6MkfixedInvoker#z6MkfixedInvoker",
             CapabilityChain = Array.Empty<object>(),
@@ -125,70 +126,147 @@ public class CrossLanguageJcsInteropTests
         canonical.Should().NotContain("\"proofValue\"");
     }
 
-    [Fact(DisplayName = "Proof.Created on-wire JSON uses 6-digit microsecond ISO-8601 UTC")]
-    public void Proof_OnWireDateTime_UsesSixDigitMicrosecondUtc()
+    [Theory(DisplayName = "Issue #36 reproduction A — proof.created is preserved verbatim across many shapes")]
+    [InlineData("2026-04-29T00:00:00Z")]
+    [InlineData("2026-04-29T00:00:00.000000Z")]
+    [InlineData("2026-04-29T00:00:00.123Z")]
+    [InlineData("2026-04-29T00:00:00.123456789Z")]
+    [InlineData("2026-04-29T00:00:00+00:00")]
+    public void Created_PreservedVerbatim_NoMatterTheShape(string onWireCreated)
     {
-        // Pick a DateTime with sub-microsecond precision (.NET tick = 100ns).
-        // The converter must truncate to 6 digits for cross-stack JCS interop.
+        // Verifier path: an on-wire proof carries a `created` timestamp in some shape.
+        // Every other Data Integrity verifier JCS-canonicalizes that string verbatim.
+        // Our canonicalizer must do the same — any normalization at this boundary
+        // diverges the bytes the signer signed from the bytes we hash.
+        var invocation = new Invocation
+        {
+            Id = "urn:uuid:invocation-created-preservation",
+            Capability = "urn:zcap:root:test",
+            CapabilityAction = "read",
+            InvocationTarget = "https://example.com/r"
+        };
         var proof = new Proof
         {
             Type = "Ed25519Signature2020",
-            Created = new DateTime(638829918538521234L, DateTimeKind.Utc),
-            ProofPurpose = "capabilityDelegation",
-            VerificationMethod = "did:key:zX",
-            CapabilityChain = Array.Empty<object>(),
-            ProofValue = "z..."
+            Created = onWireCreated,
+            ProofPurpose = "capabilityInvocation",
+            VerificationMethod = "did:key:zX#zX",
+            ProofValue = "z-discarded"
         };
 
-        var json = JsonSerializer.Serialize(proof);
+        var canonicalBytes = ProofSigningPayloadBuilder.CanonicalizeInvocationPayload(invocation, proof);
+        var canonical = Encoding.UTF8.GetString(canonicalBytes);
 
-        // 7-digit (.NET default) would be ".8538521" — that breaks Python interop.
-        // We want exactly 6 digits + "Z".
-        json.Should().Contain("\"created\":\"");
-        json.Should().MatchRegex("\"created\":\"\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{6}Z\"");
-        json.Should().NotMatchRegex("\"created\":\"[^\"]*\\.\\d{7}Z\"",
-            "7-digit fractional seconds break JCS interop with zcap-py");
+        canonical.Should().Contain($"\"created\":\"{onWireCreated}\"",
+            $"on-wire `created` value '{onWireCreated}' must appear unmodified in the JCS canonical bytes");
     }
 
-    [Fact(DisplayName = "Capability.Expires on-wire JSON uses 6-digit microsecond ISO-8601 UTC")]
-    public void Capability_OnWireExpires_UsesSixDigitMicrosecondUtc()
+    [Fact(DisplayName = "Issue #36 reproduction B — unmodeled proof fields (`domain`, `nonce`) are preserved")]
+    public void Proof_UnmodeledFields_PreservedInCanonicalBytes()
     {
-        var capability = new Capability
+        // Simulate a proof that arrived from the wire with extension fields
+        // not declared on Proof.cs (domain, nonce, id, challenge). Every other
+        // Data Integrity verifier JCS-canonicalizes them. We must too.
+        const string OnWire = """
         {
-            Id = "urn:uuid:test",
-            Controller = "did:key:zX",
-            InvocationTarget = "https://example.com/x",
-            Expires = new DateTime(638829918538521234L, DateTimeKind.Utc)
-        };
+          "id": "urn:uuid:invocation-with-extensions",
+          "capability": "urn:zcap:root:test",
+          "capabilityAction": "read",
+          "invocationTarget": "https://example.com/r",
+          "proof": {
+            "type": "Ed25519Signature2020",
+            "created": "2026-04-29T00:00:00Z",
+            "proofPurpose": "capabilityInvocation",
+            "verificationMethod": "did:key:zX#zX",
+            "domain": "https://resource.example/proof-fields",
+            "nonce": "abc123",
+            "challenge": "ch-xyz",
+            "id": "urn:proof:42",
+            "capability": "urn:zcap:root:test",
+            "capabilityAction": "read",
+            "invocationTarget": "https://example.com/r",
+            "proofValue": "z-this-must-be-excluded"
+          }
+        }
+        """;
 
-        var json = JsonSerializer.Serialize(capability);
+        var invocation = JsonSerializer.Deserialize<Invocation>(OnWire)!;
+        invocation.Proof.Should().NotBeNull();
 
-        json.Should().MatchRegex("\"expires\":\"\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{6}Z\"");
-        json.Should().NotMatchRegex("\"expires\":\"[^\"]*\\.\\d{7}Z\"");
+        var canonicalBytes = ProofSigningPayloadBuilder.CanonicalizeInvocationPayload(
+            ProofSigningPayloadBuilder.CloneInvocationWithoutProof(invocation),
+            invocation.Proof!);
+        var canonical = Encoding.UTF8.GetString(canonicalBytes);
+
+        canonical.Should().Contain("\"domain\":\"https://resource.example/proof-fields\"",
+            "unmodeled proof field `domain` must round-trip verbatim — it's part of what was signed");
+        canonical.Should().Contain("\"nonce\":\"abc123\"",
+            "unmodeled proof field `nonce` must round-trip verbatim");
+        canonical.Should().Contain("\"challenge\":\"ch-xyz\"");
+        canonical.Should().Contain("\"id\":\"urn:proof:42\"");
+        canonical.Should().NotContain("\"proofValue\"", "proofValue must still be excluded");
     }
 
-    [Fact(DisplayName = "DateTime kind=Local is normalized to UTC before serialization")]
-    public void DateTime_LocalKind_IsConvertedToUtc()
+    [Fact(DisplayName = "Issue #36 — unmodeled capability fields are preserved")]
+    public void Capability_UnmodeledFields_PreservedInCanonicalBytes()
+    {
+        const string OnWire = """
+        {
+          "@context": "https://w3id.org/zcap/v1",
+          "id": "urn:uuid:capability-with-extensions",
+          "controller": "did:key:zC",
+          "invocationTarget": "https://example.com/r",
+          "allowedAction": ["read"],
+          "caveat": [],
+          "expires": "2027-01-01T00:00:00Z",
+          "parentCapability": "urn:zcap:root:test",
+          "delegator": "did:key:zDelegator",
+          "purpose": "operational-test"
+        }
+        """;
+        var capability = JsonSerializer.Deserialize<Capability>(OnWire)!;
+        capability.AdditionalProperties.Should().NotBeNull();
+        capability.AdditionalProperties!.Should().ContainKey("delegator");
+        capability.AdditionalProperties.Should().ContainKey("purpose");
+
+        var proof = new Proof
+        {
+            Type = "Ed25519Signature2020",
+            Created = "2026-04-29T00:00:00Z",
+            ProofPurpose = "capabilityDelegation",
+            VerificationMethod = "did:key:zX#zX",
+            CapabilityChain = new object[] { "urn:zcap:root:test" },
+            ProofValue = "z-discarded"
+        };
+
+        var canonicalBytes = ProofSigningPayloadBuilder.CanonicalizeCapabilityPayload(capability, proof);
+        var canonical = Encoding.UTF8.GetString(canonicalBytes);
+
+        canonical.Should().Contain("\"delegator\":\"did:key:zDelegator\"",
+            "unmodeled capability field `delegator` must round-trip verbatim");
+        canonical.Should().Contain("\"purpose\":\"operational-test\"");
+        canonical.Should().Contain("\"expires\":\"2027-01-01T00:00:00Z\"",
+            "on-wire `expires` value must appear unmodified in JCS canonical bytes");
+    }
+
+    [Fact(DisplayName = "SigningService formats fresh Created with 6-digit microsecond ISO-8601 UTC")]
+    public void ZcapTimestamps_Format_ProducesSixDigitMicrosecondUtc()
+    {
+        // Sanity check: when zcap-dotnet generates a fresh timestamp on the signer
+        // path, it uses the canonical 6-digit microsecond format that aligns with
+        // the broader Data Integrity ecosystem.
+        var formatted = ZcapTimestamps.Format(new DateTime(638829918538521234L, DateTimeKind.Utc));
+
+        formatted.Should().MatchRegex(@"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$");
+    }
+
+    [Fact(DisplayName = "ZcapTimestamps.Format normalizes Local-kind DateTimes to UTC")]
+    public void ZcapTimestamps_Format_NormalizesLocalToUtc()
     {
         var local = new DateTime(2026, 4, 29, 12, 0, 0, DateTimeKind.Local);
-        var expectedUtc = local.ToUniversalTime().ToString(
+        var expected = local.ToUniversalTime().ToString(
             "yyyy-MM-ddTHH:mm:ss.ffffffZ", System.Globalization.CultureInfo.InvariantCulture);
 
-        var proof = new Proof
-        {
-            Type = "Ed25519Signature2020",
-            Created = local,
-            ProofPurpose = "capabilityDelegation",
-            VerificationMethod = "did:key:zX",
-            CapabilityChain = Array.Empty<object>(),
-            ProofValue = "z..."
-        };
-
-        var json = JsonSerializer.Serialize(proof);
-
-        json.Should().Contain($"\"created\":\"{expectedUtc}\"",
-            "Local-kind DateTimes must be normalized to UTC with explicit Z suffix before serialization");
-        json.Should().NotMatchRegex("\"created\":\"[^\"Z]*[+-]\\d{2}:\\d{2}\"",
-            "DateTime offsets like +05:00 break JCS interop — Z (UTC) is required");
+        ZcapTimestamps.Format(local).Should().Be(expected);
     }
 }

@@ -84,7 +84,7 @@ public class SigningService : ISigningService
         var suite = await ResolveSuiteForDidAsync(signerDid);
         var canonicalizer = ResolveCanonicalizer(suite);
         var verificationMethod = await _resolver.GetVerificationMethodAsync(signerDid);
-        var created = DateTime.UtcNow;
+        var created = ZcapTimestamps.Format(DateTime.UtcNow);
         var proofType = suite.ProofType;
         var normalizedChain = capabilityChain ?? Array.Empty<object>();
 
@@ -122,7 +122,7 @@ public class SigningService : ISigningService
         var suite = await ResolveSuiteForDidAsync(signerDid);
         var canonicalizer = ResolveCanonicalizer(suite);
         var verificationMethod = await _resolver.GetVerificationMethodAsync(signerDid);
-        var created = DateTime.UtcNow;
+        var created = ZcapTimestamps.Format(DateTime.UtcNow);
         var proofType = suite.ProofType;
 
         // COMPLIANCE FIX C-05: Create the invocation proof with required fields

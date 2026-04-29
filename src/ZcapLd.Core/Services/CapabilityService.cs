@@ -111,7 +111,9 @@ public class CapabilityService : ICapabilityService
             Controller = newController,
             InvocationTarget = parentCapability.InvocationTarget,
             AllowedAction = allowedActions,
-            Expires = expires ?? parentCapability.Expires, // Use parent's expiration if not specified
+            // Use parent's verbatim Expires string if caller didn't specify one;
+            // format the caller-supplied DateTime canonically otherwise.
+            Expires = expires.HasValue ? ZcapTimestamps.Format(expires.Value) : parentCapability.Expires,
             ParentCapability = parentCapability.Id,
             Caveat = inheritedCaveats
         };
@@ -256,11 +258,12 @@ public class CapabilityService : ICapabilityService
         }
 
         // Validate expiration (child must not be less restrictive)
-        if (expires.HasValue && parentCapability.Expires.HasValue)
+        var parentExpiresAt = parentCapability.ExpiresAt;
+        if (expires.HasValue && parentExpiresAt.HasValue)
         {
             // Allow a small tolerance (1 second) for clock skew between delegation calls
             var tolerance = TimeSpan.FromSeconds(1);
-            if (expires.Value > parentCapability.Expires.Value.Add(tolerance))
+            if (expires.Value > parentExpiresAt.Value.Add(tolerance))
             {
                 throw new InvalidOperationException(
                     "Child capability expiration cannot be later than parent's expiration. " +
