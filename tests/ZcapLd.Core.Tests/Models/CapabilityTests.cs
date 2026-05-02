@@ -18,10 +18,12 @@ public class CapabilityTests
         capability.Context.Should().Be("https://w3id.org/zcap/v1");
         capability.Controller.Should().BeEmpty();
         capability.InvocationTarget.Should().BeEmpty();
-        capability.AllowedAction.Should().BeEmpty();
+        // Optional fields default to null so JSON serialization omits them on the wire
+        // (cross-language parsers reject empty arrays / null values when present — see #37).
+        capability.AllowedAction.Should().BeNull();
         capability.Expires.Should().BeNull();
         capability.ParentCapability.Should().BeNull();
-        capability.Caveat.Should().BeEmpty();
+        capability.Caveat.Should().BeNull();
         capability.Proof.Should().BeNull();
     }
 

@@ -36,7 +36,7 @@ var rootCapability = await capabilityService.CreateRootCapabilityAsync(
 Console.WriteLine($"Root Capability ID: {rootCapability.Id}");
 Console.WriteLine($"Controller: {rootCapability.Controller}");
 Console.WriteLine($"Invocation Target: {rootCapability.InvocationTarget}");
-Console.WriteLine($"Root Allowed Actions: {(rootCapability.AllowedAction.Length == 0 ? "(none by design)" : string.Join(", ", rootCapability.AllowedAction))}");
+Console.WriteLine($"Root Allowed Actions: {(rootCapability.AllowedAction is null or { Length: 0 } ? "(none by design)" : string.Join(", ", rootCapability.AllowedAction))}");
 Console.WriteLine($"Has Proof: {rootCapability.Proof != null}"); // Root capabilities have no proof
 Console.WriteLine();
 
@@ -173,8 +173,8 @@ var caveatCapability = await capabilityService.DelegateCapabilityAsync(
 );
 
 Console.WriteLine($"Capability with Caveats ID: {caveatCapability.Id}");
-Console.WriteLine($"Number of Caveats: {caveatCapability.Caveat.Length}");
-foreach (var caveat in caveatCapability.Caveat)
+Console.WriteLine($"Number of Caveats: {caveatCapability.Caveat?.Length ?? 0}");
+foreach (var caveat in caveatCapability.Caveat ?? Array.Empty<Caveat>())
 {
     Console.WriteLine($"  - Caveat Type: {caveat.Type}");
     if (caveat is ExpirationCaveat exp)
@@ -235,9 +235,9 @@ var restrictedCapability = await capabilityService.DelegateCapabilityAsync(
 );
 
 Console.WriteLine("Attenuation Example:");
-Console.WriteLine($"Parent Actions: {string.Join(", ", broadCapability.AllowedAction)}");
-Console.WriteLine($"Child Actions: {string.Join(", ", restrictedCapability.AllowedAction)}");
-Console.WriteLine($"Properly Attenuated: {restrictedCapability.AllowedAction.Length < broadCapability.AllowedAction.Length}");
+Console.WriteLine($"Parent Actions: {string.Join(", ", broadCapability.AllowedAction ?? Array.Empty<string>())}");
+Console.WriteLine($"Child Actions: {string.Join(", ", restrictedCapability.AllowedAction ?? Array.Empty<string>())}");
+Console.WriteLine($"Properly Attenuated: {(restrictedCapability.AllowedAction?.Length ?? 0) < (broadCapability.AllowedAction?.Length ?? 0)}");
 
 // Attempting to create invalid delegation (expanding authority)
 Console.WriteLine("\nAttempting to expand authority (should fail):");
@@ -289,8 +289,8 @@ var adminAuthority = await capabilityService.DelegateCapabilityAsync(
 
 Console.WriteLine("Company Admin creates root capability for Q4 financials");
 Console.WriteLine($"  Capability: {sensitiveDoc.Id}");
-Console.WriteLine($"  Root Actions: {(sensitiveDoc.AllowedAction.Length == 0 ? "(none by design)" : string.Join(", ", sensitiveDoc.AllowedAction))}");
-Console.WriteLine($"  Admin Authority Actions: {string.Join(", ", adminAuthority.AllowedAction)}");
+Console.WriteLine($"  Root Actions: {(sensitiveDoc.AllowedAction is null or { Length: 0 } ? "(none by design)" : string.Join(", ", sensitiveDoc.AllowedAction))}");
+Console.WriteLine($"  Admin Authority Actions: {string.Join(", ", adminAuthority.AllowedAction ?? Array.Empty<string>())}");
 
 // Admin delegates to Manager with sharing capability for 60 days
 // Note: child expiration MUST be ≤ parent expiration (attenuation rule)

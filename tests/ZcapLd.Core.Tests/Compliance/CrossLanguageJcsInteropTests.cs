@@ -76,6 +76,74 @@ public class CrossLanguageJcsInteropTests
         canonical.Should().NotContain("\"proofValue\"", "proofValue must never appear in the signing payload");
     }
 
+    [Fact(DisplayName = "Issue #37 — root capability wire form omits absent optional fields")]
+    public void RootCapabilityWireForm_OmitsAbsentOptionalFields()
+    {
+        // Per W3C ZCAP-LD, root capabilities have unbounded authority — allowedAction,
+        // caveat, parentCapability, expires, and proof are optional. Strict cross-language
+        // parsers (zcap-py and friends) reject empty arrays / null values when those
+        // fields are present, but accept absence. The model must therefore omit them
+        // entirely from the wire when unset.
+        var rootCapability = new Capability
+        {
+            Id = "urn:zcap:root:https%3A%2F%2Fexample.com%2Fapi%2Fresource",
+            Context = "https://w3id.org/zcap/v1",
+            Controller = "did:key:z6MkfixedController",
+            InvocationTarget = "https://example.com/api/resource",
+            // AllowedAction, Caveat, Expires, ParentCapability, Proof intentionally unset
+        };
+
+        var serializerOptions = new JsonSerializerOptions
+        {
+            WriteIndented = false,
+            DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
+            Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+        };
+
+        var wireJson = JsonSerializer.Serialize(rootCapability, serializerOptions);
+
+        wireJson.Should().NotContain("\"allowedAction\"",
+            "empty allowedAction would crash zcap-py's _parse_optional_action_list (#37)");
+        wireJson.Should().NotContain("\"caveat\"",
+            "empty caveat array breaks strict spec-conformant parsers (#37)");
+        wireJson.Should().NotContain("\"parentCapability\"",
+            "null parentCapability has no spec meaning on root capabilities (#37)");
+        wireJson.Should().NotContain("\"expires\"",
+            "null expires has no spec meaning on root capabilities (#37)");
+        wireJson.Should().NotContain("\"proof\"",
+            "root capabilities are unsigned by definition (#37)");
+    }
+
+    [Fact(DisplayName = "Issue #37 — CreateRootCapabilityAsync emits only @context, id, controller, invocationTarget")]
+    public async Task CreateRootCapabilityAsync_EmitsOnlyMandatoryFields()
+    {
+        // Lock the on-wire shape produced by the service entry point that 99% of
+        // consumers use. If a future change re-introduces empty optionals, this
+        // test catches it before zcap-py / cross-stack interop breaks again.
+        var resolver = new ZcapLd.Core.Services.DidKeyResolver();
+        var signer = new ZcapLd.Core.Tests.Helpers.InMemoryDidProvider();
+        var signingService = new ZcapLd.Core.Services.SigningService(signer, resolver);
+        var capabilityService = new ZcapLd.Core.Services.CapabilityService(signingService);
+
+        var rootCap = await capabilityService.CreateRootCapabilityAsync(
+            controller: "did:key:z6MkfixedController",
+            invocationTarget: "https://example.com/api/resource");
+
+        var serializerOptions = new JsonSerializerOptions
+        {
+            WriteIndented = false,
+            DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
+            Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+        };
+
+        var wireJson = JsonSerializer.Serialize(rootCap, serializerOptions);
+
+        // Only the four mandatory fields must appear.
+        var doc = JsonSerializer.Deserialize<JsonElement>(wireJson);
+        var keys = doc.EnumerateObject().Select(p => p.Name).OrderBy(k => k).ToArray();
+        keys.Should().BeEquivalentTo(new[] { "@context", "controller", "id", "invocationTarget" });
+    }
+
     [Fact(DisplayName = "JCS invocation payload uses W3C flat shape")]
     public void InvocationJcsPayload_UsesFlatW3cDataIntegrityShape()
     {
@@ -87,13 +155,14 @@ public class CrossLanguageJcsInteropTests
             InvocationTarget = "https://example.com/api/resource",
             Proof = null
         };
+        // CapabilityChain intentionally unset — invocation proofs don't carry a chain,
+        // and emitting `"capabilityChain": []` breaks strict cross-language parsers (#37).
         var proof = new Proof
         {
             Type = "Ed25519Signature2020",
             Created = "2026-04-29T12:00:00.000000Z",
             ProofPurpose = "capabilityInvocation",
             VerificationMethod = "did:key:z6MkfixedInvoker#z6MkfixedInvoker",
-            CapabilityChain = Array.Empty<object>(),
             ProofValue = "this-must-be-excluded",
             Capability = "urn:uuid:fixed-delegated",
             CapabilityAction = "read",
@@ -112,7 +181,6 @@ public class CrossLanguageJcsInteropTests
                 "\"proof\":{" +
                     "\"capability\":\"urn:uuid:fixed-delegated\"," +
                     "\"capabilityAction\":\"read\"," +
-                    "\"capabilityChain\":[]," +
                     "\"created\":\"2026-04-29T12:00:00.000000Z\"," +
                     "\"invocationTarget\":\"https://example.com/api/resource\"," +
                     "\"proofPurpose\":\"capabilityInvocation\"," +
@@ -123,6 +191,7 @@ public class CrossLanguageJcsInteropTests
 
         canonical.Should().Be(Expected);
         canonical.Should().NotContain("\"invocation\":{", "wrapper-shape `{invocation:..., proof:...}` breaks W3C Data Integrity interop");
+        canonical.Should().NotContain("\"capabilityChain\"", "invocation proofs do not carry a capability chain (#37)");
         canonical.Should().NotContain("\"proofValue\"");
     }
 

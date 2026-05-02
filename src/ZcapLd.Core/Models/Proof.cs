@@ -43,10 +43,15 @@ public class Proof
     public string VerificationMethod { get; set; } = string.Empty;
 
     /// <summary>
-    /// Chain of capabilities for delegation proofs
+    /// Chain of capabilities for delegation proofs.
+    /// Null on invocation proofs (which reference the capability via the
+    /// <see cref="Capability"/> field instead) and omitted from the wire when null —
+    /// strict cross-language parsers reject `"capabilityChain": []` for the same
+    /// reason they reject empty `allowedAction`.
     /// </summary>
     [JsonPropertyName("capabilityChain")]
-    public object[] CapabilityChain { get; set; } = Array.Empty<object>();
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public object[]? CapabilityChain { get; set; }
 
     /// <summary>
     /// The cryptographic signature value

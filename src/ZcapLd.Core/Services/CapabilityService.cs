@@ -20,10 +20,11 @@ public class CapabilityService : ICapabilityService
     }
 
     /// <summary>
-    /// Creates a root capability
-    /// Root capabilities do NOT have a proof, expires, or parentCapability
-    /// NOTE C-01: Per strict W3C interpretation, root capabilities might not need allowedAction/caveat,
-    /// but we include them for practical use. Consider using serialization options to omit when null/empty.
+    /// Creates a root capability. Per W3C ZCAP-LD, a root capability represents
+    /// complete authority over the resource — optional fields (allowedAction, caveat,
+    /// expires, parentCapability, proof) are left unset so JSON serialization omits
+    /// them entirely. Strict cross-language parsers (zcap-py and friends) reject
+    /// empty arrays / null for these fields when present.
     /// </summary>
     public Task<Capability> CreateRootCapabilityAsync(
         string controller,
@@ -57,14 +58,7 @@ public class CapabilityService : ICapabilityService
             Id = rootId,
             Controller = controller,
             InvocationTarget = invocationTarget,
-            // COMPLIANCE FIX: MUST-03 - Root capabilities MUST NOT have allowedAction/caveat/expires
-            // These fields are only for delegated capabilities
-            // Root capabilities represent complete authority over the resource
-            AllowedAction = Array.Empty<string>(), // Always empty for root capabilities
-            Caveat = Array.Empty<Caveat>(), // Always empty for root capabilities
-            Expires = null, // Always null for root capabilities
-            ParentCapability = null,
-            Proof = null
+            // AllowedAction, Caveat, Expires, ParentCapability, Proof intentionally unset.
         };
 
         return Task.FromResult(capability);
@@ -93,7 +87,9 @@ public class CapabilityService : ICapabilityService
         // Validate attenuation rules (delegated capability must be more restrictive)
         ValidateAttenuation(parentCapability, allowedActions, expires);
 
-        // Inherit parent caveats (children inherit ALL parent caveats)
+        // Inherit parent caveats (children inherit ALL parent caveats).
+        // Returns null when neither parent nor child supplies any — keeps the field
+        // off the wire so cross-language parsers see absence, not an empty array.
         var inheritedCaveats = InheritCaveats(parentCapability.Caveat, caveats);
 
         // Resolve the signer's crypto suite context URL dynamically
@@ -285,26 +281,27 @@ public class CapabilityService : ICapabilityService
     }
 
     /// <summary>
-    /// Inherits caveats from parent and merges with new caveats
-    /// Per spec: children inherit ALL parent caveats and MAY add new ones
+    /// Inherits caveats from parent and merges with new caveats.
+    /// Per spec: children inherit ALL parent caveats and MAY add new ones.
+    /// Returns null when neither side supplies any caveats so the field stays
+    /// off the wire (vs. emitting an empty array, which strict cross-language
+    /// parsers reject).
     /// </summary>
-    private Caveat[] InheritCaveats(Caveat[] parentCaveats, Caveat[]? newCaveats)
+    private Caveat[]? InheritCaveats(Caveat[]? parentCaveats, Caveat[]? newCaveats)
     {
         var allCaveats = new List<Caveat>();
 
-        // Add all parent caveats first
         if (parentCaveats != null && parentCaveats.Length > 0)
         {
             allCaveats.AddRange(parentCaveats);
         }
 
-        // Add new caveats
         if (newCaveats != null && newCaveats.Length > 0)
         {
             allCaveats.AddRange(newCaveats);
         }
 
-        return allCaveats.ToArray();
+        return allCaveats.Count == 0 ? null : allCaveats.ToArray();
     }
 
     /// <summary>
