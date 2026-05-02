@@ -306,7 +306,7 @@ bool canInvoke = await verificationService
 var caveats = new Caveat[]
 {
     new ExpirationCaveat { Expires = DateTime.UtcNow.AddDays(7) },
-    new UsageCountCaveat { MaxUses = 10, CurrentUses = 0 }
+    new UsageCountCaveat { MaxUses = 10 } // CurrentUses is [JsonIgnore] runtime state, not signed policy
 };
 
 var capability = await capabilityService.CreateRootCapabilityAsync(
@@ -524,7 +524,7 @@ Console.WriteLine($"Capability chain valid: {isValid}"); // true
 var caveats = new Caveat[]
 {
     new ExpirationCaveat { Expires = DateTime.UtcNow.AddHours(1) },
-    new UsageCountCaveat { MaxUses = 5, CurrentUses = 0 }
+    new UsageCountCaveat { MaxUses = 5 } // CurrentUses is [JsonIgnore] runtime state, not signed policy
 };
 
 var limitedCapability = await capabilityService.CreateRootCapabilityAsync(

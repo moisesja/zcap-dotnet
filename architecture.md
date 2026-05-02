@@ -79,6 +79,12 @@ Primary assembly: `src/ZcapLd.Core`.
 - `JsonCanonicalizer`: deterministic JSON canonicalization (RFC 8785)
 - `ProofSigningPayloadBuilder`: builds signing payloads; JCS combines doc+proof into single object, RDFC-1.0 canonicalizes separately and concatenates SHA-256 hashes (per W3C Data Integrity spec)
 - `SignatureVerifier`: helper wrapper for signature checks (accepts `ICryptoSuite` + optional `IDocumentCanonicalizer`)
+- `CaveatJsonConverter`: polymorphic `JsonConverter<Caveat>` — writes via runtime concrete type, reads via discriminator lookup against `CaveatTypeRegistry`. Required for cross-language interop (sign-time vs. wire-time bytes match).
+- `ZcapJsonOptions.Default`: shared `JsonSerializerOptions` used by both sign-time canonicalization and verifier-time chain deserialization. Single source of truth for the encoder, null-handling, and the caveat converter.
+
+### Models — registries (`src/ZcapLd.Core/Models`)
+
+- `CaveatTypeRegistry.Default`: process-wide singleton mapping `Caveat.Type` discriminator strings to concrete CLR types. Pre-populated with `ExpirationCaveat`, `UsageCountCaveat`, `ValidWhileTrueCaveat`. Third-party caveat libraries register their derived types here at startup.
 
 ### Exceptions (`src/ZcapLd.Core/Exceptions`)
 
@@ -130,7 +136,15 @@ Implement `ICryptoSuite` for new signature algorithms and register via `CryptoSu
 
 ### Custom Caveats
 
-Implement new caveat types by extending `Caveat` and adding compatibility/evaluation logic in `CaveatProcessor`.
+Three steps:
+
+1. Extend `Caveat` with the discriminator `Type` override and any policy fields. Mark mutable runtime state `[JsonIgnore]` — only the policy goes on the wire (otherwise mutation invalidates the signature).
+2. **Register the type against its discriminator** so the polymorphic JSON converter can dispatch:
+   - In-process / examples: `CaveatTypeRegistry.Default.Register<MyCaveat>("MyCaveat")` at startup.
+   - ASP.NET DI: `services.AddZcapCaveatType<MyCaveat>("MyCaveat")` (mirrors `AddZcapCryptoSuite<T>()`).
+3. Add evaluation logic — synchronous via `IsSatisfied` on the caveat, or async by extending `CaveatProcessor` (the ValidWhileTrue pattern below).
+
+Skipping step 2 silently breaks cross-language interop: STJ uses the static array element type for `Capability.Caveat`, dropping derived fields at sign time. Without registration, verifier-time deserialization throws on the abstract `Caveat` base for any wire body coming in from another stack.
 
 ### ValidWhileTrue Caveat (Remote Revocation)
 

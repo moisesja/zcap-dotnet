@@ -145,10 +145,12 @@ Given the same ZCAP-LD root capability, JCS and RDFC-1.0 produce structurally di
 }
 ```
 
-**JCS output (243 bytes) — compact JSON with sorted keys:**
+**JCS output (231 bytes) — compact JSON with sorted keys:**
 ```json
-{"@context":["https://w3id.org/zcap/v1"],"allowedAction":["read","write"],"caveat":[],"controller":"did:key:z6MkRdfcOwner","id":"urn:zcap:root:https%3A%2F%2Fstorage.example.com%2Frdfc-documents","invocationTarget":"https://storage.example.com/rdfc-documents"}
+{"@context":["https://w3id.org/zcap/v1"],"allowedAction":["read","write"],"controller":"did:key:z6MkRdfcOwner","id":"urn:zcap:root:https%3A%2F%2Fstorage.example.com%2Frdfc-documents","invocationTarget":"https://storage.example.com/rdfc-documents"}
 ```
+
+> Note: this example was originally captured with `"caveat":[]` present (245 bytes). Issue #37 dropped that empty array from the wire shape; the current code emits the example above (without the empty caveat field).
 
 **RDFC-1.0 output (291 bytes) — sorted N-Quads (RDF triples):**
 ```nquads
