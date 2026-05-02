@@ -13,6 +13,10 @@ namespace ZcapLd.Core.Models;
 /// </summary>
 public class ValidWhileTrueCaveat : Caveat
 {
+    // [JsonPropertyName] explicitly re-declared on the override — STJ on .NET 10
+    // doesn't auto-inherit from the abstract base, so without this the wire body
+    // carries duplicate `Type`/`type` keys. See #45.
+    [JsonPropertyName("type")]
     public override string Type => "ValidWhileTrue";
 
     /// <summary>

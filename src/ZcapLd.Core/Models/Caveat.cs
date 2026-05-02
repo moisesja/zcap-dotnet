@@ -26,6 +26,12 @@ public abstract class Caveat
 /// </summary>
 public class ExpirationCaveat : Caveat
 {
+    // STJ on .NET 10 doesn't auto-inherit [JsonPropertyName] from the abstract
+    // base override declaration — without an explicit attribute on the override,
+    // the runtime catalogues the override as a separate property and emits the
+    // CLR name `"Type"` alongside the inherited `"type"`. Two keys on the wire
+    // diverge from every other Data Integrity implementation. See #45.
+    [JsonPropertyName("type")]
     public override string Type => "Expiration";
 
     /// <summary>
@@ -45,6 +51,7 @@ public class ExpirationCaveat : Caveat
 /// </summary>
 public class UsageCountCaveat : Caveat
 {
+    [JsonPropertyName("type")]
     public override string Type => "UsageCount";
 
     /// <summary>
