@@ -46,7 +46,8 @@ zcap-dotnet/
 │   └── ZcapLd.AspNetCore/             # ASP.NET adapter (NuGet package)
 │       ├── DependencyInjection/        # AddZcapServices(), AddZcapDidSigner<T>(), AddZcapRevocationSupport(),
 │       │                               #   AddZcapReplayProtection(), AddZcapCryptoSuite<T>(),
-│       │                               #   AddZcapDidResolver<T>(), AddZcapValidWhileTrueSupport()
+│       │                               #   AddZcapDidResolver<T>(), AddZcapValidWhileTrueSupport(),
+│       │                               #   AddZcapCaveatType<T>()
 │       ├── Endpoints/                  # MapZcapRevocationEndpoints()
 │       ├── Services/                   # HttpValidWhileTrueHandler
 │       └── Contracts/                  # RevokeCapabilityHttpRequest, RevocationStatusHttpResponse
@@ -93,7 +94,8 @@ dotnet run --project examples/ZcapLd.Examples                          # Run con
 - **Replay protection**: `INonceStore` interface; `InMemoryNonceStore` (default), `NullNonceStore` (opt-out)
 - **Canonicalization**: `IDocumentCanonicalizer` interface with `JcsDocumentCanonicalizer` (RFC 8785) and `RdfcDocumentCanonicalizer` (W3C RDFC-1.0 via dotNetRdf); suite-specific via `ICryptoSuite.CanonicalizationMethod`
 - **ValidWhileTrue**: `ValidWhileTrueCaveat` model + `IValidWhileTrueHandler` interface in Core; `HttpValidWhileTrueHandler` in AspNetCore; `AddZcapValidWhileTrueSupport()` for DI; fail-closed when no handler configured
-- **ASP.NET integration**: `AddZcapServices()` registers all core services; `AddZcapDidSigner<T>()` for signer; `AddZcapRevocationSupport()` and `MapZcapRevocationEndpoints()` for revocation; `AddZcapValidWhileTrueSupport()` for remote revocation checking; `AddZcapRdfcCanonicalization()` to enable RDFC-1.0
+- **Caveat polymorphic serialization**: `CaveatTypeRegistry.Default` (in-library types pre-registered) + `CaveatJsonConverter` wired into `ZcapJsonOptions.Default` — single source of truth for sign-time + verifier-time JSON. Custom caveats must call `CaveatTypeRegistry.Default.Register<T>(disc)` (or `AddZcapCaveatType<T>(disc)`) before any signing/verification call, otherwise cross-language wire bodies fail to deserialize.
+- **ASP.NET integration**: `AddZcapServices()` registers all core services; `AddZcapDidSigner<T>()` for signer; `AddZcapRevocationSupport()` and `MapZcapRevocationEndpoints()` for revocation; `AddZcapValidWhileTrueSupport()` for remote revocation checking; `AddZcapCaveatType<T>(disc)` for third-party caveats; `AddZcapRdfcCanonicalization()` to enable RDFC-1.0
 
 ## Workflow Orchestration
 

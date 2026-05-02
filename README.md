@@ -15,13 +15,13 @@ This library provides:
 - Capability creation and delegation
 - Delegation-chain verification
 - Invocation signing and verification
-- Caveat processing (expiration, usage count, and ValidWhileTrue remote revocation)
+- Caveat processing (expiration, usage count, ValidWhileTrue remote revocation) with polymorphic JSON serialization for third-party caveat types via `CaveatTypeRegistry`
+- Cross-language wire-format compatibility (W3C Data Integrity flat JCS shape, RFC 8785 escaping, derived-class field preservation)
 - Invocation replay protection with pluggable nonce stores
 - Revocation persistence with pluggable storage backends
 - ValidWhileTrue caveat support with HTTP-based remote revocation checking
-- Pluggable crypto suites (Ed25519 and P-256 included, additional curves extensible)
+- Pluggable crypto suites (Ed25519 and P-256 included, additional curves extensible) with JCS or RDFC-1.0 canonicalization
 - DID resolution via [NetDid](https://www.nuget.org/packages/NetDid.Core) (W3C-compliant did:key support)
-- Dynamic JSON-LD context URLs per crypto suite
 - Multibase signature encoding
 
 ## Install

@@ -101,3 +101,27 @@ Custom handler implementations can be registered via:
 ```csharp
 builder.Services.AddZcapValidWhileTrueSupport<MyCustomHandler>();
 ```
+
+## Custom Caveats (Polymorphic Serialization)
+
+`ZcapLd.Core` ships a polymorphic `JsonConverter<Caveat>` so a `Capability.Caveat` array round-trips through derived-class fields across the signing boundary. Without this, sign-time JSON and the wire body diverge and cross-language verifiers (`zcap-py` and others) reject the signature.
+
+In-library caveats (`ExpirationCaveat`, `UsageCountCaveat`, `ValidWhileTrueCaveat`) are pre-registered. Your own caveat types must register before any signing or verification call:
+
+```csharp
+public sealed class TenantCaveat : Caveat
+{
+    public override string Type => "Tenant";
+
+    [JsonPropertyName("tenantId")]
+    public string TenantId { get; set; } = string.Empty;
+
+    public override bool IsSatisfied(InvocationContext ctx)
+        => ctx.Properties.TryGetValue("tenantId", out var v)
+           && v is string s && s == TenantId;
+}
+
+builder.Services.AddZcapCaveatType<TenantCaveat>("Tenant");
+```
+
+The discriminator string must equal the caveat's `Type` override. Mark mutable runtime state (counters, last-seen timestamps, etc.) `[JsonIgnore]` — only the policy goes on the wire; otherwise mutation invalidates the signature.
