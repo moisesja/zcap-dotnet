@@ -25,19 +25,11 @@ internal static class ProofSigningPayloadBuilder
     private static readonly JcsDocumentCanonicalizer DefaultJcs = new();
 
     /// <summary>
-    /// Round-trips Capability / Proof / Invocation through System.Text.Json so that
-    /// model properties contribute only the field names and value shapes their
-    /// [JsonPropertyName] / [JsonIgnore(WhenWritingNull)] / [JsonConverter] attributes
-    /// dictate. The result matches the on-the-wire JSON byte-for-byte (after JCS
-    /// alphabetic sort), which is what every other Data Integrity verifier sees.
+    /// Sign-time and verifier-time JSON options live in <see cref="ZcapJsonOptions.Default"/>
+    /// so the <see cref="CaveatJsonConverter"/> registration is shared. Without this,
+    /// sign-time and wire-emit serializers diverge for any non-trivial caveat (Issue #39).
     /// </summary>
-    private static readonly JsonSerializerOptions ModelSerializerOptions = new()
-    {
-        WriteIndented = false,
-        PropertyNamingPolicy = null,
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
-    };
+    private static JsonSerializerOptions ModelSerializerOptions => ZcapJsonOptions.Default;
 
     public static Capability CloneCapabilityWithoutProof(Capability capability)
     {

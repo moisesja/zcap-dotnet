@@ -470,6 +470,12 @@ Console.WriteLine("---------------------------------------------------------");
 // The 3-param VerifyInvocationAsync overload lets callers inject these properties
 // into InvocationContext.Properties, where custom caveats can read them.
 
+// Register the custom caveat so the polymorphic JSON converter can round-trip
+// it across the signing boundary. In-memory pipelines work without this, but
+// any HTTP-transported wire body needs the registration before deserialization
+// can produce ContentTypeCaveat (vs. throwing on the abstract Caveat base).
+CaveatTypeRegistry.Default.Register<ContentTypeCaveat>("ContentType");
+
 var apiOwnerDid = "did:key:z6MkApiOwner";
 var clientDid = "did:key:z6MkClient";
 didProvider.GenerateAndRegisterKeyPair(apiOwnerDid);

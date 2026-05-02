@@ -617,7 +617,11 @@ public class VerificationService : IVerificationService
 
         if (element is JsonElement jsonElement && jsonElement.ValueKind == JsonValueKind.Object)
         {
-            capability = JsonSerializer.Deserialize<Capability>(jsonElement.GetRawText());
+            // Use shared options so caveats round-trip through their derived-class
+            // fields — without this, embedded chain capabilities carrying caveats
+            // either deserialize as discriminator-only stubs or throw on the
+            // abstract Caveat base type (Issue #39).
+            capability = JsonSerializer.Deserialize<Capability>(jsonElement.GetRawText(), ZcapJsonOptions.Default);
             return capability != null;
         }
 

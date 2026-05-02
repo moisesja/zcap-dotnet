@@ -76,6 +76,77 @@ public class CrossLanguageJcsInteropTests
         canonical.Should().NotContain("\"proofValue\"", "proofValue must never appear in the signing payload");
     }
 
+    [Fact(DisplayName = "Issue #39 — sign-time and wire-time bytes match for capability with derived caveats")]
+    public void CapabilityWithDerivedCaveat_SignTimeAndWireBytes_AreByteEqual()
+    {
+        // The cross-stack failure mode: zcap-dotnet signs JCS over a payload where
+        // Caveat[] elements drop their derived fields (sign-time sees `{"type":"Expiration"}`).
+        // The orchestrator emits the wire body via the runtime concrete type, so zcap-py sees
+        // `{"type":"Expiration","expires":"..."}` and re-canonicalizes — different bytes,
+        // signature verification fails. After the converter ships, both paths produce the
+        // same bytes for any registered caveat type.
+        var capability = new Capability
+        {
+            Id = "urn:uuid:fixed-delegated-with-caveat",
+            Context = "https://w3id.org/zcap/v1",
+            Controller = "did:key:z6MkfixedController",
+            InvocationTarget = "https://example.com/api/resource",
+            AllowedAction = new[] { "read" },
+            Expires = "2027-01-01T00:00:00.000000Z",
+            ParentCapability = "urn:zcap:root:fixed",
+            Caveat = new Caveat[]
+            {
+                new ExpirationCaveat { Expires = new DateTime(2027, 1, 1, 0, 0, 0, DateTimeKind.Utc) },
+                new ValidWhileTrueCaveat { Uri = "https://revocation.example.com/abc" }
+            },
+            Proof = null
+        };
+        var proof = new Proof
+        {
+            Type = "Ed25519Signature2020",
+            Created = "2026-04-29T12:00:00.000000Z",
+            ProofPurpose = "capabilityDelegation",
+            VerificationMethod = "did:key:z6MkfixedSigner#z6MkfixedSigner",
+            CapabilityChain = new object[] { "urn:zcap:root:fixed" },
+            ProofValue = "this-must-be-excluded"
+        };
+
+        // Sign-time path — what gets hashed and signed.
+        var signTimeBytes = ProofSigningPayloadBuilder.CanonicalizeCapabilityPayload(capability, proof);
+        var signTimeJson = Encoding.UTF8.GetString(signTimeBytes);
+
+        // Both derived-class fields must be in the signed bytes — that's the regression
+        // guard for #39. STJ's default DateTime serialization for DateTimeKind.Utc emits
+        // an ISO-8601 string with `Z` suffix; we just check for the date component.
+        signTimeJson.Should().Contain("\"type\":\"Expiration\"");
+        signTimeJson.Should().Contain("2027-01-01",
+            "ExpirationCaveat.Expires is part of the signed wire bytes (#39)");
+        signTimeJson.Should().Contain("\"type\":\"ValidWhileTrue\"");
+        signTimeJson.Should().Contain("\"uri\":\"https://revocation.example.com/abc\"",
+            "ValidWhileTrueCaveat.Uri is part of the signed wire bytes (#39)");
+
+        // Wire-time path — what zcap-py would JCS-canonicalize over the same wire body.
+        // Build the JCS payload by hand using the shared options + flat W3C shape, the
+        // same way ProofSigningPayloadBuilder does internally.
+        var canonicalizer = new JcsDocumentCanonicalizer();
+        var wireDoc = new Dictionary<string, object>(StringComparer.Ordinal);
+        var capElement = JsonSerializer.SerializeToElement(capability, ZcapJsonOptions.Default);
+        foreach (var prop in capElement.EnumerateObject())
+            wireDoc[prop.Name] = prop.Value;
+        var proofElement = JsonSerializer.SerializeToElement(proof, ZcapJsonOptions.Default);
+        var proofDict = new Dictionary<string, object>(StringComparer.Ordinal);
+        foreach (var prop in proofElement.EnumerateObject())
+            if (prop.Name != "proofValue") proofDict[prop.Name] = prop.Value;
+        wireDoc["proof"] = proofDict;
+        var wireBytes = canonicalizer.Canonicalize(wireDoc);
+
+        // Load-bearing assertion: signed bytes == bytes any other Data Integrity verifier sees.
+        wireBytes.Should().Equal(signTimeBytes,
+            "the bytes signed by zcap-dotnet must equal the bytes zcap-py JCS-canonicalizes " +
+            "over the wire body — otherwise signature verification fails at the chain link " +
+            "with the caveat (#39).");
+    }
+
     [Fact(DisplayName = "Issue #37 — root capability wire form omits absent optional fields")]
     public void RootCapabilityWireForm_OmitsAbsentOptionalFields()
     {

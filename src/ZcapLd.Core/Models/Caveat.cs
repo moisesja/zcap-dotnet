@@ -54,9 +54,12 @@ public class UsageCountCaveat : Caveat
     public int MaxUses { get; set; }
 
     /// <summary>
-    /// Current usage count
+    /// Current usage count. Runtime state — NOT serialized because it changes
+    /// over the capability's lifetime; the signed policy is <see cref="MaxUses"/>.
+    /// Including this in the signed JCS payload would invalidate the signature
+    /// on every increment, which is incompatible with how usage tracking works.
     /// </summary>
-    [JsonPropertyName("currentUses")]
+    [JsonIgnore]
     public int CurrentUses { get; set; }
 
     public override bool IsSatisfied(InvocationContext context)

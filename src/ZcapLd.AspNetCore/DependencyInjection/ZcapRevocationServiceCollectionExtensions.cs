@@ -2,6 +2,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using ZcapLd.AspNetCore.Services;
 using ZcapLd.Core.Cryptography;
+using ZcapLd.Core.Models;
 using ZcapLd.Core.Services;
 
 namespace ZcapLd.AspNetCore.DependencyInjection;
@@ -101,6 +102,33 @@ public static class ZcapRevocationServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(services);
 
         services.TryAddEnumerable(ServiceDescriptor.Singleton<ICryptoSuite, TSuite>());
+        return services;
+    }
+
+    /// <summary>
+    /// Registers a derived <see cref="Caveat"/> type against its on-the-wire
+    /// `type` discriminator so the polymorphic JSON converter can serialize and
+    /// deserialize it across the signing boundary (Issue #39). Without this,
+    /// derived-class fields (e.g. <c>Expires</c>, <c>MaxUses</c>, custom budget
+    /// counters) are silently dropped at sign time.
+    ///
+    /// Mutates <see cref="CaveatTypeRegistry.Default"/> directly — registration
+    /// is process-global, mirroring how <see cref="AddZcapCryptoSuite{TSuite}"/>
+    /// composes additional suites onto a single provider.
+    ///
+    /// Call before <see cref="AddZcapServices"/> resolves the service provider,
+    /// or at any point before the first signing or verification call.
+    /// </summary>
+    public static IServiceCollection AddZcapCaveatType<TCaveat>(
+        this IServiceCollection services,
+        string discriminator)
+        where TCaveat : Caveat
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        if (string.IsNullOrEmpty(discriminator))
+            throw new ArgumentException("Discriminator cannot be null or empty", nameof(discriminator));
+
+        CaveatTypeRegistry.Default.Register<TCaveat>(discriminator);
         return services;
     }
 

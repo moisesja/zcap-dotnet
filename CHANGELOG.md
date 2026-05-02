@@ -10,16 +10,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Fixed
 
 - Root capabilities and invocation proofs no longer emit empty/null optional fields on the wire (Issue #37). `allowedAction`, `caveat`, `parentCapability`, `expires`, `proof` (on root capabilities) and `capabilityChain` (on invocation proofs) are omitted when unset. Strict cross-language parsers (`zcap-py` and others) reject `"allowedAction": []` / `"capabilityChain": []` / `null` on optional fields when present, so emit-as-empty broke cross-stack interop. Companion to PR #34's flat-shape fix.
+- `Caveat[]` polymorphic serialization preserves derived-class fields across the signing boundary (Issue #39). Previously, STJ used the static array element type for `Capability.Caveat`, silently dropping derived fields like `Expires`, `Uri`, or third-party budget counters at sign time. Sign-time JCS now produces byte-identical bytes to whatever a cross-language verifier (`zcap-py` and friends) computes over the wire body re-emitted via the runtime concrete type.
+
+### Added
+
+- `CaveatTypeRegistry` (in `ZcapLd.Core.Models`) with a `Default` singleton pre-populated with the in-library caveat types. Third-party caveat libraries register their derived types via `CaveatTypeRegistry.Default.Register<T>(discriminator)` so the polymorphic JSON converter can dispatch deserialization across packages.
+- `ZcapJsonOptions.Default` (in `ZcapLd.Core.Cryptography`) — single source of truth for the `JsonSerializerOptions` shared by sign-time canonicalization and verifier-time chain deserialization (RFC 8785-compatible escaping, `WhenWritingNull`, the caveat converter).
+- `AddZcapCaveatType<TCaveat>(string discriminator)` ASP.NET DI extension on `IServiceCollection`, mirroring the `AddZcapCryptoSuite<T>()` shape.
+- `CaveatJsonConverter` — internal `JsonConverter<Caveat>` wired into `ZcapJsonOptions.Default`. `Write` dispatches to the runtime concrete type so derived fields are emitted; `Read` resolves the `type` discriminator against `CaveatTypeRegistry.Default` and deserializes via reflection, throwing `JsonException` with a registry-friendly hint when the discriminator is unknown.
 
 ### Changed
 
 - **BREAKING (wire format)**: `Capability.AllowedAction` and `Capability.Caveat` are now nullable (`string[]?` / `Caveat[]?`). Previously defaulted to `Array.Empty<>()`, producing `[]` on the wire. JCS canonical bytes change for any root capability, so signatures over the old shape no longer verify.
 - **BREAKING (wire format)**: `Proof.CapabilityChain` is now nullable (`object[]?`) and omitted on invocation proofs, which spec-correctly carry no chain.
+- **BREAKING (wire format)**: capabilities with non-empty caveats now sign over the full caveat shape (including derived-class fields), not the discriminator-only stub. Signatures over the old shape no longer verify.
+- **BREAKING (semantics)**: `UsageCountCaveat.CurrentUses` is now `[JsonIgnore]`. It's runtime state, not the signed policy — including it in the canonical bytes would invalidate the signature on every increment. Only `MaxUses` (the policy) is part of the wire body now.
 - All five optional `Capability` fields (`AllowedAction`, `Expires`, `ParentCapability`, `Caveat`, `Proof`), `Invocation.Proof`, and `Proof.CapabilityChain` carry `[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]`.
 - `CapabilityService.CreateRootCapabilityAsync` no longer assigns `Array.Empty<>()` / `null` to optional fields — they stay unset.
 - `CapabilityService.InheritCaveats` returns `Caveat[]?` and yields `null` when neither parent nor child supplies caveats, so delegations with no caveats also stay clean on the wire.
 - `SigningService.SignInvocationAsync` no longer sets `CapabilityChain = Array.Empty<object>()` on invocation proofs.
-- New `CrossLanguageJcsInteropTests` fixtures pin the new wire shape: root capability emits only `{@context, controller, id, invocationTarget}`, and invocation proofs no longer contain `"capabilityChain"`.
+- `ProofSigningPayloadBuilder.ModelSerializerOptions` now resolves to `ZcapJsonOptions.Default`; `VerificationService` chain deserialization uses the same options. Sign-time and verifier-time JSON paths share one configuration.
+- New `CrossLanguageJcsInteropTests` fixtures pin the new wire shape: root capability emits only `{@context, controller, id, invocationTarget}`; invocation proofs no longer contain `"capabilityChain"`; capabilities with `ExpirationCaveat` / `ValidWhileTrueCaveat` produce sign-time bytes byte-equal to whatever a cross-language verifier JCS-canonicalizes over the wire body.
 
 ## [1.2.0] - Released
 
