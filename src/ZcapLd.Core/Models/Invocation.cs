@@ -38,6 +38,7 @@ public class Invocation
     /// Proof of invocation
     /// </summary>
     [JsonPropertyName("proof")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public Proof? Proof { get; set; }
 }
 

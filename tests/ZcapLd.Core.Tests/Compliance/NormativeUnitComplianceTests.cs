@@ -48,8 +48,10 @@ public class NormativeUnitComplianceTests
             "https://example.com/resources",
             new[] { "read" });
 
-        root.AllowedAction.Should().BeEmpty();
-        root.Caveat.Should().BeEmpty();
+        // Per #37: root capabilities omit optional fields entirely so cross-language
+        // parsers see field absence rather than empty arrays / null values.
+        root.AllowedAction.Should().BeNull();
+        root.Caveat.Should().BeNull();
         root.Expires.Should().BeNull();
         root.ParentCapability.Should().BeNull();
         root.Proof.Should().BeNull();

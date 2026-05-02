@@ -254,9 +254,11 @@ public class VerificationService : IVerificationService
             if (!IsValidInvocationTarget(invocation.InvocationTarget, capability.InvocationTarget))
                 return false;
 
-            // 4. Verify action is allowed
-            if (capability.AllowedAction.Length > 0 &&
-                !capability.AllowedAction.Contains(invocation.CapabilityAction))
+            // 4. Verify action is allowed.
+            // Null AllowedAction == unrestricted (root capability); only enforce when
+            // the field is present and non-empty.
+            if (capability.AllowedAction is { Length: > 0 } actions &&
+                !actions.Contains(invocation.CapabilityAction))
                 return false;
 
             // 5. Verify the invocation signature
@@ -524,10 +526,12 @@ public class VerificationService : IVerificationService
                 return false;
         }
 
-        // 3. Allowed actions must be subset of parent (if parent specifies)
-        if (parent.AllowedAction.Length > 0 && child.AllowedAction.Length > 0)
+        // 3. Allowed actions must be subset of parent (if parent specifies).
+        // Null on either side == unrestricted at that level → no check needed.
+        if (parent.AllowedAction is { Length: > 0 } parentActions &&
+            child.AllowedAction is { Length: > 0 } childActions)
         {
-            if (!child.AllowedAction.All(action => parent.AllowedAction.Contains(action)))
+            if (!childActions.All(action => parentActions.Contains(action)))
                 return false;
         }
 

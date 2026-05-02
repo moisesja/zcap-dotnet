@@ -126,14 +126,15 @@ public class SigningService : ISigningService
         var proofType = suite.ProofType;
 
         // COMPLIANCE FIX C-05: Create the invocation proof with required fields
-        // Per spec, invocation proofs MUST include capability, invocationTarget, and capabilityAction
+        // Per spec, invocation proofs MUST include capability, invocationTarget, and capabilityAction.
+        // CapabilityChain is intentionally unset — invocation proofs don't carry one,
+        // and emitting `"capabilityChain": []` breaks strict cross-language parsers (#37).
         var proof = new Proof
         {
             Type = proofType,
             Created = created,
             ProofPurpose = "capabilityInvocation",
             VerificationMethod = verificationMethod,
-            CapabilityChain = Array.Empty<object>(), // Invocation proofs don't have chains
             ProofValue = string.Empty,
             // Required invocation proof fields:
             Capability = invocation.Capability,

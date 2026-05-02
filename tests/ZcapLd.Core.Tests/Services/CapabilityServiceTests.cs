@@ -38,13 +38,16 @@ public class CapabilityServiceTests
         capability.Id.Should().StartWith("urn:zcap:root:");
         capability.Controller.Should().Be(controller);
         capability.InvocationTarget.Should().Be(invocationTarget);
-        capability.AllowedAction.Should().BeEmpty();
+        // Per #37: root capabilities leave AllowedAction null so the field stays
+        // off the wire (strict cross-language parsers reject `[]`).
+        capability.AllowedAction.Should().BeNull();
         capability.Context.Should().Be("https://w3id.org/zcap/v1");
 
         // Root capabilities MUST NOT have:
         capability.Proof.Should().BeNull();
         capability.Expires.Should().BeNull();
         capability.ParentCapability.Should().BeNull();
+        capability.Caveat.Should().BeNull();
     }
 
     [Fact]

@@ -40,6 +40,10 @@ public class CaveatProcessor : ICaveatProcessor
 
         try
         {
+            // Null Caveat == no restrictions (e.g. root capability); skip evaluation.
+            if (capability.Caveat == null)
+                return true;
+
             // Evaluate all caveats on this capability
             foreach (var caveat in capability.Caveat)
             {

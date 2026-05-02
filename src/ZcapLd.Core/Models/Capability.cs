@@ -33,10 +33,13 @@ public class Capability
     public string InvocationTarget { get; set; } = string.Empty;
 
     /// <summary>
-    /// Actions allowed by this capability (e.g., "read", "write")
+    /// Actions allowed by this capability (e.g., "read", "write").
+    /// Null on root capabilities (unbounded authority); omitted from the wire when null.
+    /// Strict cross-language parsers (zcap-py and friends) reject empty arrays here.
     /// </summary>
     [JsonPropertyName("allowedAction")]
-    public string[] AllowedAction { get; set; } = Array.Empty<string>();
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string[]? AllowedAction { get; set; }
 
     /// <summary>
     /// Optional expiration timestamp, as the on-the-wire ISO-8601 string. Stored
@@ -44,6 +47,7 @@ public class Capability
     /// wrote. Use <see cref="ExpiresAt"/> for a parsed DateTime view.
     /// </summary>
     [JsonPropertyName("expires")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Expires { get; set; }
 
     /// <summary>
@@ -57,18 +61,22 @@ public class Capability
     /// Reference to parent capability for delegated capabilities
     /// </summary>
     [JsonPropertyName("parentCapability")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? ParentCapability { get; set; }
 
     /// <summary>
-    /// List of caveats (restrictions) for this capability
+    /// List of caveats (restrictions) for this capability.
+    /// Null on root capabilities (no restrictions); omitted from the wire when null.
     /// </summary>
     [JsonPropertyName("caveat")]
-    public Caveat[] Caveat { get; set; } = Array.Empty<Caveat>();
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Caveat[]? Caveat { get; set; }
 
     /// <summary>
     /// Cryptographic proof for this capability
     /// </summary>
     [JsonPropertyName("proof")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public Proof? Proof { get; set; }
 
     /// <summary>
