@@ -97,6 +97,22 @@ dotnet run --project examples/ZcapLd.Examples                          # Run con
 
 ## Workflow Orchestration
 
+### 0. Branching Policy — BLOCKING, FIRST ACTION, NO EXCEPTIONS
+
+> **STOP. Before reading code, before planning, before any edit: create a branch.**
+> Working on `main` is a hard violation of this contract. If you have already
+> started editing on `main`, stop now, move the work via `git checkout -b <branch>`
+> (uncommitted changes carry over), and continue from the branch.
+
+- **Trigger**: any work that touches code, tests, configs, or docs in response to a GitHub issue, bug report, feature request, or user-driven change.
+- **First action**, before any other tool call:
+  ```bash
+  git checkout -b <issue-number>-<short-kebab-slug>
+  # e.g. git checkout -b 37-omit-empty-optional-fields-on-root
+  ```
+- **No exceptions** for "small" fixes, "one-line" edits, or "just a doc tweak." If it produces a diff, it goes on a branch.
+- Verify with `git branch --show-current` before the first edit. If it returns `main`, you are not yet allowed to edit.
+
 ### 1. Plan Mode Fault
 
 - Enter plan mode for ANY non-trivial task defined as a task that takes 3 steps or more or that requires architectural decisions.
@@ -134,19 +150,22 @@ dotnet run --project examples/ZcapLd.Examples                          # Run con
 
 ### 6. Autonomous Bug Fixing
 
-- When given a bug report: just fix it. Don't ask for hand-holding
+- **Branch first** — see Section 0 above. Non-negotiable.
+- When given a bug report: plan and report.
 - Point at logs, errors, failing tests - then resolve them
 - Zero context switching required from the user
 - Go fix failing CI tests without being told how
 
 # Task Management
 
+0. **Branch First**: Run `git checkout -b <issue-number>-<slug>` before any other action. See Workflow Orchestration §0.
 1. **Plan First**: Write plan to `tasks/todo{timestamp}.md` with checkable items
 2. **Verify Plan**: Check in before starting implementation
 3. **Track Progress**: Mark items complete as you go
 4. **Explain Changes**: High-level summary at each step
 5. **Document Results**: Add review section to 'tasks/todo.m,
 6. **Capture Lessons**: Update 'tasks/lessons.md' after corrections
+7. **Keep Documentation Relevant**: Update all relevant documentation including README.md, architecture.md.
 
 ## Core Principles
 
