@@ -18,9 +18,10 @@ namespace ZcapLd.Core.Cryptography;
 /// - <c>DefaultIgnoreCondition = WhenWritingNull</c>: drops absent optional
 ///   fields so strict cross-language parsers (zcap-py and friends) accept the
 ///   wire body. See #37.
-/// - <c>UnsafeRelaxedJsonEscaping</c>: RFC 8785 §3.2.2.2 mandates only `"`,
-///   `\`, and control characters be escaped. The default <c>JavaScriptEncoder</c>
-///   escapes `+`, `<`, `>`, `&` to `\u00xx`, which diverges from peer
+    /// - <c>UnsafeRelaxedJsonEscaping</c>: RFC 8785 §3.2.2.2 mandates only
+    ///   quotation marks, backslashes, and control characters be escaped. The
+    ///   default <c>JavaScriptEncoder</c> escapes plus signs, angle brackets,
+    ///   ampersands, and apostrophes to Unicode escape sequences, which diverges from peer
 ///   canonicalizers. See #36.
 /// - <see cref="CaveatJsonConverter"/>: makes <see cref="Caveat"/> arrays
 ///   round-trip through their derived classes' fields. See #39.
