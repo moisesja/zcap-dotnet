@@ -98,6 +98,29 @@ public class CaveatJsonConverterTests
         act.Should().Throw<JsonException>().WithMessage("*type*");
     }
 
+    [Theory(DisplayName = "Issue #45 — concrete Caveat round-trip preserves wire bytes (no duplicate Type/type keys)")]
+    [InlineData(typeof(ExpirationCaveat), "{\"type\":\"Expiration\",\"expires\":\"2027-01-01T00:00:00Z\"}")]
+    [InlineData(typeof(UsageCountCaveat), "{\"type\":\"UsageCount\",\"maxUses\":5}")]
+    [InlineData(typeof(ValidWhileTrueCaveat), "{\"type\":\"ValidWhileTrue\",\"uri\":\"https://example.com/status\"}")]
+    public void Caveat_Roundtrip_PreservesWireBytes(Type concreteType, string wireJson)
+    {
+        // Without [JsonPropertyName("type")] on the concrete override, STJ on .NET 10
+        // catalogues the override as a separate property and emits the CLR name
+        // ("Type") alongside the inherited ("type"). Both keys land on the wire,
+        // JCS doesn't dedupe, and signature verification fails against any other
+        // Data Integrity implementation. The fix is per-subclass attribute
+        // re-declaration; this test guards against regression.
+        var deserialized = JsonSerializer.Deserialize(wireJson, concreteType, ZcapJsonOptions.Default)!;
+        var roundTripped = JsonSerializer.Serialize(deserialized, concreteType, ZcapJsonOptions.Default);
+
+        roundTripped.Should().Be(wireJson,
+            "wire bytes from a one-key body must round-trip byte-for-byte; duplicate " +
+            "\"Type\"/\"type\" keys break cross-stack signature verification (#45).");
+        roundTripped.Should().NotContain("\"Type\":",
+            "uppercase \"Type\" key indicates STJ catalogued the abstract-base property and " +
+            "the override as separate JsonPropertyInfo entries (#45 root cause).");
+    }
+
     [Fact(DisplayName = "Round-trip: serialize then deserialize preserves derived-class state")]
     public void RoundTrip_PreservesDerivedFields()
     {

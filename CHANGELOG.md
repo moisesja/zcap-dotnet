@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.1.1] - Unreleased
+
+### Fixed
+
+- Concrete `Caveat` subclasses no longer emit duplicate `"Type"` / `"type"` keys on the wire (Issue #45). STJ on .NET 10 doesn't auto-inherit `[JsonPropertyName("type")]` from the abstract base override declaration; without an explicit attribute on the override, the runtime catalogues the override as a separate `JsonPropertyInfo` and emits the CLR name `"Type"` alongside the inherited `"type"`. Both keys landed on the wire, JCS preserved them both, and signature verification failed against any other Data Integrity implementation. Fix: re-apply `[JsonPropertyName("type")]` on `ExpirationCaveat`, `UsageCountCaveat`, and `ValidWhileTrueCaveat` overrides. Fourth and final layer of the cross-stack canonicalization contract from #34 / #36 / #37 / #39.
+
 ## [2.1.0] - Released
 
 ### Fixed
