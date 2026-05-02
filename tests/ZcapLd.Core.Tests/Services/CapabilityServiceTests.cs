@@ -114,7 +114,7 @@ public class CapabilityServiceTests
         delegatedCapability.Controller.Should().Be(newController);
         delegatedCapability.InvocationTarget.Should().Be(invocationTarget);
         delegatedCapability.AllowedAction.Should().Equal(new[] { "read" });
-        delegatedCapability.Expires.Should().Be(expires);
+        delegatedCapability.Expires.Should().Be(ZcapTimestamps.Format(expires));
         delegatedCapability.ParentCapability.Should().Be(rootCapability.Id);
 
         // Context MUST be array for delegated capabilities
@@ -427,8 +427,8 @@ public class CapabilityServiceTests
             new[] { "read" },
             expires: null); // Not specified
 
-        // Assert
-        secondDelegation.Expires.Should().Be(parentExpires);
+        // Assert: parent's Expires string is preserved verbatim.
+        secondDelegation.Expires.Should().Be(ZcapTimestamps.Format(parentExpires));
     }
 
     [Fact]

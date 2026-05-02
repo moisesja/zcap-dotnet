@@ -1,5 +1,5 @@
+using System.Text.Json;
 using System.Text.Json.Serialization;
-using ZcapLd.Core.Cryptography;
 
 namespace ZcapLd.Core.Models;
 
@@ -15,11 +15,20 @@ public class Proof
     public string Type { get; set; } = string.Empty;
 
     /// <summary>
-    /// Timestamp when the proof was created
+    /// Timestamp when the proof was created, as the on-the-wire ISO-8601 string.
+    /// Stored verbatim so cross-stack JCS canonicalization sees the same bytes the
+    /// signer wrote — every other Data Integrity verifier JCS-canonicalizes this
+    /// field as an opaque string. Use <see cref="CreatedAt"/> for a parsed DateTime view.
     /// </summary>
     [JsonPropertyName("created")]
-    [JsonConverter(typeof(IsoUtcMicrosecondDateTimeConverter))]
-    public DateTime Created { get; set; }
+    public string? Created { get; set; }
+
+    /// <summary>
+    /// Parsed UTC DateTime view of <see cref="Created"/>. Read-only — assign to
+    /// <see cref="Created"/> with a string formatted via <see cref="ZcapTimestamps.Format"/>.
+    /// </summary>
+    [JsonIgnore]
+    public DateTime? CreatedAt => ZcapTimestamps.ParseOrNull(Created);
 
     /// <summary>
     /// Purpose of the proof ("capabilityDelegation" or "capabilityInvocation")
@@ -50,20 +59,30 @@ public class Proof
     /// Can be a string (root capability ID) or object (delegated capability)
     /// </summary>
     [JsonPropertyName("capability")]
-    [JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public object? Capability { get; set; }
 
     /// <summary>
     /// The invocation target (for invocation proofs)
     /// </summary>
     [JsonPropertyName("invocationTarget")]
-    [JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? InvocationTarget { get; set; }
 
     /// <summary>
     /// The capability action being invoked (for invocation proofs)
     /// </summary>
     [JsonPropertyName("capabilityAction")]
-    [JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? CapabilityAction { get; set; }
+
+    /// <summary>
+    /// Catches any proof fields not declared above (e.g. `domain`, `nonce`, `id`,
+    /// `challenge`, custom extensions) and round-trips them verbatim through both
+    /// JSON deserialization and JCS canonicalization. Without this, cross-stack
+    /// signatures over proofs carrying such fields fail verification because the
+    /// fields would be silently dropped on our side.
+    /// </summary>
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? AdditionalProperties { get; set; }
 }

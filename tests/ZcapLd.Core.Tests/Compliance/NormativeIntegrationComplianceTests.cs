@@ -32,7 +32,7 @@ public class NormativeIntegrationComplianceTests
             Controller = childDid,
             InvocationTarget = root.InvocationTarget,
             AllowedAction = new[] { "read" },
-            Expires = DateTime.UtcNow.AddDays(5)
+            Expires = ZcapTimestamps.Format(DateTime.UtcNow.AddDays(5))
         };
 
         delegated.Proof = await fixture.SigningService.SignCapabilityAsync(
@@ -200,7 +200,7 @@ public class NormativeIntegrationComplianceTests
             Controller = level1Did,
             InvocationTarget = root.InvocationTarget,
             AllowedAction = new[] { "read", "write" },
-            Expires = DateTime.UtcNow.AddDays(20)
+            Expires = ZcapTimestamps.Format(DateTime.UtcNow.AddDays(20))
         };
         level1.Proof = await fixture.SigningService.SignCapabilityAsync(
             level1,
@@ -220,7 +220,7 @@ public class NormativeIntegrationComplianceTests
             Controller = level2Did,
             InvocationTarget = root.InvocationTarget,
             AllowedAction = new[] { "read" },
-            Expires = DateTime.UtcNow.AddDays(10)
+            Expires = ZcapTimestamps.Format(DateTime.UtcNow.AddDays(10))
         };
         level2.Proof = await fixture.SigningService.SignCapabilityAsync(
             level2,

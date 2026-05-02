@@ -61,7 +61,7 @@ Console.WriteLine($"Delegated Capability ID: {bobCapability.Id}");
 Console.WriteLine($"New Controller: {bobCapability.Controller}");
 Console.WriteLine($"Parent Capability: {bobCapability.ParentCapability}");
 Console.WriteLine($"Allowed Actions: {string.Join(", ", bobCapability.AllowedAction)}");
-Console.WriteLine($"Expires: {bobCapability.Expires:yyyy-MM-dd HH:mm:ss} UTC");
+Console.WriteLine($"Expires: {bobCapability.Expires}");
 Console.WriteLine($"Has Proof: {bobCapability.Proof != null}"); // Delegated capabilities MUST have proof
 Console.WriteLine($"Proof Type: {bobCapability.Proof?.Type}");
 Console.WriteLine($"Proof Purpose: {bobCapability.Proof?.ProofPurpose}");
@@ -88,7 +88,7 @@ Console.WriteLine($"Second-Level Delegation ID: {carolCapability.Id}");
 Console.WriteLine($"Controller: {carolCapability.Controller}");
 Console.WriteLine($"Parent: {carolCapability.ParentCapability}");
 Console.WriteLine($"Allowed Actions: {string.Join(", ", carolCapability.AllowedAction)}");
-Console.WriteLine($"Expires: {carolCapability.Expires:yyyy-MM-dd HH:mm:ss} UTC");
+Console.WriteLine($"Expires: {carolCapability.Expires}");
 
 // Verify the capability chain
 var chainValid = await verificationService.VerifyCapabilityChainAsync(carolCapability);

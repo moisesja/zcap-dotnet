@@ -35,7 +35,7 @@ public class CapabilityTests
             Controller = "did:example:alice",
             InvocationTarget = "https://example.com/resource",
             AllowedAction = new[] { "read", "write" },
-            Expires = new DateTime(2025, 12, 31, 23, 59, 59, DateTimeKind.Utc)
+            Expires = ZcapTimestamps.Format(new DateTime(2025, 12, 31, 23, 59, 59, DateTimeKind.Utc))
         };
 
         // Act

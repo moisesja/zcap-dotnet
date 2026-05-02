@@ -35,12 +35,26 @@ public static class JsonCanonicalizer
         // Parse and re-serialize with sorted properties
         using var doc = JsonDocument.Parse(jsonString);
         using var stream = new MemoryStream();
-        using (var writer = new Utf8JsonWriter(stream, new JsonWriterOptions { Indented = false }))
+        using (var writer = new Utf8JsonWriter(stream, CanonicalWriterOptions))
         {
             WriteElementSorted(writer, doc.RootElement);
         }
         return stream.ToArray();
     }
+
+    /// <summary>
+    /// Per RFC 8785 §3.2.2.2, JSON strings escape only control chars (&lt;0x20),
+    /// the reverse solidus, and the double quote — not characters like `+`, `&lt;`, `&gt;`,
+    /// or `&amp;`. Utf8JsonWriter's default encoder escapes those for HTML safety,
+    /// which would diverge our canonical bytes from any RFC 8785-conformant peer
+    /// (e.g. timestamps written as `2026-04-29T00:00:00+00:00` would canonicalize
+    /// differently in zcap-dotnet vs. zcap-py).
+    /// </summary>
+    private static readonly JsonWriterOptions CanonicalWriterOptions = new()
+    {
+        Indented = false,
+        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+    };
 
     /// <summary>
     /// JSON serialization options for canonical form
@@ -66,7 +80,7 @@ public static class JsonCanonicalizer
     {
         using var doc = JsonDocument.Parse(jsonString);
         using var stream = new MemoryStream();
-        using (var writer = new Utf8JsonWriter(stream, new JsonWriterOptions { Indented = false }))
+        using (var writer = new Utf8JsonWriter(stream, CanonicalWriterOptions))
         {
             WriteElementWithoutProof(writer, doc.RootElement);
         }

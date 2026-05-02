@@ -92,6 +92,6 @@ public class SignatureVerifier
                !string.IsNullOrEmpty(proof.ProofPurpose) &&
                !string.IsNullOrEmpty(proof.VerificationMethod) &&
                !string.IsNullOrEmpty(proof.ProofValue) &&
-               proof.Created != default;
+               !string.IsNullOrEmpty(proof.Created);
     }
 }

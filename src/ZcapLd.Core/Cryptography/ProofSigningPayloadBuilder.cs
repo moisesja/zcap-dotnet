@@ -53,6 +53,8 @@ internal static class ProofSigningPayloadBuilder
             Expires = capability.Expires,
             AllowedAction = capability.AllowedAction,
             Caveat = capability.Caveat,
+            // Preserve unmodeled wire fields so JCS canonicalization sees them.
+            AdditionalProperties = capability.AdditionalProperties,
             Proof = null
         };
     }
