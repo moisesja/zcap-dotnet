@@ -227,7 +227,12 @@ public class VerificationService : IVerificationService
     }
 
     /// <summary>
-    /// Verifies a capability's cryptographic proof
+    /// Verifies the soundness of a delegated capability's single delegation link: proof signature,
+    /// parent-controller authorization, ancestor revocation carried by the proof chain, attenuation,
+    /// and child expiry against the embedded immediate parent. NOT a full authorization gate — it
+    /// does not walk the chain to the root. Use <see cref="VerifyCapabilityChainAsync"/> /
+    /// <see cref="VerifyInvocationAsync(Invocation, Capability)"/> for authorization decisions.
+    /// A root capability is valid iff it carries no proof.
     /// </summary>
     public async Task<bool> VerifyCapabilityProofAsync(Capability capability)
     {
@@ -369,6 +374,20 @@ public class VerificationService : IVerificationService
             if (parentCapability != null &&
                 !await IsControllerAuthorizedAsync(
                     proof.VerificationMethod, parentCapability, VerificationRelationship.CapabilityDelegation))
+            {
+                return false;
+            }
+
+            // The standalone proof check must also reject a child broader than its parent
+            // (attenuation) or already expired; otherwise a re-signed child that expands authority
+            // beyond its parent can pass VerifyCapabilityProofAsync while VerifyCapabilityChainAsync
+            // correctly rejects it (Issue #69). Skipped when no parent context is available.
+            if (parentCapability != null && !ValidateAttenuation(capability, parentCapability))
+            {
+                return false;
+            }
+
+            if (capability.ExpiresAt is { } childExpiresAt && childExpiresAt < DateTime.UtcNow)
             {
                 return false;
             }
