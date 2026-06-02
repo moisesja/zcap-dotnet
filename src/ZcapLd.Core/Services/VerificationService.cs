@@ -756,6 +756,11 @@ public class VerificationService : IVerificationService
         }
         catch (CapabilityValidationException)
         {
+            // Only the structural re-build (BuildCapabilityChainAsync) runs here, and it raises
+            // exactly CapabilityValidationException — a malformed chain → not authorized. Infra
+            // errors (DID resolution, network, crypto) can't reach this catch: VerifyCapabilityChainAsync
+            // above is fully fail-closed (swallows everything → false), so we never get here unless the
+            // chain already verified. Net effect for the caller: this method is fail-closed end to end.
             return false;
         }
     }

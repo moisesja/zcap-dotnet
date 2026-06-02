@@ -92,8 +92,9 @@ public class VerificationServiceTests
         // Sanity: before revocation the leaf's proof verifies.
         (await _verificationService.VerifyCapabilityProofAsync(leaf)).Should().BeTrue();
 
-        // Revoke the immediate parent (mid).
-        await _verificationService.RevokeCapabilityAsync(mid.Id, rootDid);
+        // Revoke the immediate parent (mid). rootDid controls the root (mid's ancestor),
+        // so it is authorized to revoke mid via the authorizing Capability overload.
+        (await _verificationService.RevokeCapabilityAsync(mid, rootDid)).Should().BeTrue();
 
         // The single-proof check must now also reject the leaf, matching VerifyCapabilityChainAsync.
         (await _verificationService.VerifyCapabilityProofAsync(leaf)).Should().BeFalse();

@@ -56,9 +56,18 @@ public interface IVerificationService
     /// cryptographically verified.
     /// COMPLIANCE: MUST-21, SHOULD-07 — revocation support.
     /// </summary>
+    /// <remarks>
+    /// The method is <b>fail-closed</b>: any failure to cryptographically verify or structurally
+    /// build the delegation chain — including errors surfaced by DID resolution, network I/O (for a
+    /// remote <see cref="IDidResolver"/>), or the cryptography layer — yields <c>false</c> with
+    /// nothing recorded, because chain verification runs first and treats every such failure as
+    /// "unverifiable → not authorized". A revocation is recorded only when authorization positively
+    /// succeeds. The only exceptions thrown are <see cref="System.ArgumentNullException"/> /
+    /// <see cref="System.ArgumentException"/> for a null capability or null/empty revoker DID.
+    /// </remarks>
     /// <param name="capability">The capability to revoke (its chain is cryptographically verified for authorization)</param>
     /// <param name="revokerDid">The authenticated DID requesting revocation</param>
-    /// <returns>True if authorized and recorded; false if the revoker is not authorized</returns>
+    /// <returns>True if authorized and recorded; false if the revoker is not authorized or the chain is unverifiable</returns>
     Task<bool> RevokeCapabilityAsync(Capability capability, string revokerDid);
 
     /// <summary>
