@@ -64,8 +64,8 @@ Console.WriteLine($"Parent Capability: {bobCapability.ParentCapability}");
 Console.WriteLine($"Allowed Actions: {string.Join(", ", bobCapability.AllowedAction)}");
 Console.WriteLine($"Expires: {bobCapability.Expires}");
 Console.WriteLine($"Has Proof: {bobCapability.Proof != null}"); // Delegated capabilities MUST have proof
-Console.WriteLine($"Proof Type: {bobCapability.Proof?.Type}");
-Console.WriteLine($"Proof Purpose: {bobCapability.Proof?.ProofPurpose}");
+Console.WriteLine($"Proof Type: {bobCapability.Proof?.Primary.Type}");
+Console.WriteLine($"Proof Purpose: {bobCapability.Proof?.Primary.ProofPurpose}");
 Console.WriteLine();
 
 // ===================================================
@@ -617,7 +617,7 @@ var rdfcDelegated = await rdfcCapabilityService.DelegateCapabilityAsync(
 
 Console.WriteLine($"Root Capability:      {rdfcRoot.Id}");
 Console.WriteLine($"Delegated Capability: {rdfcDelegated.Id}");
-Console.WriteLine($"Proof Type:           {rdfcDelegated.Proof?.Type}");
+Console.WriteLine($"Proof Type:           {rdfcDelegated.Proof?.Primary.Type}");
 
 // Verify the RDFC-1.0 delegation chain
 var rdfcChainValid = await rdfcVerificationService.VerifyCapabilityChainAsync(rdfcDelegated);

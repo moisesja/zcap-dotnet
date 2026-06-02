@@ -125,14 +125,14 @@ public class CapabilityServiceTests
 
         // MUST have proof
         delegatedCapability.Proof.Should().NotBeNull();
-        delegatedCapability.Proof!.ProofPurpose.Should().Be("capabilityDelegation");
-        delegatedCapability.Proof.Type.Should().Be("Ed25519Signature2020");
-        delegatedCapability.Proof.ProofValue.Should().NotBeNullOrEmpty();
-        delegatedCapability.Proof.ProofValue.Should().StartWith("z");
+        delegatedCapability.Proof!.Primary.ProofPurpose.Should().Be("capabilityDelegation");
+        delegatedCapability.Proof.Primary.Type.Should().Be("Ed25519Signature2020");
+        delegatedCapability.Proof.Primary.ProofValue.Should().NotBeNullOrEmpty();
+        delegatedCapability.Proof.Primary.ProofValue.Should().StartWith("z");
 
         // Capability chain should contain root ID
-        delegatedCapability.Proof.CapabilityChain.Should().NotBeEmpty();
-        delegatedCapability.Proof.CapabilityChain[0].Should().Be(rootCapability.Id);
+        delegatedCapability.Proof.Primary.CapabilityChain.Should().NotBeEmpty();
+        delegatedCapability.Proof.Primary.CapabilityChain![0].Should().Be(rootCapability.Id);
     }
 
     [Fact]
@@ -286,14 +286,14 @@ public class CapabilityServiceTests
 
         // Chain should be: [rootId, firstDelegationId]
         // Per spec: root ID, intermediate IDs, parent object
-        secondDelegation.Proof!.CapabilityChain.Should().NotBeEmpty();
-        secondDelegation.Proof.CapabilityChain.Length.Should().BeGreaterThanOrEqualTo(2);
+        secondDelegation.Proof!.Primary.CapabilityChain.Should().NotBeEmpty();
+        secondDelegation.Proof.Primary.CapabilityChain!.Length.Should().BeGreaterThanOrEqualTo(2);
 
         // First element should be root ID
-        secondDelegation.Proof.CapabilityChain[0].Should().Be(rootCapability.Id);
+        secondDelegation.Proof.Primary.CapabilityChain![0].Should().Be(rootCapability.Id);
 
         // Should contain first delegation's ID
-        secondDelegation.Proof.CapabilityChain.Should().Contain(firstDelegation.Id);
+        secondDelegation.Proof.Primary.CapabilityChain.Should().Contain(firstDelegation.Id);
     }
 
     [Fact]

@@ -21,19 +21,23 @@ public class SignatureVerifier
         ICryptoSuite suite,
         IDocumentCanonicalizer? canonicalizer = null)
     {
-        if (capability.Proof == null)
+        if (capability.Proof == null || capability.Proof.IsEmpty)
             return false;
+
+        // A delegated zcap's proof may be an array; verify the delegation proof (the one that
+        // carries the capabilityChain), falling back to the first proof for non-standard inputs.
+        var proof = capability.Proof.FirstDelegationProof() ?? capability.Proof.Primary;
 
         try
         {
             var capabilityForVerification = ProofSigningPayloadBuilder.CloneCapabilityWithoutProof(capability);
             var canonicalizedData = ProofSigningPayloadBuilder.CanonicalizeCapabilityPayload(
                 capabilityForVerification,
-                capability.Proof,
+                proof,
                 canonicalizer);
 
             // Decode the signature
-            var signature = MultibaseCodec.Decode(capability.Proof.ProofValue);
+            var signature = MultibaseCodec.Decode(proof.ProofValue);
 
             // Verify the signature
             return suite.Verify(canonicalizedData, signature, publicKey);

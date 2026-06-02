@@ -76,11 +76,15 @@ public class Capability
     public Caveat[]? Caveat { get; set; }
 
     /// <summary>
-    /// Cryptographic proof for this capability
+    /// Cryptographic proof(s) for this capability. Per ZCAP-LD v0.3 a delegated zcap's
+    /// <c>proof</c> may be a single DI proof object or an array of proof objects (at least one
+    /// being a <c>capabilityDelegation</c> proof); <see cref="ProofSet"/> models both and
+    /// preserves the wire shape. Null on root capabilities. Assign a single <see cref="Proof"/>
+    /// directly (implicit conversion); build the array form via <see cref="ProofSet.FromValues"/>.
     /// </summary>
     [JsonPropertyName("proof")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public Proof? Proof { get; set; }
+    public ProofSet? Proof { get; set; }
 
     /// <summary>
     /// Catches any capability fields not declared above and round-trips them
