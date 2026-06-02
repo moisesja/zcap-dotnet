@@ -932,7 +932,7 @@ public class VerificationServiceTests
             new[] { "read" },
             DateTime.UtcNow.AddDays(5));
 
-        await _verificationService.RevokeCapabilityAsync(delegatedCapability.Id, rootControllerDid);
+        await _verificationService.RevokeCapabilityAsync(delegatedCapability, rootControllerDid);
 
         // Act
         var result = await _verificationService.VerifyCapabilityChainAsync(delegatedCapability);
@@ -969,7 +969,7 @@ public class VerificationServiceTests
         };
         invocation.Proof = await _signingService.SignInvocationAsync(invocation, delegatedControllerDid);
 
-        await _verificationService.RevokeCapabilityAsync(delegatedCapability.Id, rootControllerDid);
+        await _verificationService.RevokeCapabilityAsync(delegatedCapability, rootControllerDid);
 
         // Act
         var result = await _verificationService.VerifyInvocationAsync(invocation, delegatedCapability);
@@ -1041,6 +1041,21 @@ public class VerificationServiceTests
 
         revoked.Should().BeTrue();
         (await _verificationService.IsCapabilityRevokedAsync(delegated.Id)).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task RevokeCapability_NullCapability_ThrowsArgumentNullException()
+    {
+        var act = () => _verificationService.RevokeCapabilityAsync(null!, "did:key:z6MkAny");
+        await act.Should().ThrowAsync<ArgumentNullException>().WithParameterName("capability");
+    }
+
+    [Fact]
+    public async Task RevokeCapability_EmptyRevokerDid_ThrowsArgumentException()
+    {
+        var capability = new Capability { Id = "urn:uuid:some-id" };
+        var act = () => _verificationService.RevokeCapabilityAsync(capability, "");
+        await act.Should().ThrowAsync<ArgumentException>().WithParameterName("revokerDid");
     }
 
     #endregion
