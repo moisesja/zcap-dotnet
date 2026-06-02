@@ -185,7 +185,7 @@ public class VerificationService : IVerificationService
         }
 
         if (requireParentAuthorization &&
-            (parentCapability == null || string.IsNullOrWhiteSpace(parentCapability.Controller)))
+            (parentCapability == null || parentCapability.Controller is null || parentCapability.Controller.IsEmpty))
         {
             return false;
         }
@@ -494,7 +494,7 @@ public class VerificationService : IVerificationService
             throw new CapabilityValidationException("Root capability MUST NOT include a delegation proof.");
         }
 
-        if (string.IsNullOrWhiteSpace(root.Controller))
+        if (root.Controller is null || root.Controller.IsEmpty)
         {
             throw new CapabilityValidationException("Root capability MUST include a non-empty controller.");
         }
@@ -575,17 +575,14 @@ public class VerificationService : IVerificationService
     }
 
     /// <summary>
-    /// Checks if the controller (from verification method) is authorized for this capability
+    /// Checks if the controller (from the proof's verification method) is authorized for
+    /// this capability. A capability may have multiple controllers; the proof is authorized
+    /// when its verification method matches any one of them (by bare DID or full VM URI).
     /// </summary>
     private bool IsControllerAuthorized(string verificationMethod, Capability capability)
     {
-        // Extract DID from verification method
-        // Format: did:key:z...#z... or just did:key:z...
-        var did = verificationMethod.Split('#')[0];
-
-        // Check if this DID is in the capability's controller
-        // Controller is always a string in current model
-        return did == capability.Controller || verificationMethod == capability.Controller;
+        return capability.Controller is not null &&
+               capability.Controller.ContainsVerificationMethod(verificationMethod);
     }
 
     private static bool TryExtractEmbeddedParentFromProofChain(object[]? capabilityChain, out Capability? parentCapability)

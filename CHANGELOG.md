@@ -5,7 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [2.1.1] - Unreleased
+## [3.0.0] - Unreleased
+
+### Added
+
+- `controller` may now be a single URI string **or** an array of URI strings on both root and delegated zcaps, per W3C ZCAP-LD v0.3 (Issue #47). Authorization succeeds when a proof's verification method matches **any** controller in the set.
+- `ControllerSet` (in `ZcapLd.Core.Models`) — immutable value type modeling one or many controllers. Exposes `Values`, `Count`, `IsEmpty`, `IsArrayForm`, `Primary`, `Contains`, and `ContainsVerificationMethod`. Implicit conversions from `string` and `string[]` keep single-controller call sites ergonomic (`Controller = "did:..."` still compiles). Carries a `[JsonConverter]` that **preserves the on-wire shape** (a single controller stays a bare string; an array stays an array, even a single-element one) so JCS canonical bytes round-trip byte-stably for cross-language verifiers.
+- `ControllerSetJsonConverter` (internal) — reads/writes both wire shapes and rejects malformed controller values (empty array, non-string entry, empty/whitespace string) with `JsonException`.
+- `CapabilityService.DelegateCapabilityAsync` gains an optional `signerDid` parameter so any one of a multi-controller parent's controllers can sign the delegation (defaults to the parent's first controller; validated against the parent's controller set).
+
+### Changed
+
+- **BREAKING (API)**: `Capability.Controller` changes type from `string` to `ControllerSet`. Reads that previously treated it as a string need `.Primary` (the single/first controller) or `.Values`; assignments from a `string` or `string[]` continue to compile via implicit conversion. `ICapabilityService.CreateRootCapabilityAsync` / `DelegateCapabilityAsync` now take `ControllerSet` (string callers unaffected).
+- Single-controller capabilities are unchanged on the wire — `controller` still serializes as a bare string, so existing signatures and pinned JCS bytes are preserved.
+- New `CrossLanguageJcsInteropTests` pins lock the multi-controller shape: an array-form `controller` produces sign-time bytes byte-equal to what a peer verifier JCS-canonicalizes over the array-shaped wire body, and a single controller still emits a bare string (no one-element-array collapse).
+- Dependency updates: `NetDid.Core` / `NetDid.Method.Key` 1.1.2 → 1.3.0, `Microsoft.SourceLink.GitHub` 10.0.201 → 10.0.300. Test/example tooling: `Microsoft.NET.Test.Sdk` 18.4.0 → 18.6.0, `FluentAssertions` 8.9.0 → 8.10.0, `coverlet.collector` 6.0.0 → 10.0.1, `Microsoft.Data.Sqlite` 10.0.6 → 10.0.8.
+- P-256 signing/verification now explicitly requests IEEE P1363 from NetDid's format-aware overloads (`EcdsaSignatureFormat.IeeeP1363`). NetDid 1.3.0 changed the *default* of its legacy ECDSA `Sign`/`Verify` overloads from P1363 to ASN.1 DER; the W3C `ecdsa-2019` / `EcdsaSecp256r1Signature2019` wire format requires P1363 (fixed-width `r‖s`, 64 bytes for P-256), so `CryptoSuite` pins the format to keep `proofValue` interoperable with peer Data Integrity stacks. Ed25519 (the default suite) is unaffected. Regression-guarded by `CryptoSuiteTests.P256_Sign_ProducesIeeeP1363WireFormat_NotDer`.
 
 ### Fixed
 

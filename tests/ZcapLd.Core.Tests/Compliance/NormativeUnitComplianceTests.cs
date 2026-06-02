@@ -33,7 +33,7 @@ public class NormativeUnitComplianceTests
             new[] { "read" });
 
         root.Id.Should().NotBeNullOrWhiteSpace();
-        root.Controller.Should().Be(controllerDid);
+        root.Controller.Primary.Should().Be(controllerDid);
         root.InvocationTarget.Should().Be("https://example.com/resources");
     }
 
@@ -99,7 +99,7 @@ public class NormativeUnitComplianceTests
 
         delegated.Id.Should().NotBeNullOrWhiteSpace();
         delegated.ParentCapability.Should().Be(root.Id);
-        delegated.Controller.Should().Be(childDid);
+        delegated.Controller.Primary.Should().Be(childDid);
         delegated.InvocationTarget.Should().Be(root.InvocationTarget);
         delegated.Expires.Should().NotBeNull();
         delegated.Proof.Should().NotBeNull();

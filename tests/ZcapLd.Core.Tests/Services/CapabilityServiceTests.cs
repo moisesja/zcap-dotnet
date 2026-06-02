@@ -36,7 +36,7 @@ public class CapabilityServiceTests
         // Assert
         capability.Should().NotBeNull();
         capability.Id.Should().StartWith("urn:zcap:root:");
-        capability.Controller.Should().Be(controller);
+        capability.Controller.Primary.Should().Be(controller);
         capability.InvocationTarget.Should().Be(invocationTarget);
         // Per #37: root capabilities leave AllowedAction null so the field stays
         // off the wire (strict cross-language parsers reject `[]`).
@@ -114,7 +114,7 @@ public class CapabilityServiceTests
         // Assert
         delegatedCapability.Should().NotBeNull();
         delegatedCapability.Id.Should().StartWith("urn:uuid:");
-        delegatedCapability.Controller.Should().Be(newController);
+        delegatedCapability.Controller.Primary.Should().Be(newController);
         delegatedCapability.InvocationTarget.Should().Be(invocationTarget);
         delegatedCapability.AllowedAction.Should().Equal(new[] { "read" });
         delegatedCapability.Expires.Should().Be(ZcapTimestamps.Format(expires));

@@ -112,6 +112,27 @@ public class CryptoSuiteTests
     }
 
     [Fact]
+    public void P256_Sign_ProducesIeeeP1363WireFormat_NotDer()
+    {
+        // Regression guard for the NetDid 1.3.0 trap: NetDid's *legacy* Sign overload defaults
+        // P-256 to ASN.1 DER (~70-72 bytes, starts 0x30). The W3C ecdsa-2019 /
+        // EcdsaSecp256r1Signature2019 wire format (and JOSE ES256) require IEEE P1363 fixed-width
+        // r‖s = exactly 64 bytes for P-256. CryptoSuite must call NetDid's format-aware overload
+        // with EcdsaSignatureFormat.IeeeP1363; if a future change reverts to the 3-arg overload,
+        // signatures become DER and silently break cross-language verification — caught here by
+        // the deterministic 64-byte length (DER is never 64 bytes for P-256).
+        var suite = CryptoSuite.P256();
+        var kp = KeyGen.Generate(KeyType.P256);
+        var data = "ecdsa-2019 wire format compatibility"u8.ToArray();
+
+        var signature = suite.Sign(data, kp.PrivateKey);
+
+        signature.Length.Should().Be(64,
+            "P-256 proofValue must be IEEE P1363 (32-byte r + 32-byte s), not ASN.1 DER");
+        suite.Verify(data, signature, kp.PublicKey).Should().BeTrue();
+    }
+
+    [Fact]
     public void P256_Verify_WithValidSignature_ShouldReturnTrue()
     {
         var suite = CryptoSuite.P256();

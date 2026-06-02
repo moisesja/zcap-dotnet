@@ -16,7 +16,7 @@ public class CapabilityTests
         // Assert
         capability.Id.Should().BeEmpty();
         capability.Context.Should().Be("https://w3id.org/zcap/v1");
-        capability.Controller.Should().BeEmpty();
+        capability.Controller.IsEmpty.Should().BeTrue();
         capability.InvocationTarget.Should().BeEmpty();
         // Optional fields default to null so JSON serialization omits them on the wire
         // (cross-language parsers reject empty arrays / null values when present — see #37).
@@ -78,7 +78,7 @@ public class CapabilityTests
         // Assert
         capability.Should().NotBeNull();
         capability!.Id.Should().Be("urn:uuid:12345");
-        capability.Controller.Should().Be("did:example:alice");
+        capability.Controller.Primary.Should().Be("did:example:alice");
         capability.InvocationTarget.Should().Be("https://example.com/resource");
         capability.AllowedAction.Should().BeEquivalentTo(new[] { "read", "write" });
     }

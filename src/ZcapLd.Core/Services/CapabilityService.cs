@@ -27,13 +27,13 @@ public class CapabilityService : ICapabilityService
     /// empty arrays / null for these fields when present.
     /// </summary>
     public Task<Capability> CreateRootCapabilityAsync(
-        string controller,
+        ControllerSet controller,
         string invocationTarget,
         string[]? allowedActions = null,
         DateTime? expires = null,
         Caveat[]? caveats = null)
     {
-        if (string.IsNullOrEmpty(controller))
+        if (controller is null || controller.IsEmpty)
         {
             throw new ArgumentException("Controller cannot be null or empty", nameof(controller));
         }
@@ -69,19 +69,38 @@ public class CapabilityService : ICapabilityService
     /// </summary>
     public async Task<Capability> DelegateCapabilityAsync(
         Capability parentCapability,
-        string newController,
+        ControllerSet newController,
         string[] allowedActions,
         DateTime? expires = null,
-        Caveat[]? caveats = null)
+        Caveat[]? caveats = null,
+        string? signerDid = null)
     {
         if (parentCapability == null)
         {
             throw new ArgumentNullException(nameof(parentCapability));
         }
 
-        if (string.IsNullOrEmpty(newController))
+        if (newController is null || newController.IsEmpty)
         {
             throw new ArgumentException("New controller cannot be null or empty", nameof(newController));
+        }
+
+        // Determine which of the parent's controllers signs this delegation. A parent
+        // may have several controllers; any one of them is authorized to delegate, so
+        // the caller picks via signerDid (defaulting to the first controller).
+        var parentControllers = parentCapability.Controller;
+        if (parentControllers is null || parentControllers.IsEmpty)
+        {
+            throw new InvalidOperationException(
+                "Parent capability has no controller authorized to sign the delegation.");
+        }
+
+        var effectiveSigner = signerDid ?? parentControllers.Primary;
+        if (!parentControllers.Contains(effectiveSigner))
+        {
+            throw new ArgumentException(
+                $"Signer '{effectiveSigner}' is not among the parent capability's controllers.",
+                nameof(signerDid));
         }
 
         // Validate attenuation rules (delegated capability must be more restrictive)
@@ -93,7 +112,7 @@ public class CapabilityService : ICapabilityService
         var inheritedCaveats = InheritCaveats(parentCapability.Caveat, caveats);
 
         // Resolve the signer's crypto suite context URL dynamically
-        var suiteContextUrl = await _signingService.ResolveSuiteContextUrlAsync(parentCapability.Controller);
+        var suiteContextUrl = await _signingService.ResolveSuiteContextUrlAsync(effectiveSigner);
 
         // Create the delegated capability (without proof initially)
         var delegatedCapability = new Capability
@@ -117,12 +136,10 @@ public class CapabilityService : ICapabilityService
         // Build capability chain for the proof
         var capabilityChain = BuildCapabilityChain(parentCapability);
 
-        // Sign the capability with the parent's controller
-        // Note: In practice, you'd need to have access to the parent controller's key
-        // For now, we assume the parent controller signs
+        // Sign the capability with the selected parent controller's key.
         var proof = await _signingService.SignCapabilityAsync(
             delegatedCapability,
-            parentCapability.Controller,
+            effectiveSigner,
             "capabilityDelegation",
             capabilityChain);
 
@@ -144,7 +161,7 @@ public class CapabilityService : ICapabilityService
                 return Task.FromResult(false);
             }
 
-            if (string.IsNullOrEmpty(capability.Controller))
+            if (capability.Controller is null || capability.Controller.IsEmpty)
             {
                 return Task.FromResult(false);
             }

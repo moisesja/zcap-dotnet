@@ -44,12 +44,16 @@
 
   <ItemGroup>
     <!-- W3C DID Core and did:key method (provides crypto, DID resolution, and multibase) -->
+    <!-- NetDid 1.3.0 made DER the default for its legacy ECDSA Sign/Verify overloads. The W3C
+         `ecdsa-2019` suite this library implements requires IEEE P1363 (fixed-width r||s), so
+         CryptoSuite calls NetDid's format-aware overloads with EcdsaSignatureFormat.IeeeP1363.
+         See CryptoSuite.cs. -->
     <PackageReference Include="dotNetRdf.Core" Version="3.5.1" />
-    <PackageReference Include="NetDid.Core" Version="1.1.2" />
-    <PackageReference Include="NetDid.Method.Key" Version="1.1.2" />
+    <PackageReference Include="NetDid.Core" Version="1.3.0" />
+    <PackageReference Include="NetDid.Method.Key" Version="1.3.0" />
 
     <!-- Embed source and commit metadata for debugging/open-source distribution -->
-    <PackageReference Include="Microsoft.SourceLink.GitHub" Version="10.0.201" PrivateAssets="All" />
+    <PackageReference Include="Microsoft.SourceLink.GitHub" Version="10.0.300" PrivateAssets="All" />
   </ItemGroup>
 
   <ItemGroup>
