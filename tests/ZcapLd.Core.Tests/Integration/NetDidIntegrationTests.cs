@@ -1,5 +1,6 @@
 using FluentAssertions;
 using NetDid.Core.Crypto;
+using NetDid.Method.Key;
 using ZcapLd.Core.Exceptions;
 using ZcapLd.Core.Services;
 using Xunit;
@@ -46,6 +47,43 @@ public class NetDidIntegrationTests
         // Assert
         resolved.KeyType.Should().Be("Ed25519VerificationKey2020");
         resolved.PublicKeyBytes.Should().Equal(keyPair.PublicKey);
+    }
+
+    [Fact]
+    public async Task ResolvePublicKeyAsync_X25519KeyAgreementFragment_ReturnsX25519KeyNotEd25519()
+    {
+        // Issue #67: an Ed25519 did:key resolves to two verification methods — the Ed25519
+        // signing key and a derived X25519 key-agreement key. Resolving a specific method by
+        // #fragment must return THAT method's key, not always the first one.
+        var keyPair = _keyGen.Generate(KeyType.Ed25519);
+        var did = $"did:key:{keyPair.MultibasePublicKey}";
+
+        var didKeyMethod = new DidKeyMethod(new DefaultKeyGenerator());
+        var doc = await didKeyMethod.ResolveAsync(did);
+        var vms = doc.DidDocument!.VerificationMethod!;
+        vms.Count.Should().BeGreaterThanOrEqualTo(2,
+            "an Ed25519 did:key derives an X25519 key-agreement verification method");
+
+        var first = await _resolver.ResolvePublicKeyAsync(vms[0].Id);
+        var second = await _resolver.ResolvePublicKeyAsync(vms[1].Id);
+
+        first.KeyType.Should().Be("Ed25519VerificationKey2020");
+        second.KeyType.Should().Be("X25519KeyAgreementKey2020",
+            "the X25519 fragment must resolve to the X25519 key, not the first (Ed25519) method");
+        second.PublicKeyBytes.Should().NotEqual(first.PublicKeyBytes);
+    }
+
+    [Fact]
+    public async Task ResolvePublicKeyAsync_UnknownFragment_Throws()
+    {
+        // Issue #67: a fragment that matches no verification method must throw, not silently
+        // substitute the first method.
+        var keyPair = _keyGen.Generate(KeyType.Ed25519);
+        var did = $"did:key:{keyPair.MultibasePublicKey}";
+        var bogus = $"{did}#zNotARealFragment";
+
+        var act = async () => await _resolver.ResolvePublicKeyAsync(bogus);
+        await act.Should().ThrowAsync<CapabilityValidationException>();
     }
 
     #endregion
