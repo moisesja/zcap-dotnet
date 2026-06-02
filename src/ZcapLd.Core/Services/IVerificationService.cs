@@ -48,13 +48,31 @@ public interface IVerificationService
     Task<ResolvedKey> ResolvePublicKeyAsync(string did);
 
     /// <summary>
-    /// Revokes a capability by ID
-    /// COMPLIANCE FIX: MUST-21, SHOULD-07 - Revocation support
+    /// Records a revocation for a capability ID <b>without performing any authorization</b>.
+    /// This overload only has the capability ID, and a bare <paramref name="revokerDid"/> string
+    /// is not proof of control, so it cannot verify the revoker is entitled to revoke. The caller
+    /// (host) MUST authorize the revoker before calling; the DID is stored as audit attribution
+    /// only. To have the library enforce authorization against the delegation chain, use
+    /// <see cref="RevokeCapabilityAsync(Capability, string)"/>.
+    /// COMPLIANCE: MUST-21, SHOULD-07 — revocation support.
     /// </summary>
     /// <param name="capabilityId">The ID of the capability to revoke</param>
-    /// <param name="revokerDid">The DID of the entity performing the revocation</param>
-    /// <returns>True if revocation was successful</returns>
+    /// <param name="revokerDid">DID recorded as the revoker (attribution only; not authorized)</param>
+    /// <returns>True once the revocation is recorded; throws on null/empty arguments</returns>
     Task<bool> RevokeCapabilityAsync(string capabilityId, string revokerDid);
+
+    /// <summary>
+    /// Revokes a capability after verifying the revoker is authorized. A revoker is authorized
+    /// when it controls the capability itself or any ancestor in its delegation chain (an up-chain
+    /// delegator). <paramref name="revokerDid"/> is expected to be a DID the host has already
+    /// <i>authenticated</i> — the library performs authorization, not authentication. Returns
+    /// <c>false</c> (recording nothing) when the revoker is not authorized or the chain cannot be
+    /// verified.
+    /// </summary>
+    /// <param name="capability">The capability to revoke (its chain is used for authorization)</param>
+    /// <param name="revokerDid">The authenticated DID requesting revocation</param>
+    /// <returns>True if authorized and recorded; false if the revoker is not authorized</returns>
+    Task<bool> RevokeCapabilityAsync(Capability capability, string revokerDid);
 
     /// <summary>
     /// Checks if a capability has been revoked
