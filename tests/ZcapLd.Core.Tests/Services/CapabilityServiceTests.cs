@@ -22,6 +22,26 @@ public class CapabilityServiceTests
     }
 
     [Fact]
+    public async Task CreateRootCapability_DropsExpiresAllowedActionsAndCaveats()
+    {
+        // Issue #72: a root carries no allowedAction/expires/caveat per W3C ZCAP-LD, so these
+        // parameters are accepted but intentionally dropped. This is CORRECT behavior (a root with
+        // expires is actively rejected by ValidateCapabilityAsync) — this test locks it so a future
+        // change does not mistakenly start honoring them on roots.
+        var root = await _capabilityService.CreateRootCapabilityAsync(
+            "did:key:z6MkExample",
+            "https://example.com/doc",
+            allowedActions: new[] { "read" },
+            expires: DateTime.UtcNow.AddDays(1),
+            caveats: new Caveat[] { new ExpirationCaveat { Expires = DateTime.UtcNow.AddHours(1) } });
+
+        root.AllowedAction.Should().BeNull();
+        root.Expires.Should().BeNull();
+        root.Caveat.Should().BeNull();
+        (await _capabilityService.ValidateCapabilityAsync(root)).Should().BeTrue("a clean root validates");
+    }
+
+    [Fact]
     public async Task CreateRootCapability_ViaInterface_AllowedActionsOptional()
     {
         // Issue #66: the ICapabilityService signature now matches the implementation
