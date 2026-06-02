@@ -690,18 +690,50 @@ public class VerificationService : IVerificationService
     }
 
     /// <summary>
-    /// Revokes a capability by ID
-    /// COMPLIANCE FIX: MUST-21, SHOULD-07 - Revocation support
-    /// Per W3C spec: Revoked capabilities must be stored until their expiration
+    /// Revokes a capability after verifying the revoker is authorized: the revoker must control
+    /// the capability itself or any ancestor in its delegation chain (an up-chain delegator).
+    /// <paramref name="revokerDid"/> is a DID the host has already authenticated — the library
+    /// performs authorization, not authentication. Returns <c>false</c> (recording nothing) when
+    /// the revoker is not authorized or the chain cannot be cryptographically verified.
+    /// COMPLIANCE: MUST-21, SHOULD-07 — revoked capabilities are stored until their expiration.
     /// </summary>
-    public Task<bool> RevokeCapabilityAsync(string capabilityId, string revokerDid)
+    public async Task<bool> RevokeCapabilityAsync(Capability capability, string revokerDid)
     {
-        if (string.IsNullOrEmpty(capabilityId))
-            throw new ArgumentException("Capability ID cannot be null or empty", nameof(capabilityId));
+        if (capability == null)
+            throw new ArgumentNullException(nameof(capability));
         if (string.IsNullOrEmpty(revokerDid))
             throw new ArgumentException("Revoker DID cannot be null or empty", nameof(revokerDid));
 
-        return RevokeCapabilityCoreAsync(capabilityId, revokerDid);
+        if (!await IsRevokerAuthorizedAsync(capability, revokerDid))
+            return false;
+
+        return await RevokeCapabilityCoreAsync(capability.Id, revokerDid);
+    }
+
+    /// <summary>
+    /// True when <paramref name="revokerDid"/> may revoke <paramref name="capability"/> — i.e. it
+    /// controls the capability or any ancestor in its delegation chain. Cryptographically verifies
+    /// the chain before trusting any controller fields; a forged or invalid chain yields false.
+    /// </summary>
+    private async Task<bool> IsRevokerAuthorizedAsync(Capability capability, string revokerDid)
+    {
+        // Verify the chain cryptographically first so controller fields can be trusted.
+        // Without this, a caller passing a crafted Capability with a tampered controller
+        // could authorize themselves to revoke a legitimate capability.
+        if (!await VerifyCapabilityChainAsync(capability))
+            return false;
+
+        try
+        {
+            var chain = await BuildCapabilityChainAsync(capability);
+            return chain.Any(link =>
+                link.Controller is not null &&
+                link.Controller.ContainsVerificationMethod(revokerDid));
+        }
+        catch (CapabilityValidationException)
+        {
+            return false;
+        }
     }
 
     /// <summary>

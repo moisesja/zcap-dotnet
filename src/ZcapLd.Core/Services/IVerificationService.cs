@@ -48,13 +48,18 @@ public interface IVerificationService
     Task<ResolvedKey> ResolvePublicKeyAsync(string did);
 
     /// <summary>
-    /// Revokes a capability by ID
-    /// COMPLIANCE FIX: MUST-21, SHOULD-07 - Revocation support
+    /// Revokes a capability after verifying the revoker is authorized. A revoker is authorized
+    /// when it controls the capability itself or any ancestor in its delegation chain (an up-chain
+    /// delegator). <paramref name="revokerDid"/> is expected to be a DID the host has already
+    /// <i>authenticated</i> — the library performs authorization, not authentication. Returns
+    /// <c>false</c> (recording nothing) when the revoker is not authorized or the chain cannot be
+    /// cryptographically verified.
+    /// COMPLIANCE: MUST-21, SHOULD-07 — revocation support.
     /// </summary>
-    /// <param name="capabilityId">The ID of the capability to revoke</param>
-    /// <param name="revokerDid">The DID of the entity performing the revocation</param>
-    /// <returns>True if revocation was successful</returns>
-    Task<bool> RevokeCapabilityAsync(string capabilityId, string revokerDid);
+    /// <param name="capability">The capability to revoke (its chain is cryptographically verified for authorization)</param>
+    /// <param name="revokerDid">The authenticated DID requesting revocation</param>
+    /// <returns>True if authorized and recorded; false if the revoker is not authorized</returns>
+    Task<bool> RevokeCapabilityAsync(Capability capability, string revokerDid);
 
     /// <summary>
     /// Checks if a capability has been revoked
