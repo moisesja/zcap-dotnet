@@ -726,6 +726,14 @@ public class VerificationService : IVerificationService
         try
         {
             var chain = await BuildCapabilityChainAsync(capability);
+            // Authorization is a string-level controller match: revokerDid (a bare DID or a
+            // did#key-fragment) authorizes when it equals a chain controller, or its bare DID
+            // does. This covers did:key (the DID *is* the key) and a did:web controller whose
+            // bare DID matches the revoker's key fragment (did:web:issuer#key-1 → did:web:issuer).
+            // It does NOT resolve the controller's DID document, so a revoker key belonging to a
+            // *different* DID that the controller would authorize is not matched.
+            // TODO: support cross-DID key authorization by resolving the controller's DID
+            // document and checking its verificationMethod/capabilityDelegation relationships.
             return chain.Any(link =>
                 link.Controller is not null &&
                 link.Controller.ContainsVerificationMethod(revokerDid));

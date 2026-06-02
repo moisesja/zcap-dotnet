@@ -366,6 +366,11 @@ public class NormativeIntegrationComplianceTests
             new[] { "read" },
             DateTime.UtcNow.AddMonths(6));
 
-        delegated.Expires.Should().NotBeNull();
+        // Assert the requested 6-month expiration round-trips intact, not merely that no
+        // exception was thrown — this catches a silent truncation in DelegateCapabilityAsync
+        // that a NotBeNull() check would miss (PR #81 review).
+        delegated.ExpiresAt.Should().NotBeNull();
+        delegated.ExpiresAt!.Value.Should().BeCloseTo(
+            DateTime.UtcNow.AddMonths(6), TimeSpan.FromSeconds(5));
     }
 }
