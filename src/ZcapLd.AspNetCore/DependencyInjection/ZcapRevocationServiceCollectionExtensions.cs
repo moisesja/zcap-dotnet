@@ -88,7 +88,8 @@ public static class ZcapRevocationServiceCollectionExtensions
                 sp.GetRequiredService<IRevocationService>(),
                 sp.GetRequiredService<INonceStore>(),
                 sp.GetRequiredService<IDocumentCanonicalizerProvider>(),
-                logger: sp.GetService<ILogger<VerificationService>>()));
+                logger: sp.GetService<ILogger<VerificationService>>(),
+                policy: sp.GetService<VerificationPolicy>()));
 
         return services;
     }

@@ -22,6 +22,7 @@ public class VerificationService : IVerificationService
     private readonly IDocumentCanonicalizerProvider _canonicalizerProvider;
     private readonly TimeSpan _nonceWindow;
     private readonly ILogger _logger;
+    private readonly VerificationPolicy _policy;
     private const int MaxChainLength = 10; // Per spec: SHOULD limit to 10
 
     /// <summary>
@@ -114,7 +115,8 @@ public class VerificationService : IVerificationService
         INonceStore nonceStore,
         IDocumentCanonicalizerProvider canonicalizerProvider,
         TimeSpan? nonceWindow = null,
-        ILogger<VerificationService>? logger = null)
+        ILogger<VerificationService>? logger = null,
+        VerificationPolicy? policy = null)
     {
         _didResolver = didResolver ?? throw new ArgumentNullException(nameof(didResolver));
         _caveatProcessor = caveatProcessor ?? throw new ArgumentNullException(nameof(caveatProcessor));
@@ -124,6 +126,7 @@ public class VerificationService : IVerificationService
         _canonicalizerProvider = canonicalizerProvider ?? throw new ArgumentNullException(nameof(canonicalizerProvider));
         _nonceWindow = nonceWindow ?? DefaultNonceWindow;
         _logger = logger ?? NullLogger<VerificationService>.Instance;
+        _policy = policy ?? VerificationPolicy.Default;
     }
 
     internal static ICryptoSuiteProvider CreateDefaultSuiteProvider()
@@ -486,6 +489,15 @@ public class VerificationService : IVerificationService
                 // Verify expiration hasn't passed
                 var childExpiresAt = child.ExpiresAt;
                 if (childExpiresAt.HasValue && childExpiresAt.Value < DateTime.UtcNow)
+                    return false;
+
+                // Verifier-side SHOULD (opt-in): reject a delegated zcap whose expiration is more
+                // than MaxDelegationExpirationMonths in the future, measured at verification time
+                // (Issue #73). This is the correct home for the 3-month ceiling — the create-time
+                // hard throw was removed in #61. Off by default because it is a SHOULD.
+                if (_policy.EnforceMaxDelegationExpiration &&
+                    childExpiresAt.HasValue &&
+                    childExpiresAt.Value > DateTime.UtcNow.AddMonths(_policy.MaxDelegationExpirationMonths))
                     return false;
 
                 // Verify caveats are compatible

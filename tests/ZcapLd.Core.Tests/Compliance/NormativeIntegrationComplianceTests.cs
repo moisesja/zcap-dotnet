@@ -2,6 +2,7 @@ using System.Reflection;
 using FluentAssertions;
 using Xunit;
 using ZcapLd.Core.Models;
+using ZcapLd.Core.Services;
 
 namespace ZcapLd.Core.Tests.Compliance;
 
@@ -367,5 +368,41 @@ public class NormativeIntegrationComplianceTests
             DateTime.UtcNow.AddMonths(6));
 
         delegated.Expires.Should().NotBeNull();
+    }
+
+    [Fact(DisplayName = "SHOULD-04 Verifier SHOULD reject delegated expirations beyond 3 months when policy enabled")]
+    public async Task Should04_Verifier_RejectsExpirationBeyondThreeMonths_WhenPolicyEnabled()
+    {
+        // Issue #73: the W3C 3-month expiration ceiling is a verifier-side SHOULD measured at
+        // verification time, behind an opt-in policy flag. Off by default (no behavior change);
+        // when enabled, the verifier rejects a delegated zcap whose expiration is more than three
+        // months out.
+        var fixture = new ComplianceTestFixture();
+        var parentDid = fixture.RegisterControllerDid();
+        var childDid = fixture.RegisterControllerDid();
+
+        var root = await fixture.CapabilityService.CreateRootCapabilityAsync(
+            parentDid, "https://example.com/resources", new[] { "read" });
+        var delegated = await fixture.CapabilityService.DelegateCapabilityAsync(
+            root, childDid, new[] { "read" }, DateTime.UtcNow.AddMonths(6));
+
+        // Default verifier (policy off): the long-lived delegation still verifies.
+        (await fixture.VerificationService.VerifyCapabilityChainAsync(delegated)).Should().BeTrue(
+            "the ceiling is a SHOULD and is off by default");
+
+        // Policy-enabled verifier: the same delegation is rejected (expires > 3 months out).
+        var strictVerifier = new VerificationService(
+            fixture.DidProvider,
+            fixture.CaveatProcessor,
+            VerificationService.CreateDefaultSuiteProvider(),
+            new RevocationService(new InMemoryRevocationStore()),
+            new InMemoryNonceStore(),
+            SigningService.CreateDefaultCanonicalizerProvider(),
+            nonceWindow: null,
+            logger: null,
+            policy: new VerificationPolicy { EnforceMaxDelegationExpiration = true });
+
+        (await strictVerifier.VerifyCapabilityChainAsync(delegated)).Should().BeFalse(
+            "with the policy enabled, an expiration more than 3 months out is rejected");
     }
 }
