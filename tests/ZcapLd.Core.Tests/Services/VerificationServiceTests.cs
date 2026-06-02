@@ -1,5 +1,6 @@
 using System.Text.Json;
 using FluentAssertions;
+using Microsoft.Extensions.Logging;
 using Xunit;
 using ZcapLd.Core.Cryptography;
 using ZcapLd.Core.Exceptions;
@@ -67,6 +68,40 @@ public class VerificationServiceTests
 
         // Assert
         result.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task VerifyCapabilityChain_WhenItFailsClosed_LogsTheCause()
+    {
+        // Issue #64: failing closed is correct, but the cause must not be discarded silently.
+        // A delegated capability whose chain cannot be reconstructed throws internally; the
+        // top-level catch must return false AND emit a diagnostic via the injected logger.
+        var logger = new CapturingLogger<VerificationService>();
+        var verifier = new VerificationService(
+            _didProvider,
+            _caveatProcessor,
+            VerificationService.CreateDefaultSuiteProvider(),
+            new RevocationService(new InMemoryRevocationStore()),
+            new InMemoryNonceStore(),
+            SigningService.CreateDefaultCanonicalizerProvider(),
+            nonceWindow: null,
+            logger: logger);
+
+        // Looks delegated (has parentCapability) but carries no proof/chain → BuildCapabilityChainAsync throws.
+        var malformed = new Capability
+        {
+            Context = new object[] { "https://w3id.org/zcap/v1" },
+            Id = "urn:uuid:malformed",
+            Controller = "did:key:z6MkLogChild",
+            InvocationTarget = "https://example.com/resource",
+            ParentCapability = "urn:zcap:root:https%3A%2F%2Fexample.com%2Fresource"
+        };
+
+        var result = await verifier.VerifyCapabilityChainAsync(malformed);
+
+        result.Should().BeFalse("fail-closed is preserved");
+        logger.Entries.Should().Contain(e => e.Level == LogLevel.Warning && e.Exception != null,
+            "the swallowed cause must be logged, not discarded");
     }
 
     [Fact]
@@ -1197,5 +1232,25 @@ internal class ContentTypeCaveat : Caveat
         return context.Properties.TryGetValue("contentType", out var value)
             && value is string contentType
             && string.Equals(contentType, RequiredContentType, StringComparison.OrdinalIgnoreCase);
+    }
+}
+
+/// <summary>Minimal in-memory <see cref="ILogger{T}"/> that records emitted entries (Issue #64 test support).</summary>
+internal sealed class CapturingLogger<T> : ILogger<T>
+{
+    public List<(LogLevel Level, Exception? Exception, string Message)> Entries { get; } = new();
+
+    public IDisposable BeginScope<TState>(TState state) where TState : notnull => NullScope.Instance;
+
+    public bool IsEnabled(LogLevel logLevel) => true;
+
+    public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+        Func<TState, Exception?, string> formatter)
+        => Entries.Add((logLevel, exception, formatter(state, exception)));
+
+    private sealed class NullScope : IDisposable
+    {
+        public static readonly NullScope Instance = new();
+        public void Dispose() { }
     }
 }
