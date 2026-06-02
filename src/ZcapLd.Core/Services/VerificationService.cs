@@ -273,8 +273,14 @@ public class VerificationService : IVerificationService
             if (!string.Equals(invocation.Capability, capability.Id, StringComparison.Ordinal))
                 return false;
 
-            // 2b. Proof payload fields MUST be semantically consistent with invocation fields
-            if (!string.Equals(invocation.Proof.Capability as string, invocation.Capability, StringComparison.Ordinal) ||
+            // 2b. Proof payload fields MUST be semantically consistent with invocation fields.
+            // Proof.Capability is object?: after a JSON round-trip it is a JsonElement, not a
+            // CLR string, so normalize via TryExtractStringValue rather than an `as string` cast
+            // (which would yield null and reject every deserialized invocation — issue #58).
+            var proofCapabilityId = invocation.Proof.Capability is { } proofCapability
+                ? TryExtractStringValue(proofCapability)
+                : null;
+            if (!string.Equals(proofCapabilityId, invocation.Capability, StringComparison.Ordinal) ||
                 !string.Equals(invocation.Proof.CapabilityAction, invocation.CapabilityAction, StringComparison.Ordinal) ||
                 !string.Equals(invocation.Proof.InvocationTarget, invocation.InvocationTarget, StringComparison.Ordinal))
                 return false;
