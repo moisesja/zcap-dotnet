@@ -11,9 +11,6 @@ public class CapabilityService : ICapabilityService
 {
     private readonly ISigningService _signingService;
 
-    // https://w3c-ccg.github.io/zcap-spec/#:~:text=expiration%20date%2Dtime.-,A,-verifier%20SHOULD%20ensure
-    private const short MaxExpirationMonths = 3;
-
     public CapabilityService(ISigningService signingService)
     {
         _signingService = signingService ?? throw new ArgumentNullException(nameof(signingService));
@@ -289,17 +286,12 @@ public class CapabilityService : ICapabilityService
             }
         }
 
-        // COMPLIANCE FIX: SHOULD-04 - Enforce 3-month maximum expiration
-        if (expires.HasValue)
-        {
-            var maximumExpirationDate = DateTime.UtcNow.AddMonths(MaxExpirationMonths);
-            if (expires.Value > maximumExpirationDate)
-            {
-                throw new InvalidOperationException(
-                    $"Capability expiration exceeds recommended {MaxExpirationMonths}-month limit. " +
-                    $"Requested: {expires.Value:O}, Maximum allowed: {maximumExpirationDate:O}");
-            }
-        }
+        // The W3C ZCAP-LD 3-month expiration ceiling is a verifier-side SHOULD measured at
+        // invocation time — NOT a create-time MUST (Issue #61). Enforcing it here as a hard throw
+        // blocked even constructing a legitimately long-lived delegation the parent permits, and
+        // mislocated the check (wrong actor, wrong time). The ceiling now lives on the verify path
+        // behind a policy flag (Issue #73). Attenuation (child ≤ parent expiry) is still enforced
+        // above.
     }
 
     /// <summary>

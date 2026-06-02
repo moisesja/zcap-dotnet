@@ -343,9 +343,13 @@ public class NormativeIntegrationComplianceTests
         field!.GetRawConstantValue().Should().Be(10);
     }
 
-    [Fact(DisplayName = "SHOULD-04 Verifier SHOULD reject delegated expirations beyond 3 months")]
-    public async Task Should04_Verifier_ShouldRejectExpirationsBeyondThreeMonths()
+    [Fact(DisplayName = "SHOULD-04 Delegation does not hard-throw on long expirations at create time")]
+    public async Task Should04_Delegation_DoesNotThrowOnLongExpirationAtCreateTime()
     {
+        // Issue #61: the W3C 3-month expiration ceiling is a verifier-side SHOULD measured at
+        // invocation time, not a create-time MUST. Constructing a long-lived delegation the parent
+        // permits must succeed; the ceiling is enforced on the verify path behind a policy flag
+        // (Issue #73).
         var fixture = new ComplianceTestFixture();
         var parentDid = fixture.RegisterControllerDid();
         var childDid = fixture.RegisterControllerDid();
@@ -355,13 +359,13 @@ public class NormativeIntegrationComplianceTests
             "https://example.com/resources",
             new[] { "read" });
 
-        var act = async () => await fixture.CapabilityService.DelegateCapabilityAsync(
+        // Constructing a long-lived delegation the parent permits must succeed (no throw).
+        var delegated = await fixture.CapabilityService.DelegateCapabilityAsync(
             root,
             childDid,
             new[] { "read" },
             DateTime.UtcNow.AddMonths(6));
 
-        await act.Should().ThrowAsync<InvalidOperationException>(
-            "SHOULD-04 recommends rejecting unreasonably long delegated expirations.");
+        delegated.Expires.Should().NotBeNull();
     }
 }
