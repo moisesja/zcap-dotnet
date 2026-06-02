@@ -177,20 +177,6 @@ public class CapabilityService : ICapabilityService
                 return Task.FromResult(false);
             }
 
-            // COMPLIANCE FIX: SHOULD-05 - Validate action names (should be read/write)
-            if (capability.AllowedAction != null && capability.AllowedAction.Length > 0)
-            {
-                var validActions = new[] { "read", "write" };
-                foreach (var action in capability.AllowedAction)
-                {
-                    if (!validActions.Contains(action, StringComparer.OrdinalIgnoreCase))
-                    {
-                        // SHOULD requirement: non-standard actions should fail validation
-                        return Task.FromResult(false);
-                    }
-                }
-            }
-
             // Check if it's a root or delegated capability
             bool isRoot = capability.ParentCapability == null;
 
