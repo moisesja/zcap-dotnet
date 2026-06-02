@@ -81,6 +81,39 @@ invocation.Proof = await signingService.SignInvocationAsync(invocation, leafDid)
 var isValid = await verificationService.VerifyInvocationAsync(invocation, delegated);
 ```
 
+### Single vs Multiple Controllers
+
+Per W3C ZCAP-LD v0.3, a capability's `controller` may be **a single DID or an array of DIDs**.
+`Capability.Controller` is a `ControllerSet` that preserves the shape on the wire — assign a
+`string` for one controller or a `string[]` for several (implicit conversions). **Any** controller
+in the set is authorized to invoke or delegate.
+
+```csharp
+// Single controller → serializes as a bare string: "controller": "did:key:zAlice"
+var single = await capabilityService.CreateRootCapabilityAsync(
+    "did:key:zAlice",
+    "https://api.example.com/resources",
+    new[] { "read" });
+
+// Multiple controllers → serializes as an array: "controller": ["did:key:zAlice","did:key:zBob"]
+var shared = await capabilityService.CreateRootCapabilityAsync(
+    new[] { "did:key:zAlice", "did:key:zBob" },
+    "https://api.example.com/resources",
+    new[] { "read" });
+
+// An invocation/delegation signed by EITHER zAlice or zBob verifies; any other key is rejected.
+shared.Controller.Values;                       // ["did:key:zAlice", "did:key:zBob"]
+shared.Controller.ContainsVerificationMethod("did:key:zBob#zBob"); // true
+
+// When delegating from a multi-controller capability, choose which controller signs:
+var delegatedByBob = await capabilityService.DelegateCapabilityAsync(
+    shared,
+    "did:key:zCarol",
+    new[] { "read" },
+    DateTime.UtcNow.AddDays(7),
+    signerDid: "did:key:zBob");                 // must be one of `shared`'s controllers
+```
+
 ## Revocation Extensibility
 
 The core package is storage-agnostic for revocation.
