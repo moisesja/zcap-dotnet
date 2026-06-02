@@ -177,19 +177,13 @@ public class CapabilityService : ICapabilityService
                 return Task.FromResult(false);
             }
 
-            // COMPLIANCE FIX: SHOULD-05 - Validate action names (should be read/write)
-            if (capability.AllowedAction != null && capability.AllowedAction.Length > 0)
-            {
-                var validActions = new[] { "read", "write" };
-                foreach (var action in capability.AllowedAction)
-                {
-                    if (!validActions.Contains(action, StringComparer.OrdinalIgnoreCase))
-                    {
-                        // SHOULD requirement: non-standard actions should fail validation
-                        return Task.FromResult(false);
-                    }
-                }
-            }
+            // ZCAP-LD treats allowedAction as an application-defined vocabulary — "read"/"write"
+            // are illustrative examples, not a closed allow-list (Issue #59). The real
+            // constraints are enforced elsewhere: attenuation (child ⊆ parent) at delegation and
+            // chain verification, and membership in allowedAction at invocation time. Rejecting
+            // arbitrary actions here declared spec-conformant capabilities invalid — including
+            // ones this library mints (e.g. "delete", "admin", "share") and cryptographically
+            // verifies — so no action-name allow-list is applied.
 
             // Check if it's a root or delegated capability
             bool isRoot = capability.ParentCapability == null;

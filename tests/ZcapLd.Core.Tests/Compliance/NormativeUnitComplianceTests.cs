@@ -323,9 +323,14 @@ public class NormativeUnitComplianceTests
         delegated.Id.Should().StartWith("urn:uuid:");
     }
 
-    [Fact(DisplayName = "SHOULD-05 capabilityAction SHOULD be read/write")]
-    public async Task Should05_CapabilityAction_ShouldBeReadOrWrite()
+    [Fact(DisplayName = "SHOULD-05 capabilityAction is an application-defined vocabulary")]
+    public async Task Should05_CapabilityAction_AllowsApplicationDefinedActions()
     {
+        // ZCAP-LD treats allowedAction as an application-defined vocabulary; "read"/"write"
+        // are illustrative, not a closed allow-list (Issue #59). A capability modeling a real
+        // application action (here "admin") is spec-conformant and must validate — the same
+        // capability also verifies cryptographically. Enforcement of action names, if a
+        // deployment wants it, belongs in an injected policy, not in core validation.
         var fixture = new ComplianceTestFixture();
         var parentDid = fixture.RegisterControllerDid();
         var childDid = fixture.RegisterControllerDid();
@@ -335,6 +340,8 @@ public class NormativeUnitComplianceTests
             "https://example.com/resources",
             new[] { "read", "write" });
 
+        // The root carries no allowedAction (unrestricted), so delegating a custom "admin"
+        // action is within the parent's authority and must produce a valid delegated zcap.
         var delegated = await fixture.CapabilityService.DelegateCapabilityAsync(
             root,
             childDid,
@@ -342,7 +349,7 @@ public class NormativeUnitComplianceTests
             DateTime.UtcNow.AddDays(5));
 
         var isValid = await fixture.CapabilityService.ValidateCapabilityAsync(delegated);
-        isValid.Should().BeFalse("SHOULD-05 expects enforcement or explicit validation feedback for non-standard actions.");
+        isValid.Should().BeTrue("allowedAction is application-defined; a custom action is spec-conformant.");
     }
 
     [Fact(DisplayName = "SHOULD-06 Invocation SHOULD include an id field")]
