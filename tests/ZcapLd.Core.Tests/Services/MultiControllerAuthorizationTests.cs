@@ -1,5 +1,7 @@
+using System.Text.Json;
 using FluentAssertions;
 using Xunit;
+using ZcapLd.Core.Cryptography;
 using ZcapLd.Core.Models;
 using ZcapLd.Core.Services;
 using ZcapLd.Core.Tests.Helpers;
@@ -56,6 +58,39 @@ public class MultiControllerAuthorizationTests
         var isValid = await _verificationService.VerifyInvocationAsync(invocation, root);
 
         isValid.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task RootInvocation_OverDeserializedArrayController_AuthorizesAnyController()
+    {
+        // Issue #65: a spec-permitted array `controller` must (1) deserialize rather than throw
+        // (it previously threw JsonException under the single-string model) and (2) authorize an
+        // invocation signed by ANY controller in the set — verified end-to-end over the JSON wire
+        // body a resource server actually receives. (Resolving a controller's DID document to
+        // confirm a verification relationship for non-did:key controllers is a separate,
+        // architectural enhancement that requires extending IDidResolver.)
+        var alice = _didProvider.GenerateDidKey();
+        var bob = _didProvider.GenerateDidKey();
+
+        var root = await _capabilityService.CreateRootCapabilityAsync(
+            new[] { alice, bob }, Target, new[] { "read" });
+
+        // Round-trip through JSON: the array controller must survive intact, not throw.
+        var json = JsonSerializer.Serialize(root, ZcapJsonOptions.Default);
+        var received = JsonSerializer.Deserialize<Capability>(json, ZcapJsonOptions.Default)!;
+        received.Controller.IsArrayForm.Should().BeTrue();
+        received.Controller.Values.Should().BeEquivalentTo(new[] { alice, bob });
+
+        // Sign with the SECOND controller and verify against the deserialized capability.
+        var invocation = new Invocation
+        {
+            Capability = received.Id,
+            CapabilityAction = "read",
+            InvocationTarget = Target
+        };
+        invocation.Proof = await _signingService.SignInvocationAsync(invocation, bob);
+
+        (await _verificationService.VerifyInvocationAsync(invocation, received)).Should().BeTrue();
     }
 
     [Fact]
