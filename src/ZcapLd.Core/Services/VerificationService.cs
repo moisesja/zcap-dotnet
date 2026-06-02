@@ -690,9 +690,13 @@ public class VerificationService : IVerificationService
     }
 
     /// <summary>
-    /// Revokes a capability by ID
-    /// COMPLIANCE FIX: MUST-21, SHOULD-07 - Revocation support
-    /// Per W3C spec: Revoked capabilities must be stored until their expiration
+    /// Records a revocation for a capability ID <b>without performing any authorization</b>.
+    /// This overload only has the capability ID, and a bare <paramref name="revokerDid"/> string
+    /// is not proof of control, so it cannot verify the revoker is entitled to revoke — the DID is
+    /// stored as audit attribution only (<see cref="RevocationRecord.RevokedBy"/>). The caller
+    /// (host) MUST authorize the revoker before calling. To have the library enforce authorization
+    /// against the delegation chain, use <see cref="RevokeCapabilityAsync(Capability, string)"/>.
+    /// COMPLIANCE: MUST-21, SHOULD-07 — revoked capabilities are stored until their expiration.
     /// </summary>
     public Task<bool> RevokeCapabilityAsync(string capabilityId, string revokerDid)
     {
@@ -702,6 +706,46 @@ public class VerificationService : IVerificationService
             throw new ArgumentException("Revoker DID cannot be null or empty", nameof(revokerDid));
 
         return RevokeCapabilityCoreAsync(capabilityId, revokerDid);
+    }
+
+    /// <summary>
+    /// Revokes a capability after verifying the revoker is authorized: the revoker must control
+    /// the capability itself or any ancestor in its delegation chain (an up-chain delegator).
+    /// <paramref name="revokerDid"/> is a DID the host has already authenticated — the library
+    /// performs authorization, not authentication. Returns <c>false</c> (recording nothing) when
+    /// the revoker is not authorized or the chain cannot be verified.
+    /// </summary>
+    public async Task<bool> RevokeCapabilityAsync(Capability capability, string revokerDid)
+    {
+        if (capability == null)
+            throw new ArgumentNullException(nameof(capability));
+        if (string.IsNullOrEmpty(revokerDid))
+            throw new ArgumentException("Revoker DID cannot be null or empty", nameof(revokerDid));
+
+        if (!await IsRevokerAuthorizedAsync(capability, revokerDid))
+            return false;
+
+        return await RevokeCapabilityCoreAsync(capability.Id, revokerDid);
+    }
+
+    /// <summary>
+    /// True when <paramref name="revokerDid"/> may revoke <paramref name="capability"/> — i.e. it
+    /// controls the capability or any ancestor in its delegation chain. A malformed/unverifiable
+    /// chain yields false (cannot authorize).
+    /// </summary>
+    private async Task<bool> IsRevokerAuthorizedAsync(Capability capability, string revokerDid)
+    {
+        try
+        {
+            var chain = await BuildCapabilityChainAsync(capability);
+            return chain.Any(link =>
+                link.Controller is not null &&
+                link.Controller.ContainsVerificationMethod(revokerDid));
+        }
+        catch (CapabilityValidationException)
+        {
+            return false;
+        }
     }
 
     /// <summary>

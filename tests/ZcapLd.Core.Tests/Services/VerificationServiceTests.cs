@@ -978,6 +978,71 @@ public class VerificationServiceTests
         result.Should().BeFalse();
     }
 
+    [Fact]
+    public async Task RevokeCapability_AuthorizedUpChainController_RevokesAndReturnsTrue()
+    {
+        // Issue #60: the Capability overload authorizes the revoker against the delegation chain.
+        // The root controller is an up-chain delegator and must be allowed to revoke a child.
+        var rootControllerDid = "did:key:z6MkRevokeRoot";
+        var delegatedControllerDid = "did:key:z6MkRevokeChild";
+        _didProvider.GenerateAndRegisterKeyPair(rootControllerDid);
+        _didProvider.GenerateAndRegisterKeyPair(delegatedControllerDid);
+
+        var root = await _capabilityService.CreateRootCapabilityAsync(
+            rootControllerDid, "https://example.com/resource", new[] { "read", "write" });
+        var delegated = await _capabilityService.DelegateCapabilityAsync(
+            root, delegatedControllerDid, new[] { "read" }, DateTime.UtcNow.AddDays(5));
+
+        var revoked = await _verificationService.RevokeCapabilityAsync(delegated, rootControllerDid);
+
+        revoked.Should().BeTrue();
+        (await _verificationService.IsCapabilityRevokedAsync(delegated.Id)).Should().BeTrue();
+        (await _verificationService.VerifyCapabilityChainAsync(delegated)).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task RevokeCapability_UnauthorizedRevoker_ReturnsFalseAndDoesNotRevoke()
+    {
+        // Issue #60: Mallory controls nothing in the chain, so the authorizing overload must
+        // refuse to revoke — and must NOT record anything (no unauthenticated denial-of-capability).
+        var rootControllerDid = "did:key:z6MkAuthzRoot";
+        var delegatedControllerDid = "did:key:z6MkAuthzChild";
+        const string malloryDid = "did:key:z6MkMalloryHasNoAuthority";
+        _didProvider.GenerateAndRegisterKeyPair(rootControllerDid);
+        _didProvider.GenerateAndRegisterKeyPair(delegatedControllerDid);
+
+        var root = await _capabilityService.CreateRootCapabilityAsync(
+            rootControllerDid, "https://example.com/resource", new[] { "read", "write" });
+        var delegated = await _capabilityService.DelegateCapabilityAsync(
+            root, delegatedControllerDid, new[] { "read" }, DateTime.UtcNow.AddDays(5));
+
+        var revoked = await _verificationService.RevokeCapabilityAsync(delegated, malloryDid);
+
+        revoked.Should().BeFalse();
+        (await _verificationService.IsCapabilityRevokedAsync(delegated.Id)).Should().BeFalse();
+        (await _verificationService.VerifyCapabilityChainAsync(delegated)).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task RevokeCapability_OwnControllerSelfRevoke_RevokesAndReturnsTrue()
+    {
+        // A capability's own controller is authorized to revoke it (self-revocation).
+        var rootControllerDid = "did:key:z6MkSelfRoot";
+        var delegatedControllerDid = "did:key:z6MkSelfChild";
+        _didProvider.GenerateAndRegisterKeyPair(rootControllerDid);
+        _didProvider.GenerateAndRegisterKeyPair(delegatedControllerDid);
+
+        var root = await _capabilityService.CreateRootCapabilityAsync(
+            rootControllerDid, "https://example.com/resource", new[] { "read", "write" });
+        var delegated = await _capabilityService.DelegateCapabilityAsync(
+            root, delegatedControllerDid, new[] { "read" }, DateTime.UtcNow.AddDays(5));
+
+        var revoked = await _verificationService.RevokeCapabilityAsync(delegated, delegatedControllerDid);
+
+        revoked.Should().BeTrue();
+        (await _verificationService.IsCapabilityRevokedAsync(delegated.Id)).Should().BeTrue();
+    }
+
     #endregion
 
     #region DID Resolution Tests
