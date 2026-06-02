@@ -209,6 +209,17 @@ public class VerificationService : IVerificationService
                 return false;
             }
 
+            // A delegation signed by the controller of a now-revoked parent is not a valid basis
+            // for authority. VerifyCapabilityChainAsync checks revocation for every link, but the
+            // standalone VerifyCapabilityProofAsync path previously checked only the leaf — so a
+            // capability whose immediate parent had been revoked still passed (Issue #63). Check
+            // the resolved parent (embedded in proof.capabilityChain, or the chain-walk override)
+            // here so both paths honour ancestor revocation.
+            if (parentCapability != null && await IsCapabilityRevokedAsync(parentCapability.Id))
+            {
+                return false;
+            }
+
             if (requireParentAuthorization &&
                 (parentCapability == null || parentCapability.Controller is null || parentCapability.Controller.IsEmpty))
             {
