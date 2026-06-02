@@ -511,11 +511,10 @@ public class VerificationServiceTests
         };
         invocation.Proof = await _signingService.SignInvocationAsync(invocation, controllerDid);
 
-        // In-memory verify works because Proof.Capability is still a CLR string here.
-        (await _verificationService.VerifyInvocationAsync(invocation, rootCapability))
-            .Should().BeTrue();
-
-        // Round-trip through JSON exactly as a resource server would receive it.
+        // Round-trip through JSON exactly as a resource server would receive it. (We verify
+        // only the deserialized form — verifying the in-memory form first would consume the
+        // invocation's nonce, and replay protection is on by default; the in-memory path is
+        // already covered by VerifyInvocation_ValidInvocation_ShouldReturnTrue.)
         var json = JsonSerializer.Serialize(invocation, ZcapJsonOptions.Default);
         var received = JsonSerializer.Deserialize<Invocation>(json, ZcapJsonOptions.Default);
         received.Should().NotBeNull();
