@@ -170,6 +170,31 @@ public class ControllerSetTests
         set.ContainsVerificationMethod("did:example:alice#key-1").Should().BeTrue();
     }
 
+    [Fact]
+    public void ContainsVerificationMethod_MatchesKeyFragmentAgainstBareControllerDid()
+    {
+        // A revoker/invoker authenticates with a specific key fragment (did#key-1) while the
+        // capability's controller is the bare DID. The bare-DID split authorizes correctly —
+        // the relevant case for a did:web controller that lists keyed verification methods.
+        // (PR #81 review: IsRevokerAuthorizedAsync key-fragment edge case.)
+        var set = ControllerSet.FromSingle("did:web:issuer.example");
+
+        set.ContainsVerificationMethod("did:web:issuer.example#key-1").Should().BeTrue();
+    }
+
+    [Fact]
+    public void ContainsVerificationMethod_DoesNotResolveCrossDidController()
+    {
+        // Documents a known limitation: authorization is a string-level controller match, NOT a
+        // DID-document resolution. A key belonging to a DIFFERENT DID — even one the controller's
+        // DID document would authorize — is not matched. Cross-DID key authorization is future
+        // work (see the TODO in VerificationService.IsRevokerAuthorizedAsync). (PR #81 review.)
+        var set = ControllerSet.FromSingle("did:web:issuer.example");
+
+        set.ContainsVerificationMethod("did:key:z6MkSomeOtherKey#z6MkSomeOtherKey")
+            .Should().BeFalse();
+    }
+
     // ─── Implicit conversions + equality ───────────────────────────────
 
     [Fact]
