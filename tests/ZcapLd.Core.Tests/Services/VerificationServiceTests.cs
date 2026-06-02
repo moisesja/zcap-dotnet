@@ -163,7 +163,7 @@ public class VerificationServiceTests
             DateTime.UtcNow.AddDays(30));
 
         // Corrupt the proof purpose
-        delegatedCapability.Proof!.ProofPurpose = "capabilityInvocation"; // Wrong purpose
+        delegatedCapability.Proof!.Primary.ProofPurpose = "capabilityInvocation"; // Wrong purpose
 
         // Act
         var result = await _verificationService.VerifyCapabilityProofAsync(delegatedCapability);
@@ -192,7 +192,7 @@ public class VerificationServiceTests
             new[] { "read" },
             DateTime.UtcNow.AddDays(30));
 
-        delegatedCapability.Proof!.VerificationMethod = await _didProvider.GetVerificationMethodAsync(attackerDid);
+        delegatedCapability.Proof!.Primary.VerificationMethod = await _didProvider.GetVerificationMethodAsync(attackerDid);
 
         // Act
         var result = await _verificationService.VerifyCapabilityProofAsync(delegatedCapability);
@@ -219,7 +219,7 @@ public class VerificationServiceTests
             new[] { "read" },
             DateTime.UtcNow.AddDays(30));
 
-        delegatedCapability.Proof!.CapabilityChain[0] = "urn:zcap:root:tampered";
+        delegatedCapability.Proof!.Primary.CapabilityChain![0] = "urn:zcap:root:tampered";
 
         // Act
         var result = await _verificationService.VerifyCapabilityProofAsync(delegatedCapability);

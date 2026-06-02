@@ -124,7 +124,7 @@ public class NormativeUnitComplianceTests
             DateTime.UtcNow.AddDays(10));
 
         delegated.Proof.Should().NotBeNull();
-        delegated.Proof!.ProofPurpose.Should().Be("capabilityDelegation");
+        delegated.Proof!.Primary.ProofPurpose.Should().Be("capabilityDelegation");
     }
 
     [Fact(DisplayName = "MUST-07 capabilityChain MUST be array with root capability ID first")]
@@ -146,8 +146,8 @@ public class NormativeUnitComplianceTests
             DateTime.UtcNow.AddDays(10));
 
         delegated.Proof.Should().NotBeNull();
-        delegated.Proof!.CapabilityChain.Should().NotBeEmpty();
-        delegated.Proof.CapabilityChain[0].Should().Be(root.Id);
+        delegated.Proof!.Primary.CapabilityChain.Should().NotBeEmpty();
+        delegated.Proof.Primary.CapabilityChain![0].Should().Be(root.Id);
     }
 
     [Fact(DisplayName = "MUST-08 capabilityChain MUST embed immediate parent as last entry")]
@@ -175,7 +175,7 @@ public class NormativeUnitComplianceTests
             new[] { "read" },
             DateTime.UtcNow.AddDays(10));
 
-        var lastChainEntry = level2.Proof!.CapabilityChain[^1];
+        var lastChainEntry = level2.Proof!.Primary.CapabilityChain![^1];
 
         if (lastChainEntry is Capability embeddedParent)
         {
@@ -256,7 +256,7 @@ public class NormativeUnitComplianceTests
             new[] { "read" },
             DateTime.UtcNow.AddDays(10));
 
-        delegated.Proof!.ProofPurpose.Should().Be("capabilityDelegation");
+        delegated.Proof!.Primary.ProofPurpose.Should().Be("capabilityDelegation");
     }
 
     [Fact(DisplayName = "SHOULD-01 Root capability ID SHOULD use urn:zcap:root:<encoded-target> format")]

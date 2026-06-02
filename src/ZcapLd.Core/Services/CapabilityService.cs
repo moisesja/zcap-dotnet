@@ -230,8 +230,10 @@ public class CapabilityService : ICapabilityService
                     return Task.FromResult(false);
                 }
 
-                // MUST have proof
-                if (capability.Proof == null)
+                // MUST have proof, and at least one MUST be a capabilityDelegation proof
+                // (the proof set may also carry other DI proofs alongside it).
+                if (capability.Proof == null ||
+                    capability.Proof.FirstDelegationProof() == null)
                 {
                     return Task.FromResult(false);
                 }
@@ -332,17 +334,20 @@ public class CapabilityService : ICapabilityService
     {
         var chain = new List<object>();
 
-        // If parent is delegated (has a proof with chain), it's not the root
-        if (parentCapability.Proof?.CapabilityChain != null && parentCapability.Proof.CapabilityChain.Length > 0)
+        // A delegated parent may carry several proofs; its delegation chain lives on a
+        // capabilityDelegation proof. If the parent has one with a chain, it's not the root.
+        // (All capabilityDelegation proofs in a set are assumed to describe the same chain.)
+        var parentChainProof = parentCapability.Proof?.FirstDelegationProofWithChain();
+        if (parentChainProof?.CapabilityChain != null && parentChainProof.CapabilityChain.Length > 0)
         {
             // Parent is delegated
             // Its chain structure: [rootId, ...intermediateIds, grandparentObject]
 
             // Extract all string IDs from parent's chain (these are root + intermediates)
             var stringIds = new List<string>();
-            for (int i = 0; i < parentCapability.Proof.CapabilityChain.Length; i++)
+            for (int i = 0; i < parentChainProof.CapabilityChain.Length; i++)
             {
-                var element = parentCapability.Proof.CapabilityChain[i];
+                var element = parentChainProof.CapabilityChain[i];
                 if (element is string strId)
                 {
                     stringIds.Add(strId);

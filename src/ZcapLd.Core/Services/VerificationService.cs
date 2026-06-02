@@ -162,49 +162,78 @@ public class VerificationService : IVerificationService
             return false;
         }
 
-        if (capability.Proof.ProofPurpose != "capabilityDelegation")
+        // Per ZCAP-LD v0.3 a delegated zcap's proof may be an array; it is valid if AT LEAST
+        // ONE capabilityDelegation proof fully verifies (signature + parent authorization +
+        // chain). Try each delegation proof in turn — a single proof's failure (unsupported
+        // suite, unresolvable key, bad signature, unauthorized signer) must not reject the
+        // others, and non-delegation proofs in the set are simply ignored here.
+        foreach (var proof in capability.Proof.DelegationProofs())
         {
-            return false;
-        }
-
-        var parentCapability = parentCapabilityOverride;
-        if (parentCapability == null &&
-            !TryExtractEmbeddedParentFromProofChain(capability.Proof.CapabilityChain, out parentCapability))
-        {
-            if (requireParentAuthorization)
+            if (await VerifySingleDelegationProofAsync(
+                    capability, proof, parentCapabilityOverride, requireParentAuthorization))
             {
-                // Without embedded parent context, standalone authorization cannot be proven.
-                return false;
+                return true;
             }
         }
 
-        if (parentCapability != null &&
-            !IsControllerAuthorized(capability.Proof.VerificationMethod, parentCapability))
+        return false;
+    }
+
+    private async Task<bool> VerifySingleDelegationProofAsync(
+        Capability capability,
+        Proof proof,
+        Capability? parentCapabilityOverride,
+        bool requireParentAuthorization)
+    {
+        try
         {
+            var parentCapability = parentCapabilityOverride;
+            if (parentCapability == null &&
+                !TryExtractEmbeddedParentFromProofChain(proof.CapabilityChain, out parentCapability))
+            {
+                if (requireParentAuthorization)
+                {
+                    // Without embedded parent context, standalone authorization cannot be proven.
+                    return false;
+                }
+            }
+
+            if (parentCapability != null &&
+                !IsControllerAuthorized(proof.VerificationMethod, parentCapability))
+            {
+                return false;
+            }
+
+            if (requireParentAuthorization &&
+                (parentCapability == null || parentCapability.Controller is null || parentCapability.Controller.IsEmpty))
+            {
+                return false;
+            }
+
+            // Get the public key and look up the crypto suite for this proof type
+            var resolvedKey = await _didResolver.ResolvePublicKeyAsync(proof.VerificationMethod);
+            var suite = _suiteProvider.GetByProofType(proof.Type);
+            if (suite == null)
+            {
+                return false;
+            }
+
+            var canonicalizer = ResolveCanonicalizer(suite);
+            var capabilityWithoutProof = ProofSigningPayloadBuilder.CloneCapabilityWithoutProof(capability);
+            var canonicalBytes = ProofSigningPayloadBuilder.CanonicalizeCapabilityPayload(
+                capabilityWithoutProof,
+                proof,
+                canonicalizer);
+            var signatureBytes = MultibaseCodec.Decode(proof.ProofValue);
+
+            return suite.Verify(canonicalBytes, signatureBytes, resolvedKey.PublicKeyBytes);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // A single malformed/unsupported proof must not abort evaluation of the rest.
+            // Cancellation is intentionally NOT swallowed so callers can still observe it.
             return false;
         }
-
-        if (requireParentAuthorization &&
-            (parentCapability == null || parentCapability.Controller is null || parentCapability.Controller.IsEmpty))
-        {
-            return false;
-        }
-
-        // Get the public key and look up the crypto suite for this proof type
-        var resolvedKey = await _didResolver.ResolvePublicKeyAsync(capability.Proof.VerificationMethod);
-        var suite = _suiteProvider.GetByProofType(capability.Proof.Type)
-            ?? throw new CapabilityValidationException(
-                $"Unsupported proof type: {capability.Proof.Type}");
-
-        var canonicalizer = ResolveCanonicalizer(suite);
-        var capabilityWithoutProof = ProofSigningPayloadBuilder.CloneCapabilityWithoutProof(capability);
-        var canonicalBytes = ProofSigningPayloadBuilder.CanonicalizeCapabilityPayload(
-            capabilityWithoutProof,
-            capability.Proof,
-            canonicalizer);
-        var signatureBytes = MultibaseCodec.Decode(capability.Proof.ProofValue);
-
-        return suite.Verify(canonicalBytes, signatureBytes, resolvedKey.PublicKeyBytes);
     }
 
     /// <summary>
@@ -431,13 +460,20 @@ public class VerificationService : IVerificationService
                 break;
             }
 
-            if (current.Proof?.CapabilityChain == null || current.Proof.CapabilityChain.Length == 0)
+            // A delegated zcap may carry several proofs; the delegation chain lives on a
+            // capabilityDelegation proof. Use the first delegation proof that carries one.
+            // Assumption: every capabilityDelegation proof in a set describes the SAME chain
+            // (they are independent signatures over one delegation), so the first one with a
+            // chain is representative — VerifyDelegationProofAsync independently accepts any
+            // delegation proof whose signature and parent authorization hold.
+            var chainProof = current.Proof?.FirstDelegationProofWithChain();
+            if (chainProof?.CapabilityChain == null || chainProof.CapabilityChain.Length == 0)
             {
                 throw new CapabilityValidationException(
                     "Delegated capability missing capabilityChain in proof");
             }
 
-            var chainRootId = TryExtractStringValue(current.Proof.CapabilityChain[0]);
+            var chainRootId = TryExtractStringValue(chainProof.CapabilityChain[0]);
             if (string.IsNullOrWhiteSpace(chainRootId))
             {
                 throw new CapabilityValidationException(
@@ -454,13 +490,13 @@ public class VerificationService : IVerificationService
                     $"Inconsistent root capability IDs in capabilityChain. Expected '{expectedRootId}', got '{chainRootId}'.");
             }
 
-            if (current.Proof.CapabilityChain.Length < 2)
+            if (chainProof.CapabilityChain.Length < 2)
             {
                 throw new CapabilityValidationException(
                     "capabilityChain MUST include root capability ID and embedded immediate parent capability object.");
             }
 
-            if (!TryDeserializeCapability(current.Proof.CapabilityChain[^1], out var parentCapability) || parentCapability == null)
+            if (!TryDeserializeCapability(chainProof.CapabilityChain[^1], out var parentCapability) || parentCapability == null)
             {
                 throw new CapabilityValidationException(
                     "capabilityChain last entry MUST embed the immediate parent capability object");

@@ -24,24 +24,36 @@ public class SignatureVerifier
         if (capability.Proof == null)
             return false;
 
-        try
-        {
-            var capabilityForVerification = ProofSigningPayloadBuilder.CloneCapabilityWithoutProof(capability);
-            var canonicalizedData = ProofSigningPayloadBuilder.CanonicalizeCapabilityPayload(
-                capabilityForVerification,
-                capability.Proof,
-                canonicalizer);
+        // A delegated zcap's proof may be an array. Mirror VerificationService's any-verifies
+        // semantics: succeed if ANY capabilityDelegation proof validates against the supplied
+        // key. Fall back to all proofs when none declare the delegation purpose (non-standard
+        // inputs). A single malformed proof must not abort evaluation of the rest.
+        var candidates = capability.Proof.DelegationProofs().ToList();
+        if (candidates.Count == 0)
+            candidates = capability.Proof.Values.ToList();
 
-            // Decode the signature
-            var signature = MultibaseCodec.Decode(capability.Proof.ProofValue);
-
-            // Verify the signature
-            return suite.Verify(canonicalizedData, signature, publicKey);
-        }
-        catch
+        foreach (var proof in candidates)
         {
-            return false;
+            try
+            {
+                var capabilityForVerification = ProofSigningPayloadBuilder.CloneCapabilityWithoutProof(capability);
+                var canonicalizedData = ProofSigningPayloadBuilder.CanonicalizeCapabilityPayload(
+                    capabilityForVerification,
+                    proof,
+                    canonicalizer);
+
+                var signature = MultibaseCodec.Decode(proof.ProofValue);
+
+                if (suite.Verify(canonicalizedData, signature, publicKey))
+                    return true;
+            }
+            catch
+            {
+                // Try the next candidate proof.
+            }
         }
+
+        return false;
     }
 
     /// <summary>

@@ -227,6 +227,99 @@ public class CrossLanguageJcsInteropTests
         canonical.Should().NotContain("\"controller\":[");
     }
 
+    [Fact(DisplayName = "Issue #48 — multi-proof capability: chosen delegation proof sign-time bytes match wire bytes")]
+    public void CapabilityWithProofArray_SignTimeBytesForDelegationProof_MatchWireBytes()
+    {
+        // ZCAP-LD allows a delegated zcap's `proof` to be an array. Per W3C Data Integrity,
+        // each proof is verified over the document with ALL proofs removed plus that one
+        // proof's options — so the presence of other proofs in the array must NOT change the
+        // canonical bytes for the delegation proof being verified. A peer re-canonicalizing
+        // the wire body (dropping the whole proof array, re-adding the one delegation proof)
+        // must arrive at the same bytes we sign/verify (#48).
+        var delegationProof = new Proof
+        {
+            Type = "Ed25519Signature2020",
+            Created = "2026-04-29T12:00:00.000000Z",
+            ProofPurpose = "capabilityDelegation",
+            VerificationMethod = "did:key:z6MkfixedSigner#z6MkfixedSigner",
+            CapabilityChain = new object[] { "urn:zcap:root:fixed" },
+            ProofValue = "this-must-be-excluded"
+        };
+        var otherProof = new Proof
+        {
+            Type = "Ed25519Signature2020",
+            Created = "2026-04-29T12:00:00.000000Z",
+            ProofPurpose = "assertionMethod",
+            VerificationMethod = "did:key:z6MkOther#z6MkOther",
+            ProofValue = "z-other"
+        };
+        var capability = new Capability
+        {
+            Id = "urn:uuid:fixed-delegated-multiproof",
+            Context = "https://w3id.org/zcap/v1",
+            Controller = "did:key:z6MkfixedController",
+            InvocationTarget = "https://example.com/api/resource",
+            AllowedAction = new[] { "read" },
+            Expires = "2027-01-01T00:00:00.000000Z",
+            ParentCapability = "urn:zcap:root:fixed",
+            Proof = ProofSet.FromValues(new[] { otherProof, delegationProof })
+        };
+
+        // The full wire body serializes `proof` as a JSON array.
+        var fullJson = JsonSerializer.Serialize(capability, ZcapJsonOptions.Default);
+        fullJson.Should().Contain("\"proof\":[", "a multi-proof capability emits the array wire shape (#48)");
+
+        // Sign-time payload for the delegation proof: capability with ALL proofs removed + that proof.
+        var signTimeBytes = ProofSigningPayloadBuilder.CanonicalizeCapabilityPayload(
+            ProofSigningPayloadBuilder.CloneCapabilityWithoutProof(capability), delegationProof);
+
+        // Wire-time payload a peer computes: drop the whole proof array, re-add the delegation proof options.
+        var canonicalizer = new JcsDocumentCanonicalizer();
+        var wireDoc = new Dictionary<string, object>(StringComparer.Ordinal);
+        var capElement = JsonSerializer.SerializeToElement(capability, ZcapJsonOptions.Default);
+        foreach (var prop in capElement.EnumerateObject())
+            if (prop.Name != "proof") wireDoc[prop.Name] = prop.Value;
+        var proofElement = JsonSerializer.SerializeToElement(delegationProof, ZcapJsonOptions.Default);
+        var proofDict = new Dictionary<string, object>(StringComparer.Ordinal);
+        foreach (var prop in proofElement.EnumerateObject())
+            if (prop.Name != "proofValue") proofDict[prop.Name] = prop.Value;
+        wireDoc["proof"] = proofDict;
+        var wireBytes = canonicalizer.Canonicalize(wireDoc);
+
+        wireBytes.Should().Equal(signTimeBytes,
+            "sign-time bytes for the chosen delegation proof must equal what a peer JCS-canonicalizes " +
+            "over the wire body (all proofs dropped, the delegation proof re-added) — #48.");
+    }
+
+    [Fact(DisplayName = "Issue #48 — single proof still emits a bare object (no array wrap)")]
+    public void CapabilityWithSingleProof_StillEmitsBareObject()
+    {
+        // Regression guard: introducing ProofSet must NOT wrap a single proof into a
+        // one-element array — that would change every existing delegated zcap's wire shape.
+        var capability = new Capability
+        {
+            Id = "urn:uuid:fixed-delegated-single",
+            Context = "https://w3id.org/zcap/v1",
+            Controller = "did:key:z6MkfixedController",
+            InvocationTarget = "https://example.com/api/resource",
+            ParentCapability = "urn:zcap:root:fixed",
+            Proof = new Proof
+            {
+                Type = "Ed25519Signature2020",
+                Created = "2026-04-29T12:00:00.000000Z",
+                ProofPurpose = "capabilityDelegation",
+                VerificationMethod = "did:key:z6MkfixedSigner#z6MkfixedSigner",
+                CapabilityChain = new object[] { "urn:zcap:root:fixed" },
+                ProofValue = "z-single"
+            }
+        };
+
+        var json = JsonSerializer.Serialize(capability, ZcapJsonOptions.Default);
+
+        json.Should().Contain("\"proof\":{");
+        json.Should().NotContain("\"proof\":[");
+    }
+
     [Fact(DisplayName = "Issue #37 — root capability wire form omits absent optional fields")]
     public void RootCapabilityWireForm_OmitsAbsentOptionalFields()
     {
