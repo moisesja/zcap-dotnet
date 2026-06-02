@@ -247,6 +247,16 @@ public class VerificationService : IVerificationService
                 return false;
             }
 
+            // Bind the suite (chosen from the proof's type) to the resolved key's type. The proof
+            // type is part of the signed payload, so tampering breaks the signature, and key
+            // importers reject cross-curve bytes — but this explicit guard self-documents the
+            // invariant and future-proofs against custom resolvers/suites that might erode it
+            // (Issue #68).
+            if (!string.Equals(suite.KeyType, resolvedKey.KeyType, StringComparison.Ordinal))
+            {
+                return false;
+            }
+
             var canonicalizer = ResolveCanonicalizer(suite);
             var capabilityWithoutProof = ProofSigningPayloadBuilder.CloneCapabilityWithoutProof(capability);
             var canonicalBytes = ProofSigningPayloadBuilder.CanonicalizeCapabilityPayload(
@@ -330,6 +340,10 @@ public class VerificationService : IVerificationService
             var suite = _suiteProvider.GetByProofType(invocation.Proof.Type)
                 ?? throw new CapabilityValidationException(
                     $"Unsupported proof type: {invocation.Proof.Type}");
+
+            // Bind the suite (chosen from the proof's type) to the resolved key's type (Issue #68).
+            if (!string.Equals(suite.KeyType, resolvedKey.KeyType, StringComparison.Ordinal))
+                return false;
 
             var canonicalizer = ResolveCanonicalizer(suite);
             var invocationWithoutProof = ProofSigningPayloadBuilder.CloneInvocationWithoutProof(invocation);

@@ -71,6 +71,40 @@ public class VerificationServiceTests
     }
 
     [Fact]
+    public async Task VerifyInvocation_WhenResolvedKeyTypeMismatchesSuite_ReturnsFalse()
+    {
+        // Issue #68: the suite is chosen from proof.Type; the resolved key's type must match it.
+        // Here the key bytes are correct (signature would verify), but a resolver reports a
+        // mismatched KeyType — the explicit binding guard must reject it before/independently of
+        // the signature check.
+        var controllerDid = "did:key:z6MkKeyTypeBinding";
+        _didProvider.GenerateAndRegisterKeyPair(controllerDid);
+
+        var root = await _capabilityService.CreateRootCapabilityAsync(
+            controllerDid, "https://example.com/resource", new[] { "read" });
+
+        var invocation = new Invocation
+        {
+            Capability = root.Id,
+            CapabilityAction = "read",
+            InvocationTarget = "https://example.com/resource"
+        };
+        invocation.Proof = await _signingService.SignInvocationAsync(invocation, controllerDid);
+
+        // Verifier whose resolver returns the correct key bytes but a mismatched key type.
+        var mismatchVerifier = new VerificationService(
+            new WrongKeyTypeResolver(_didProvider, "EcdsaSecp256r1VerificationKey2019"),
+            _caveatProcessor);
+
+        (await mismatchVerifier.VerifyInvocationAsync(invocation, root)).Should().BeFalse();
+
+        // Sanity: the same invocation verifies under the honest resolver (so the only failing
+        // factor above is the key-type/suite mismatch).
+        var honestVerifier = new VerificationService(_didProvider, _caveatProcessor);
+        (await honestVerifier.VerifyInvocationAsync(invocation, root)).Should().BeTrue();
+    }
+
+    [Fact]
     public async Task VerifyCapabilityChain_WhenItFailsClosed_LogsTheCause()
     {
         // Issue #64: failing closed is correct, but the cause must not be discarded silently.
@@ -1218,6 +1252,30 @@ internal class ContentTypeCaveat : Caveat
             && value is string contentType
             && string.Equals(contentType, RequiredContentType, StringComparison.OrdinalIgnoreCase);
     }
+}
+
+/// <summary>
+/// Wraps an inner resolver but overrides the resolved key's type with a deliberately wrong value
+/// (Issue #68 test support) — the key bytes stay correct so only the key-type/suite binding differs.
+/// </summary>
+internal sealed class WrongKeyTypeResolver : IDidResolver
+{
+    private readonly IDidResolver _inner;
+    private readonly string _wrongKeyType;
+
+    public WrongKeyTypeResolver(IDidResolver inner, string wrongKeyType)
+    {
+        _inner = inner;
+        _wrongKeyType = wrongKeyType;
+    }
+
+    public async Task<ResolvedKey> ResolvePublicKeyAsync(string didOrVerificationMethod)
+    {
+        var key = await _inner.ResolvePublicKeyAsync(didOrVerificationMethod);
+        return new ResolvedKey(key.PublicKeyBytes, _wrongKeyType);
+    }
+
+    public Task<string> GetVerificationMethodAsync(string did) => _inner.GetVerificationMethodAsync(did);
 }
 
 /// <summary>Minimal in-memory <see cref="ILogger{T}"/> that records emitted entries (Issue #64 test support).</summary>
