@@ -335,13 +335,21 @@ public class NormativeUnitComplianceTests
         var parentDid = fixture.RegisterControllerDid();
         var childDid = fixture.RegisterControllerDid();
 
+        // Pass no allowedAction: root zcaps MUST NOT carry the field (the root grants
+        // unrestricted authority over its invocationTarget). Passing null makes the intent
+        // explicit so a reader doesn't mistake an allow-list for an attenuation boundary.
         var root = await fixture.CapabilityService.CreateRootCapabilityAsync(
             parentDid,
             "https://example.com/resources",
-            new[] { "read", "write" });
+            allowedActions: null);
 
-        // The root carries no allowedAction (unrestricted), so delegating a custom "admin"
-        // action is within the parent's authority and must produce a valid delegated zcap.
+        // The root is unrestricted (no allowedAction), so delegating a custom "admin" action is
+        // within the parent's authority and must produce a valid delegated zcap. Assert the root
+        // really is unrestricted — otherwise attenuation, not the application-vocabulary rule,
+        // would be what lets "admin" through, and this test would be checking the wrong thing.
+        root.AllowedAction.Should().BeNullOrEmpty(
+            "root zcaps grant unrestricted authority and MUST NOT carry an allowedAction allow-list");
+
         var delegated = await fixture.CapabilityService.DelegateCapabilityAsync(
             root,
             childDid,

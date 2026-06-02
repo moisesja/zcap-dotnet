@@ -256,33 +256,32 @@ public class EndToEndTests
             DateTime.UtcNow.AddDays(5),
             new Caveat[] { usageCaveat });
 
-        // Act - Invoke within usage limit
-        var invocation = new Invocation
+        // Act - each use is a distinct invocation with its own id/nonce (the realistic flow);
+        // the usage-count caveat is what gates them, not replay protection (on by default).
+        async Task<bool> InvokeOnceAsync()
         {
-            Capability = delegatedCapability.Id,
-            CapabilityAction = "read",
-            InvocationTarget = "https://api.example.com/documents/doc1"
-        };
+            var invocation = new Invocation
+            {
+                Capability = delegatedCapability.Id,
+                CapabilityAction = "read",
+                InvocationTarget = "https://api.example.com/documents/doc1"
+            };
+            invocation.Proof = await _signingService.SignInvocationAsync(invocation, delegatedControllerDid);
+            return await _verificationService.VerifyInvocationAsync(invocation, delegatedCapability);
+        }
 
-        invocation.Proof = await _signingService.SignInvocationAsync(invocation, delegatedControllerDid);
+        // Assert - within the usage limit, each fresh invocation succeeds
+        (await InvokeOnceAsync()).Should().BeTrue();
 
-        // Assert - Should succeed
-        var isValid = await _verificationService.VerifyInvocationAsync(invocation, delegatedCapability);
-        isValid.Should().BeTrue();
-
-        // Simulate usage increments
         usageCaveat.CurrentUses = 1;
-        isValid = await _verificationService.VerifyInvocationAsync(invocation, delegatedCapability);
-        isValid.Should().BeTrue();
+        (await InvokeOnceAsync()).Should().BeTrue();
 
         usageCaveat.CurrentUses = 2;
-        isValid = await _verificationService.VerifyInvocationAsync(invocation, delegatedCapability);
-        isValid.Should().BeTrue();
+        (await InvokeOnceAsync()).Should().BeTrue();
 
         // At limit - should fail
         usageCaveat.CurrentUses = 3;
-        isValid = await _verificationService.VerifyInvocationAsync(invocation, delegatedCapability);
-        isValid.Should().BeFalse();
+        (await InvokeOnceAsync()).Should().BeFalse();
     }
 
     [Fact]
