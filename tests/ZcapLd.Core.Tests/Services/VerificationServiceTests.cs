@@ -70,6 +70,37 @@ public class VerificationServiceTests
     }
 
     [Fact]
+    public async Task VerifyCapabilityProof_WithRevokedImmediateParent_ShouldReturnFalse()
+    {
+        // Issue #63: VerifyCapabilityProofAsync previously checked only the leaf's revocation,
+        // ignoring the immediate parent embedded in proof.capabilityChain. A capability whose
+        // ancestor has been revoked must not pass the single-proof check either.
+        var rootDid = "did:key:z6MkRevParentRoot";
+        var midDid = "did:key:z6MkRevParentMid";
+        var leafDid = "did:key:z6MkRevParentLeaf";
+        _didProvider.GenerateAndRegisterKeyPair(rootDid);
+        _didProvider.GenerateAndRegisterKeyPair(midDid);
+        _didProvider.GenerateAndRegisterKeyPair(leafDid);
+
+        var root = await _capabilityService.CreateRootCapabilityAsync(
+            rootDid, "https://example.com/resource", new[] { "read", "write" });
+        var mid = await _capabilityService.DelegateCapabilityAsync(
+            root, midDid, new[] { "read" }, DateTime.UtcNow.AddDays(20));
+        var leaf = await _capabilityService.DelegateCapabilityAsync(
+            mid, leafDid, new[] { "read" }, DateTime.UtcNow.AddDays(10));
+
+        // Sanity: before revocation the leaf's proof verifies.
+        (await _verificationService.VerifyCapabilityProofAsync(leaf)).Should().BeTrue();
+
+        // Revoke the immediate parent (mid).
+        await _verificationService.RevokeCapabilityAsync(mid.Id, rootDid);
+
+        // The single-proof check must now also reject the leaf, matching VerifyCapabilityChainAsync.
+        (await _verificationService.VerifyCapabilityProofAsync(leaf)).Should().BeFalse();
+        (await _verificationService.VerifyCapabilityChainAsync(leaf)).Should().BeFalse();
+    }
+
+    [Fact]
     public async Task VerifyCapabilityProof_AfterJsonRoundTrip_ShouldReturnTrue()
     {
         // Arrange — simulates HTTP POST: serialize capability → deserialize on server
