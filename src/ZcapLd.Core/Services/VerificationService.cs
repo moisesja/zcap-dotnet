@@ -1,4 +1,6 @@
 using System.Text.Json;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using ZcapLd.Core.Cryptography;
 using ZcapLd.Core.Exceptions;
 using ZcapLd.Core.Models;
@@ -19,6 +21,7 @@ public class VerificationService : IVerificationService
     private readonly INonceStore _nonceStore;
     private readonly IDocumentCanonicalizerProvider _canonicalizerProvider;
     private readonly TimeSpan _nonceWindow;
+    private readonly ILogger _logger;
     private const int MaxChainLength = 10; // Per spec: SHOULD limit to 10
 
     /// <summary>
@@ -92,7 +95,10 @@ public class VerificationService : IVerificationService
     }
 
     /// <summary>
-    /// Full constructor with all dependencies including canonicalizer provider.
+    /// Full constructor with all dependencies including canonicalizer provider. The optional
+    /// <paramref name="logger"/> receives a diagnostic whenever verification fails closed on an
+    /// unexpected exception, so operators can tell a misconfiguration/transient fault apart from
+    /// an invalid capability (Issue #64). Defaults to <see cref="NullLogger"/> (no output).
     /// </summary>
     public VerificationService(
         IDidResolver didResolver,
@@ -101,7 +107,8 @@ public class VerificationService : IVerificationService
         IRevocationService revocationService,
         INonceStore nonceStore,
         IDocumentCanonicalizerProvider canonicalizerProvider,
-        TimeSpan? nonceWindow = null)
+        TimeSpan? nonceWindow = null,
+        ILogger<VerificationService>? logger = null)
     {
         _didResolver = didResolver ?? throw new ArgumentNullException(nameof(didResolver));
         _caveatProcessor = caveatProcessor ?? throw new ArgumentNullException(nameof(caveatProcessor));
@@ -110,6 +117,7 @@ public class VerificationService : IVerificationService
         _nonceStore = nonceStore ?? throw new ArgumentNullException(nameof(nonceStore));
         _canonicalizerProvider = canonicalizerProvider ?? throw new ArgumentNullException(nameof(canonicalizerProvider));
         _nonceWindow = nonceWindow ?? DefaultNonceWindow;
+        _logger = logger ?? NullLogger<VerificationService>.Instance;
     }
 
     internal static ICryptoSuiteProvider CreateDefaultSuiteProvider()
@@ -148,8 +156,13 @@ public class VerificationService : IVerificationService
                 parentCapabilityOverride: null,
                 requireParentAuthorization: true);
         }
-        catch
+        catch (Exception ex)
         {
+            // Fail closed, but record the cause: a config/transient fault (missing canonicalizer,
+            // unsupported proof type, DID-resolution error) is otherwise indistinguishable from an
+            // invalid capability (Issue #64).
+            _logger.LogWarning(ex,
+                "VerifyCapabilityProofAsync failed closed for capability {CapabilityId}", capability.Id);
             return false;
         }
     }
@@ -363,8 +376,12 @@ public class VerificationService : IVerificationService
 
             return true;
         }
-        catch
+        catch (Exception ex)
         {
+            // Fail closed, but record the cause so a misconfiguration/transient fault is
+            // distinguishable from an invalid invocation (Issue #64).
+            _logger.LogWarning(ex,
+                "VerifyInvocationAsync failed closed for invocation {InvocationId}", invocation.Id);
             return false;
         }
     }
@@ -432,9 +449,12 @@ public class VerificationService : IVerificationService
 
             return true;
         }
-        catch
+        catch (Exception ex)
         {
-            // For other unexpected exceptions, return false
+            // Fail closed, but record the cause so a misconfiguration/transient fault is
+            // distinguishable from an invalid chain (Issue #64).
+            _logger.LogWarning(ex,
+                "VerifyCapabilityChainAsync failed closed for capability {CapabilityId}", capability.Id);
             return false;
         }
     }
