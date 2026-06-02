@@ -42,7 +42,7 @@ dotnet test tests/ZcapLd.Core.Tests/ZcapLd.Core.Tests.csproj --filter FullyQuali
 | SHOULD-01 | `NormativeUnitComplianceTests.Should01_RootId_ShouldUseRecommendedFormat` |
 | SHOULD-02 | `NormativeUnitComplianceTests.Should02_DelegatedId_ShouldUseUrnUuidFormat` |
 | SHOULD-03 | `NormativeIntegrationComplianceTests.Should03_Verifier_ShouldUseChainLimitOfTen` |
-| SHOULD-04 | `NormativeIntegrationComplianceTests.Should04_Delegation_DoesNotThrowOnLongExpirationAtCreateTime` |
+| SHOULD-04 | `NormativeIntegrationComplianceTests.Should04_Delegation_DoesNotThrowOnLongExpirationAtCreateTime` (create-time behaviour only; the spec's verifier-side 3-month expiration ceiling is tracked in #73 and not yet enforced) |
 | SHOULD-05 | `NormativeUnitComplianceTests.Should05_CapabilityAction_AllowsApplicationDefinedActions` |
 | SHOULD-06 | `NormativeUnitComplianceTests.Should06_Invocation_ShouldExposeIdField` |
 | SHOULD-07 | `NormativeUnitComplianceTests.Should07_RevocationEndpoint_ShouldBeSupported` |
