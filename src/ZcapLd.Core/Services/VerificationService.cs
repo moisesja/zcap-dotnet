@@ -693,8 +693,12 @@ public class VerificationService : IVerificationService
         if (invocationTarget == capabilityTarget)
             return true;
 
-        // Check if invocationTarget is a valid prefix extension
-        if (invocationTarget.StartsWith(capabilityTarget))
+        // Check if invocationTarget is a valid prefix extension. Use ordinal comparison to stay
+        // consistent with the ordinal Substring index math below (Issue #74): the culture-sensitive
+        // StartsWith overload can return true for strings whose ordinal lengths differ (ignorable
+        // Unicode code points), after which Substring(capabilityTarget.Length) is wrong or throws
+        // ArgumentOutOfRangeException.
+        if (invocationTarget.StartsWith(capabilityTarget, StringComparison.Ordinal))
         {
             var suffix = invocationTarget.Substring(capabilityTarget.Length);
 

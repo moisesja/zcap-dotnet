@@ -786,6 +786,32 @@ public class VerificationServiceTests
     }
 
     [Fact]
+    public async Task VerifyInvocation_TargetWithIgnorableUnicodeChar_IsNotTreatedAsPrefix()
+    {
+        // Issue #74: the prefix test uses ordinal comparison (consistent with the ordinal Substring
+        // that follows). A target differing from the capability target by a Unicode-ignorable code
+        // point (soft hyphen here) is NOT an ordinal prefix, so it must be rejected — and ordinal
+        // comparison avoids the culture-sensitive path's ArgumentOutOfRangeException corner case.
+        var controllerDid = "did:key:z6MkOrdinalTarget";
+        _didProvider.GenerateAndRegisterKeyPair(controllerDid);
+
+        var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
+            controllerDid, "https://example.com/resource", new[] { "read" });
+
+        // Soft hyphen (U+00AD) injected after "res" — built via escape so it's explicit in source.
+        var targetWithIgnorableChar = "https://example.com/res­ource/subpath";
+        var invocation = new Invocation
+        {
+            Capability = rootCapability.Id,
+            CapabilityAction = "read",
+            InvocationTarget = targetWithIgnorableChar
+        };
+        invocation.Proof = await _signingService.SignInvocationAsync(invocation, controllerDid);
+
+        (await _verificationService.VerifyInvocationAsync(invocation, rootCapability)).Should().BeFalse();
+    }
+
+    [Fact]
     public async Task VerifyInvocation_WithoutProof_ShouldReturnFalse()
     {
         // Arrange
