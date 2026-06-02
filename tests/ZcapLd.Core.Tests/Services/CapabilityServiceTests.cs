@@ -1,5 +1,7 @@
+using System.Text.Json;
 using FluentAssertions;
 using Xunit;
+using ZcapLd.Core.Cryptography;
 using ZcapLd.Core.Models;
 using ZcapLd.Core.Services;
 using ZcapLd.Core.Tests.Helpers;
@@ -358,6 +360,105 @@ public class CapabilityServiceTests
 
         // Assert
         isValid.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ValidateCapability_RootWithAllowedAction_ShouldReturnFalse()
+    {
+        // Arrange
+        var capability = await _capabilityService.CreateRootCapabilityAsync(
+            "did:key:z6MkExample",
+            "https://example.com/foo",
+            new[] { "read" });
+
+        // Corrupt the root by adding allowedAction. "read" is a valid action, so the
+        // SHOULD-05 action check passes — the forbidden-root-field check is what rejects it.
+        // (W3C ZCAP-LD: "A root zcap MUST NOT have any other fields.")
+        capability.AllowedAction = new[] { "read" };
+
+        // Act
+        var isValid = await _capabilityService.ValidateCapabilityAsync(capability);
+
+        // Assert
+        isValid.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ValidateCapability_RootWithCaveat_ShouldReturnFalse()
+    {
+        // Arrange
+        var capability = await _capabilityService.CreateRootCapabilityAsync(
+            "did:key:z6MkExample",
+            "https://example.com/foo",
+            new[] { "read" });
+
+        // Corrupt the root by adding a caveat (root zcaps MUST NOT carry caveats).
+        capability.Caveat = new Caveat[]
+        {
+            new ExpirationCaveat { Expires = DateTime.UtcNow.AddDays(1) }
+        };
+
+        // Act
+        var isValid = await _capabilityService.ValidateCapabilityAsync(capability);
+
+        // Assert
+        isValid.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ValidateCapability_RootWithAdditionalProperty_ShouldReturnFalse()
+    {
+        // Arrange: an externally-supplied root whose unknown field lands in AdditionalProperties
+        // via [JsonExtensionData]. This is the cross-language wire-body case the fix targets.
+        const string rootJsonWithUnknownField = """
+        {
+          "@context": "https://w3id.org/zcap/v1",
+          "id": "urn:zcap:root:https%3A%2F%2Fexample.com%2Ffoo",
+          "controller": "did:key:z6MkExample",
+          "invocationTarget": "https://example.com/foo",
+          "purpose": "not allowed on root"
+        }
+        """;
+
+        var capability = JsonSerializer.Deserialize<Capability>(
+            rootJsonWithUnknownField,
+            ZcapJsonOptions.Default)!;
+
+        // Guard: prove the unknown field was captured rather than dropped.
+        capability.AdditionalProperties.Should().ContainKey("purpose");
+
+        // Act
+        var isValid = await _capabilityService.ValidateCapabilityAsync(capability);
+
+        // Assert
+        isValid.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ValidateCapability_RootDeserializedFromCleanJson_ShouldReturnTrue()
+    {
+        // Arrange: a clean, wire-sourced root with exactly the four permitted fields.
+        const string cleanRootJson = """
+        {
+          "@context": "https://w3id.org/zcap/v1",
+          "id": "urn:zcap:root:https%3A%2F%2Fexample.com%2Ffoo",
+          "controller": "did:key:z6MkExample",
+          "invocationTarget": "https://example.com/foo"
+        }
+        """;
+
+        var capability = JsonSerializer.Deserialize<Capability>(
+            cleanRootJson,
+            ZcapJsonOptions.Default)!;
+
+        // Guard: no stray fields were captured.
+        capability.AdditionalProperties.Should().BeNullOrEmpty();
+
+        // Act
+        var isValid = await _capabilityService.ValidateCapabilityAsync(capability);
+
+        // Assert
+        isValid.Should().BeTrue();
     }
 
     [Fact]
