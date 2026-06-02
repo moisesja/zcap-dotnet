@@ -1,5 +1,6 @@
 using FluentAssertions;
 using Xunit;
+using ZcapLd.Core.Cryptography;
 using ZcapLd.Core.Models;
 using ZcapLd.Core.Services;
 using ZcapLd.Core.Tests.Helpers;
@@ -52,6 +53,59 @@ public class VerificationServiceReplayTests
 
         invocation.Proof = await _signingService.SignInvocationAsync(invocation, leafDid);
         return (invocation, delegated);
+    }
+
+    /// <summary>
+    /// Builds an unsigned invocation plus its capability and the leaf signer DID, for freshness
+    /// tests that re-sign over a controlled <c>proof.created</c> via <see cref="SignInvocationWithCreatedAsync"/>.
+    /// </summary>
+    private async Task<(Invocation invocation, Capability capability, string leafDid)> CreateSignedInvocationParts()
+    {
+        var rootDid = _didProvider.GenerateDidKey();
+        var leafDid = _didProvider.GenerateDidKey();
+
+        var root = await _capabilityService.CreateRootCapabilityAsync(
+            rootDid, "https://example.com/resource", new[] { "read" });
+        var delegated = await _capabilityService.DelegateCapabilityAsync(
+            root, leafDid, new[] { "read" }, DateTime.UtcNow.AddDays(7));
+
+        var invocation = new Invocation
+        {
+            Capability = delegated.Id,
+            CapabilityAction = "read",
+            InvocationTarget = "https://example.com/resource"
+        };
+        return (invocation, delegated, leafDid);
+    }
+
+    /// <summary>
+    /// Replicates <c>SigningService.SignInvocationAsync</c> but signs over a caller-controlled
+    /// <c>created</c> timestamp, producing a cryptographically valid proof whose freshness can be
+    /// exercised (Issue #71 test support).
+    /// </summary>
+    private async Task SignInvocationWithCreatedAsync(Invocation invocation, string signerDid, DateTime createdUtc)
+    {
+        var suite = CryptoSuite.Ed25519();
+        var canonicalizer = new JcsDocumentCanonicalizer();
+        var withoutProof = ProofSigningPayloadBuilder.CloneInvocationWithoutProof(invocation);
+        var vm = await _didProvider.GetVerificationMethodAsync(signerDid);
+
+        var proof = new Proof
+        {
+            Type = suite.ProofType,
+            Created = ZcapTimestamps.Format(createdUtc),
+            ProofPurpose = "capabilityInvocation",
+            VerificationMethod = vm,
+            ProofValue = string.Empty,
+            Capability = invocation.Capability,
+            InvocationTarget = invocation.InvocationTarget,
+            CapabilityAction = invocation.CapabilityAction
+        };
+
+        var canonicalBytes = ProofSigningPayloadBuilder.CanonicalizeInvocationPayload(withoutProof, proof, canonicalizer);
+        var signature = await _didProvider.SignAsync(signerDid, canonicalBytes);
+        proof.ProofValue = MultibaseCodec.Encode(signature.Signature);
+        invocation.Proof = proof;
     }
 
     [Fact]
@@ -134,6 +188,47 @@ public class VerificationServiceReplayTests
 
         first.Should().BeTrue();
         second.Should().BeTrue("NullNonceStore never rejects replays");
+    }
+
+    [Fact]
+    public async Task VerifyInvocation_StaleCreated_IsRejected()
+    {
+        // Issue #71: a signed invocation whose proof.created is older than the replay window must
+        // be rejected even when its signature is valid — freshness bounds replay independently of
+        // the nonce store TTL.
+        var nonceStore = new InMemoryNonceStore();
+        var verifier = CreateVerificationService(nonceStore); // default 5-minute window
+        var (invocation, capability, leafDid) = await CreateSignedInvocationParts();
+
+        // Re-sign over a created timestamp 10 minutes in the past (valid signature, stale).
+        await SignInvocationWithCreatedAsync(invocation, leafDid, DateTime.UtcNow.AddMinutes(-10));
+
+        (await verifier.VerifyInvocationAsync(invocation, capability)).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task VerifyInvocation_FutureCreated_IsRejected()
+    {
+        // Issue #71: a created timestamp beyond the small clock-skew allowance is rejected.
+        var verifier = CreateVerificationService(new InMemoryNonceStore());
+        var (invocation, capability, leafDid) = await CreateSignedInvocationParts();
+
+        await SignInvocationWithCreatedAsync(invocation, leafDid, DateTime.UtcNow.AddMinutes(10));
+
+        (await verifier.VerifyInvocationAsync(invocation, capability)).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task VerifyInvocation_FreshCreated_Verifies()
+    {
+        // Positive control: the replication helper produces a verifiable invocation, so the
+        // stale/future rejections above are due to freshness, not a broken signature.
+        var verifier = CreateVerificationService(new InMemoryNonceStore());
+        var (invocation, capability, leafDid) = await CreateSignedInvocationParts();
+
+        await SignInvocationWithCreatedAsync(invocation, leafDid, DateTime.UtcNow);
+
+        (await verifier.VerifyInvocationAsync(invocation, capability)).Should().BeTrue();
     }
 
     [Fact]

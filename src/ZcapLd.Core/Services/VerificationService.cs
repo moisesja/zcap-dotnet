@@ -25,6 +25,12 @@ public class VerificationService : IVerificationService
     private const int MaxChainLength = 10; // Per spec: SHOULD limit to 10
 
     /// <summary>
+    /// Tolerance for a future-dated invocation <c>proof.created</c> (clock skew between signer and
+    /// verifier) before the freshness check (Issue #71) rejects it.
+    /// </summary>
+    private static readonly TimeSpan FreshnessClockSkew = TimeSpan.FromMinutes(1);
+
+    /// <summary>
     /// Default window during which invocation nonces are tracked for replay protection.
     /// </summary>
     public static readonly TimeSpan DefaultNonceWindow = TimeSpan.FromMinutes(5);
@@ -324,6 +330,19 @@ public class VerificationService : IVerificationService
 
             // 2. Verify invocation proof exists and has correct purpose
             if (invocation.Proof == null || invocation.Proof.ProofPurpose != "capabilityInvocation")
+                return false;
+
+            // 2c. Freshness: the signed proof.created timestamp bounds replay independently of the
+            // nonce store's TTL (Issue #71). Reject a missing timestamp, one dated in the future
+            // beyond a small clock-skew allowance, or one older than the replay window — anything
+            // evictable from the nonce store is then already too old to replay.
+            var createdAt = invocation.Proof.CreatedAt;
+            if (createdAt is null)
+                return false;
+            var nowUtc = DateTime.UtcNow;
+            if (createdAt.Value > nowUtc + FreshnessClockSkew)
+                return false;
+            if (nowUtc - createdAt.Value > _nonceWindow)
                 return false;
 
             // 2a. Invocation MUST reference the capability being verified
