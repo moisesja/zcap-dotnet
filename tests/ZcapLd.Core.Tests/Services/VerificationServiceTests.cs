@@ -1,6 +1,7 @@
 using System.Text.Json;
 using FluentAssertions;
 using Xunit;
+using ZcapLd.Core.Cryptography;
 using ZcapLd.Core.Exceptions;
 using ZcapLd.Core.Models;
 using ZcapLd.Core.Services;
@@ -484,6 +485,45 @@ public class VerificationServiceTests
         var result = await _verificationService.VerifyInvocationAsync(invocation, rootCapability);
 
         // Assert
+        result.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task VerifyInvocation_AfterJsonRoundTrip_ShouldReturnTrue()
+    {
+        // Regression for issue #58: a resource server receives invocations as JSON and
+        // deserializes them. After the round-trip Proof.Capability is a JsonElement, not a
+        // CLR string, so the proof/invocation consistency check must normalize it rather
+        // than rely on an `as string` cast (which would reject every valid wire invocation).
+        var controllerDid = "did:key:z6MkRoundTripController";
+        _didProvider.GenerateAndRegisterKeyPair(controllerDid);
+
+        var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
+            controllerDid,
+            "https://example.com/resource",
+            new[] { "read", "write" });
+
+        var invocation = new Invocation
+        {
+            Capability = rootCapability.Id,
+            CapabilityAction = "read",
+            InvocationTarget = "https://example.com/resource"
+        };
+        invocation.Proof = await _signingService.SignInvocationAsync(invocation, controllerDid);
+
+        // In-memory verify works because Proof.Capability is still a CLR string here.
+        (await _verificationService.VerifyInvocationAsync(invocation, rootCapability))
+            .Should().BeTrue();
+
+        // Round-trip through JSON exactly as a resource server would receive it.
+        var json = JsonSerializer.Serialize(invocation, ZcapJsonOptions.Default);
+        var received = JsonSerializer.Deserialize<Invocation>(json, ZcapJsonOptions.Default);
+        received.Should().NotBeNull();
+
+        // Act: verify the deserialized invocation.
+        var result = await _verificationService.VerifyInvocationAsync(received!, rootCapability);
+
+        // Assert: the same valid, untampered invocation must verify over the wire.
         result.Should().BeTrue();
     }
 
