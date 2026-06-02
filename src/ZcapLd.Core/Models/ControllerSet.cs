@@ -73,6 +73,9 @@ public sealed class ControllerSet : IEquatable<ControllerSet>
     /// Builds a controller set from many values. Defaults to array wire form. Throws when
     /// the input is null, empty, or contains a null/whitespace entry — malformed controller
     /// values per the spec must not silently produce a valid-looking capability.
+    /// Values are stored verbatim: declaration order is preserved and duplicates are NOT
+    /// removed. This is deliberate — deduplicating or reordering would change the JCS canonical
+    /// bytes relative to the wire shape the signer produced and break cross-language verification.
     /// </summary>
     public static ControllerSet FromValues(IEnumerable<string> controllers, bool asArray = true)
     {
