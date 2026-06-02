@@ -1,6 +1,8 @@
 using System.Reflection;
+using System.Text.Json;
 using FluentAssertions;
 using Xunit;
+using ZcapLd.Core.Cryptography;
 using ZcapLd.Core.Models;
 
 namespace ZcapLd.Core.Tests.Compliance;
@@ -55,6 +57,33 @@ public class NormativeUnitComplianceTests
         root.Expires.Should().BeNull();
         root.ParentCapability.Should().BeNull();
         root.Proof.Should().BeNull();
+    }
+
+    [Fact(DisplayName = "MUST-03b Validation MUST reject a root zcap that has any other fields")]
+    public async Task Must03b_RootValidation_MustRejectForbiddenFields()
+    {
+        var fixture = new ComplianceTestFixture();
+
+        // MUST-03 covers the creation path; this covers the validation path for an
+        // externally-supplied root (e.g. another stack's wire body) carrying a field
+        // outside the permitted set. "A root zcap MUST NOT have any other fields."
+        const string rootWithForbiddenField = """
+        {
+          "@context": "https://w3id.org/zcap/v1",
+          "id": "urn:zcap:root:https%3A%2F%2Fexample.com%2Fresources",
+          "controller": "did:key:z6MkExample",
+          "invocationTarget": "https://example.com/resources",
+          "allowedAction": ["read"]
+        }
+        """;
+
+        var root = JsonSerializer.Deserialize<Capability>(
+            rootWithForbiddenField,
+            ZcapJsonOptions.Default)!;
+
+        var isValid = await fixture.CapabilityService.ValidateCapabilityAsync(root);
+
+        isValid.Should().BeFalse();
     }
 
     [Fact(DisplayName = "MUST-04 Delegated @context MUST be array with zcap context first")]

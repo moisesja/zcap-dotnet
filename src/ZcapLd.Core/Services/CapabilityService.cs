@@ -209,8 +209,17 @@ public class CapabilityService : ICapabilityService
                     // Warning: Not following SHOULD requirement, but not invalid
                 }
 
-                // Root capabilities MUST NOT have proof, expires, or parentCapability
-                if (capability.Proof != null || capability.Expires != null || capability.ParentCapability != null)
+                // Root zcaps MUST contain only @context, id, controller, invocationTarget.
+                // "A root zcap MUST NOT have any other fields." (W3C CCG ZCAP-LD v0.3, Root Capability)
+                // Strict policy: allowedAction/caveat must be absent (null), not empty — the spec
+                // omits them on roots and CreateRootCapabilityAsync leaves them null, so no real
+                // producer emits empty arrays. Unknown extension fields land in AdditionalProperties.
+                if (capability.Proof != null ||
+                    capability.Expires != null ||
+                    capability.ParentCapability != null ||
+                    capability.AllowedAction != null ||
+                    capability.Caveat != null ||
+                    capability.AdditionalProperties is { Count: > 0 })
                 {
                     return Task.FromResult(false);
                 }
