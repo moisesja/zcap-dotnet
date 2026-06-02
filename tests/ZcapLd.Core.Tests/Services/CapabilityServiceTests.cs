@@ -22,6 +22,22 @@ public class CapabilityServiceTests
     }
 
     [Fact]
+    public async Task CreateRootCapability_ViaInterface_AllowedActionsOptional()
+    {
+        // Issue #66: the ICapabilityService signature now matches the implementation
+        // (allowedActions is optional), so a caller bound to the interface can create a root
+        // without passing a throwaway array. allowedActions is ignored for roots regardless.
+        ICapabilityService caps = _capabilityService;
+
+        var root = await caps.CreateRootCapabilityAsync(
+            "did:key:z6MkExample",
+            "https://example.com/doc");
+
+        root.AllowedAction.Should().BeNull("roots carry no allowedAction");
+        root.Id.Should().StartWith("urn:zcap:root:");
+    }
+
+    [Fact]
     public async Task CreateRootCapability_ShouldCreateValidRootCapability()
     {
         // Arrange
