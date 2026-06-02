@@ -26,11 +26,16 @@ public class CryptoSuite : ICryptoSuite
     public string KeyType { get; }
     public string ContextUrl { get; }
 
+    // W3C Data Integrity suites (ecdsa-2019 / EcdsaSecp256r1Signature2019) and JOSE put the raw
+    // ECDSA signature on the wire as IEEE P1363 fixed-width r‖s — NOT ASN.1 DER. NetDid 1.3.0
+    // defaults its legacy Sign/Verify overloads to DER, so we explicitly request P1363 via the
+    // format-aware overloads. Non-ECDSA key types (Ed25519, secp256k1, BLS) ignore the format and
+    // return their algorithm-native wire form, so passing P1363 unconditionally is safe.
     public byte[] Sign(byte[] data, byte[] privateKey)
-        => Crypto.Sign(_netDidKeyType, privateKey, data);
+        => Crypto.Sign(_netDidKeyType, privateKey, data, EcdsaSignatureFormat.IeeeP1363);
 
     public bool Verify(byte[] data, byte[] signature, byte[] publicKey)
-        => Crypto.Verify(_netDidKeyType, publicKey, data, signature);
+        => Crypto.Verify(_netDidKeyType, publicKey, data, signature, EcdsaSignatureFormat.IeeeP1363);
 
     /// <summary>
     /// Ed25519Signature2020 suite.

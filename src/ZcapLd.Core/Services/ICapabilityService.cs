@@ -10,14 +10,15 @@ public interface ICapabilityService
     /// <summary>
     /// Creates a new root capability
     /// </summary>
-    /// <param name="controller">The DID of the capability controller</param>
+    /// <param name="controller">The controller(s) of the capability — a single DID
+    /// (implicit from <see cref="string"/>) or several (implicit from <c>string[]</c>)</param>
     /// <param name="invocationTarget">The target resource URI</param>
     /// <param name="allowedActions">Actions allowed by this capability</param>
     /// <param name="expires">Optional expiration time</param>
     /// <param name="caveats">Optional caveats to apply</param>
     /// <returns>The created capability</returns>
     Task<Capability> CreateRootCapabilityAsync(
-        string controller,
+        ControllerSet controller,
         string invocationTarget,
         string[] allowedActions,
         DateTime? expires = null,
@@ -27,17 +28,21 @@ public interface ICapabilityService
     /// Delegates a capability to another controller
     /// </summary>
     /// <param name="parentCapability">The parent capability to delegate</param>
-    /// <param name="newController">The DID of the new controller</param>
+    /// <param name="newController">The controller(s) of the new capability — a single DID
+    /// (implicit from <see cref="string"/>) or several (implicit from <c>string[]</c>)</param>
     /// <param name="allowedActions">Actions to delegate (must be subset of parent)</param>
     /// <param name="expires">Optional expiration time (must not exceed parent)</param>
     /// <param name="caveats">Optional additional caveats</param>
+    /// <param name="signerDid">Which of the parent's controllers signs the delegation.
+    /// Defaults to the parent's first controller; must be one of the parent's controllers.</param>
     /// <returns>The delegated capability</returns>
     Task<Capability> DelegateCapabilityAsync(
         Capability parentCapability,
-        string newController,
+        ControllerSet newController,
         string[] allowedActions,
         DateTime? expires = null,
-        Caveat[]? caveats = null);
+        Caveat[]? caveats = null,
+        string? signerDid = null);
 
     /// <summary>
     /// Validates a capability and its chain

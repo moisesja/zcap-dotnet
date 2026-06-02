@@ -21,10 +21,13 @@ public class Capability
     public object Context { get; set; } = "https://w3id.org/zcap/v1";
 
     /// <summary>
-    /// The DID of the entity issuing this capability
+    /// The controller(s) of this capability — the DID(s) authorized over it.
+    /// Per ZCAP-LD v0.3, <c>controller</c> may be a single URI string or an array of
+    /// URI strings; <see cref="ControllerSet"/> models both and preserves the wire shape.
+    /// Assign a <see cref="string"/> or <c>string[]</c> directly (implicit conversion).
     /// </summary>
     [JsonPropertyName("controller")]
-    public string Controller { get; set; } = string.Empty;
+    public ControllerSet Controller { get; set; } = ControllerSet.Empty;
 
     /// <summary>
     /// The target resource URI this capability grants access to

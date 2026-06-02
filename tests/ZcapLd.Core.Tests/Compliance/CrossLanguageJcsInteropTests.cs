@@ -147,6 +147,86 @@ public class CrossLanguageJcsInteropTests
             "with the caveat (#39).");
     }
 
+    [Fact(DisplayName = "Issue #47 — controller array preserves shape and sign-time bytes match wire bytes")]
+    public void CapabilityWithControllerArray_PreservesArrayShape_AndSignTimeBytesMatchWireBytes()
+    {
+        // ZCAP-LD allows `controller` to be a string or an array of strings. The two shapes
+        // produce DIFFERENT JCS canonical bytes, so we must preserve whichever shape the
+        // signer wrote — a single controller stays a bare string (existing pins cover that),
+        // an array stays an array. If sign-time bytes diverge from what a cross-language
+        // verifier JCS-canonicalizes over the wire body, the signature fails (#47).
+        var capability = new Capability
+        {
+            Id = "urn:zcap:root:multi-controller",
+            Context = "https://w3id.org/zcap/v1",
+            Controller = new[] { "did:key:z6MkAlice", "did:key:z6MkBob" },
+            InvocationTarget = "https://example.com/api/resource"
+        };
+        var proof = new Proof
+        {
+            Type = "Ed25519Signature2020",
+            Created = "2026-04-29T12:00:00.000000Z",
+            ProofPurpose = "capabilityDelegation",
+            VerificationMethod = "did:key:z6MkAlice#z6MkAlice",
+            CapabilityChain = new object[] { "urn:zcap:root:multi-controller" },
+            ProofValue = "this-must-be-excluded"
+        };
+
+        // Sign-time path — controller serialized as an array, keys alphabetically sorted.
+        var signTimeBytes = ProofSigningPayloadBuilder.CanonicalizeCapabilityPayload(capability, proof);
+        var signTimeJson = Encoding.UTF8.GetString(signTimeBytes);
+
+        signTimeJson.Should().Contain("\"controller\":[\"did:key:z6MkAlice\",\"did:key:z6MkBob\"]",
+            "controller array shape must be preserved verbatim in the signed JCS bytes (#47)");
+
+        // Wire-time path — what a peer verifier (zcap-py) JCS-canonicalizes over the wire body.
+        var canonicalizer = new JcsDocumentCanonicalizer();
+        var wireDoc = new Dictionary<string, object>(StringComparer.Ordinal);
+        var capElement = JsonSerializer.SerializeToElement(capability, ZcapJsonOptions.Default);
+        foreach (var prop in capElement.EnumerateObject())
+            wireDoc[prop.Name] = prop.Value;
+        var proofElement = JsonSerializer.SerializeToElement(proof, ZcapJsonOptions.Default);
+        var proofDict = new Dictionary<string, object>(StringComparer.Ordinal);
+        foreach (var prop in proofElement.EnumerateObject())
+            if (prop.Name != "proofValue") proofDict[prop.Name] = prop.Value;
+        wireDoc["proof"] = proofDict;
+        var wireBytes = canonicalizer.Canonicalize(wireDoc);
+
+        wireBytes.Should().Equal(signTimeBytes,
+            "the bytes signed by zcap-dotnet for a multi-controller capability must equal the bytes " +
+            "a cross-language verifier JCS-canonicalizes over the array-shaped wire body (#47).");
+    }
+
+    [Fact(DisplayName = "Issue #47 — single controller still emits a bare string (no array collapse)")]
+    public void CapabilityWithSingleController_StillEmitsBareString()
+    {
+        // Regression guard: introducing ControllerSet must NOT turn a single controller
+        // into a one-element array — that would change every existing capability's JCS
+        // bytes and break signatures produced before #47.
+        var capability = new Capability
+        {
+            Id = "urn:zcap:root:single",
+            Context = "https://w3id.org/zcap/v1",
+            Controller = "did:key:z6MkAlice",
+            InvocationTarget = "https://example.com/api/resource"
+        };
+        var proof = new Proof
+        {
+            Type = "Ed25519Signature2020",
+            Created = "2026-04-29T12:00:00.000000Z",
+            ProofPurpose = "capabilityDelegation",
+            VerificationMethod = "did:key:z6MkAlice#z6MkAlice",
+            CapabilityChain = new object[] { "urn:zcap:root:single" },
+            ProofValue = "this-must-be-excluded"
+        };
+
+        var canonical = Encoding.UTF8.GetString(
+            ProofSigningPayloadBuilder.CanonicalizeCapabilityPayload(capability, proof));
+
+        canonical.Should().Contain("\"controller\":\"did:key:z6MkAlice\"");
+        canonical.Should().NotContain("\"controller\":[");
+    }
+
     [Fact(DisplayName = "Issue #37 — root capability wire form omits absent optional fields")]
     public void RootCapabilityWireForm_OmitsAbsentOptionalFields()
     {

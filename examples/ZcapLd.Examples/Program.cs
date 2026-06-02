@@ -1,3 +1,4 @@
+using System.Text.Json;
 using ZcapLd.Core.Cryptography;
 using ZcapLd.Core.Models;
 using ZcapLd.Core.Services;
@@ -647,6 +648,87 @@ var rdfcBytes = rdfcCanonicalizer.Canonicalize(rdfcRoot);
 Console.WriteLine($"  JCS output size:      {jcsBytes.Length} bytes (compact JSON)");
 Console.WriteLine($"  RDFC-1.0 output size: {rdfcBytes.Length} bytes (N-Quads)");
 Console.WriteLine($"  Same output:          {jcsBytes.SequenceEqual(rdfcBytes)} (expected: False)");
+
+// ===================================================
+// Example 11: Single vs Multiple Controllers
+// ===================================================
+Console.WriteLine("Example 11: Single vs Multiple Controllers");
+Console.WriteLine("------------------------------------------");
+
+// Per W3C ZCAP-LD v0.3, a capability's `controller` may be a single DID or an array of
+// DIDs. Any one of the controllers is authorized to invoke or delegate the capability.
+// `Capability.Controller` is a `ControllerSet`: assign a string for one controller or a
+// string[] for several (implicit conversions), and it preserves that shape on the wire.
+
+// --- Single controller (serializes as a bare JSON string) ---
+var soloDid = "did:key:z6MkSolo";
+didProvider.GenerateAndRegisterKeyPair(soloDid);
+var singleControllerCap = await capabilityService.CreateRootCapabilityAsync(
+    controller: soloDid,                              // one DID (string)
+    invocationTarget: "https://api.example.com/team/reports",
+    allowedActions: new[] { "read" });
+
+Console.WriteLine("Single controller:");
+Console.WriteLine($"  Count:       {singleControllerCap.Controller.Count}");
+Console.WriteLine($"  Controllers: {string.Join(", ", singleControllerCap.Controller.Values)}");
+// JSON wire shape of just the controller field: "did:key:z6MkSolo"
+Console.WriteLine($"  Wire shape:  \"controller\": {JsonSerializer.Serialize(singleControllerCap.Controller, ZcapJsonOptions.Default)}");
+Console.WriteLine();
+
+// --- Multiple controllers (serializes as a JSON array) ---
+var alphaDid = "did:key:z6MkAlpha";
+var betaDid = "did:key:z6MkBeta";
+didProvider.GenerateAndRegisterKeyPair(alphaDid);
+didProvider.GenerateAndRegisterKeyPair(betaDid);
+var multiControllerCap = await capabilityService.CreateRootCapabilityAsync(
+    controller: new[] { alphaDid, betaDid },          // several DIDs (string[]) — any one is authorized
+    invocationTarget: "https://api.example.com/team/reports",
+    allowedActions: new[] { "read" });
+
+Console.WriteLine("Multiple controllers:");
+Console.WriteLine($"  Count:      {multiControllerCap.Controller.Count}");
+Console.WriteLine($"  Controllers: {string.Join(", ", multiControllerCap.Controller.Values)}");
+// JSON wire shape: ["did:key:z6M...","did:key:z6M..."]
+Console.WriteLine($"  Wire shape: \"controller\": {JsonSerializer.Serialize(multiControllerCap.Controller, ZcapJsonOptions.Default)}");
+Console.WriteLine();
+
+// Any controller in the set can invoke. First Alpha, then Beta — both verify.
+async Task<bool> InvokeAsAsync(string signerDid)
+{
+    var invocation = new Invocation
+    {
+        Capability = multiControllerCap.Id,
+        CapabilityAction = "read",
+        InvocationTarget = "https://api.example.com/team/reports"
+    };
+    invocation.Proof = await signingService.SignInvocationAsync(invocation, signerDid);
+    return await verificationService.VerifyInvocationAsync(invocation, multiControllerCap);
+}
+
+Console.WriteLine("Authorization (multi-controller capability):");
+Console.WriteLine($"  Invocation by controller Alpha valid: {await InvokeAsAsync(alphaDid)} (expected: True)");
+Console.WriteLine($"  Invocation by controller Beta valid:  {await InvokeAsAsync(betaDid)} (expected: True)");
+
+// A DID that is NOT a controller cannot invoke, even though its key is resolvable.
+var outsiderDid = "did:key:z6MkOutsider";
+didProvider.GenerateAndRegisterKeyPair(outsiderDid);
+Console.WriteLine($"  Invocation by non-controller valid:   {await InvokeAsAsync(outsiderDid)} (expected: False)");
+Console.WriteLine();
+
+// Delegation from a multi-controller capability: pick which controller signs via `signerDid`.
+// Beta delegates read access to a partner; the delegation proof is signed by Beta's key.
+var teamPartnerDid = "did:key:z6MkTeamPartner";
+didProvider.GenerateAndRegisterKeyPair(teamPartnerDid);
+var teamPartnerCap = await capabilityService.DelegateCapabilityAsync(
+    parentCapability: multiControllerCap,
+    newController: teamPartnerDid,
+    allowedActions: new[] { "read" },
+    expires: DateTime.UtcNow.AddDays(7),
+    signerDid: betaDid);                              // any one of the parent's controllers
+Console.WriteLine("Delegation signed by one of the controllers (Beta):");
+Console.WriteLine($"  Delegated capability: {teamPartnerCap.Id}");
+Console.WriteLine($"  Chain valid:          {await verificationService.VerifyCapabilityChainAsync(teamPartnerCap)} (expected: True)");
+Console.WriteLine();
 
 Console.WriteLine();
 Console.WriteLine("===========================================");
