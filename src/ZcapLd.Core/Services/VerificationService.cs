@@ -59,7 +59,12 @@ public class VerificationService : IVerificationService
     }
 
     /// <summary>
-    /// Constructor with all core dependencies (no replay protection).
+    /// Constructor with all core dependencies. Defaults to an in-process
+    /// <see cref="InMemoryNonceStore"/> so replay protection is ON by default — the convenience
+    /// constructors (including the 2- and 3-argument ones that chain here) are secure-by-default.
+    /// Supply an explicit <see cref="INonceStore"/> via the longer constructor to change it:
+    /// a shared store for multi-node verifiers (<see cref="InMemoryNonceStore"/> is process-local),
+    /// or <see cref="NullNonceStore"/> to deliberately opt out of replay protection (Issue #62).
     /// </summary>
     public VerificationService(
         IDidResolver didResolver,
@@ -67,7 +72,7 @@ public class VerificationService : IVerificationService
         ICryptoSuiteProvider suiteProvider,
         IRevocationService revocationService)
         : this(didResolver, caveatProcessor, suiteProvider, revocationService,
-               NullNonceStore.Instance)
+               new InMemoryNonceStore())
     {
     }
 

@@ -69,6 +69,22 @@ public class VerificationServiceReplayTests
     }
 
     [Fact]
+    public async Task VerifyInvocation_TwoArgConstructor_RejectsReplayByDefault()
+    {
+        // Issue #62: the convenience constructors must enable replay protection by default
+        // (InMemoryNonceStore), not NullNonceStore. The 2-arg constructor is the README Quick
+        // Start path, so it must reject a replayed invocation out of the box.
+        var verifier = new VerificationService(_didProvider, _caveatProcessor);
+        var (invocation, capability) = await CreateSignedInvocation();
+
+        var first = await verifier.VerifyInvocationAsync(invocation, capability);
+        var second = await verifier.VerifyInvocationAsync(invocation, capability);
+
+        first.Should().BeTrue("first invocation should succeed");
+        second.Should().BeFalse("the 2-arg convenience constructor must reject replays by default");
+    }
+
+    [Fact]
     public async Task VerifyInvocation_DifferentIds_BothSucceed()
     {
         var nonceStore = new InMemoryNonceStore();

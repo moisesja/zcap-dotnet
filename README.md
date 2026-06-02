@@ -45,6 +45,8 @@ var didProvider = new InMemoryDidProvider(); // test helper: IDidSigner + IDidRe
 var signingService = new SigningService(didProvider, didProvider);
 var capabilityService = new CapabilityService(signingService);
 var caveatProcessor = new CaveatProcessor();
+// Replay protection is ON by default (in-process InMemoryNonceStore, which is process-local —
+// supply a shared INonceStore via the longer constructor for multi-node verifiers).
 var verificationService = new VerificationService(didProvider, caveatProcessor);
 
 var rootDid = "did:key:z6MkRoot";
