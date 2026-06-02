@@ -41,9 +41,6 @@ public sealed class ProofSet
     /// <summary>Number of proofs in the set.</summary>
     public int Count => _values.Length;
 
-    /// <summary>True when the set contains no proofs.</summary>
-    public bool IsEmpty => _values.Length == 0;
-
     /// <summary>
     /// True when this set serializes as a JSON array, false when it serializes as a single
     /// bare proof object. Tracks the original wire/construction shape so round-trips are stable.
@@ -108,8 +105,16 @@ public sealed class ProofSet
 
     /// <summary>
     /// Implicit conversion from a single proof (object wire form). Keeps signing call sites
-    /// such as <c>capability.Proof = signedProof;</c> ergonomic. Build the array form
-    /// explicitly via <see cref="FromValues"/>.
+    /// such as <c>capability.Proof = signedProof;</c> ergonomic.
     /// </summary>
     public static implicit operator ProofSet(Proof proof) => FromSingle(proof);
+
+    /// <summary>
+    /// Implicit conversion from a proof array (array wire form). Mirrors
+    /// <see cref="ControllerSet"/>'s array conversion and keeps multi-proof call sites
+    /// ergonomic (<c>capability.Proof = new[] { a, b };</c>). Delegates to
+    /// <see cref="FromValues"/>, which throws on a null or empty array — a delegated zcap
+    /// with no proofs is invalid and must not silently produce a valid-looking capability.
+    /// </summary>
+    public static implicit operator ProofSet(Proof[] proofs) => FromValues(proofs);
 }

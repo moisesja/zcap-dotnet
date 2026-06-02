@@ -233,7 +233,6 @@ public class CapabilityService : ICapabilityService
                 // MUST have proof, and at least one MUST be a capabilityDelegation proof
                 // (the proof set may also carry other DI proofs alongside it).
                 if (capability.Proof == null ||
-                    capability.Proof.IsEmpty ||
                     capability.Proof.FirstDelegationProof() == null)
                 {
                     return Task.FromResult(false);
@@ -337,6 +336,7 @@ public class CapabilityService : ICapabilityService
 
         // A delegated parent may carry several proofs; its delegation chain lives on a
         // capabilityDelegation proof. If the parent has one with a chain, it's not the root.
+        // (All capabilityDelegation proofs in a set are assumed to describe the same chain.)
         var parentChainProof = parentCapability.Proof?.FirstDelegationProofWithChain();
         if (parentChainProof?.CapabilityChain != null && parentChainProof.CapabilityChain.Length > 0)
         {

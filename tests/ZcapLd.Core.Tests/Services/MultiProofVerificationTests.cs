@@ -121,17 +121,15 @@ public class MultiProofVerificationTests
     [Fact]
     public async Task ProofArray_OnlyDelegationProofHasNoChain_Fails()
     {
-        var (_, delegated, realProof, _) = await BuildDelegationAsync();
+        // Isolate the "missing chain" failure: this delegation proof carries a VALID signature
+        // (freshly signed by the authorized delegator over an empty-chain payload) but no usable
+        // capabilityChain — so the only reason verification can fail is the absent chain, not a
+        // signature mismatch.
+        var (_, delegated, _, alice) = await BuildDelegationAsync();
 
-        var chainlessProof = new Proof
-        {
-            Type = realProof.Type,
-            Created = realProof.Created,
-            ProofPurpose = "capabilityDelegation",
-            VerificationMethod = realProof.VerificationMethod,
-            CapabilityChain = null, // missing chain
-            ProofValue = realProof.ProofValue
-        };
+        var chainlessProof = await _signingService.SignCapabilityAsync(
+            delegated, alice, "capabilityDelegation", capabilityChain: Array.Empty<object>());
+        chainlessProof.CapabilityChain.Should().BeEmpty("the proof is signed without a chain");
 
         delegated.Proof = ProofSet.FromValues(new[] { chainlessProof });
 

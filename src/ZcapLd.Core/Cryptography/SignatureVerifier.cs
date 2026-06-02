@@ -21,31 +21,39 @@ public class SignatureVerifier
         ICryptoSuite suite,
         IDocumentCanonicalizer? canonicalizer = null)
     {
-        if (capability.Proof == null || capability.Proof.IsEmpty)
+        if (capability.Proof == null)
             return false;
 
-        // A delegated zcap's proof may be an array; verify the delegation proof (the one that
-        // carries the capabilityChain), falling back to the first proof for non-standard inputs.
-        var proof = capability.Proof.FirstDelegationProof() ?? capability.Proof.Primary;
+        // A delegated zcap's proof may be an array. Mirror VerificationService's any-verifies
+        // semantics: succeed if ANY capabilityDelegation proof validates against the supplied
+        // key. Fall back to all proofs when none declare the delegation purpose (non-standard
+        // inputs). A single malformed proof must not abort evaluation of the rest.
+        var candidates = capability.Proof.DelegationProofs().ToList();
+        if (candidates.Count == 0)
+            candidates = capability.Proof.Values.ToList();
 
-        try
+        foreach (var proof in candidates)
         {
-            var capabilityForVerification = ProofSigningPayloadBuilder.CloneCapabilityWithoutProof(capability);
-            var canonicalizedData = ProofSigningPayloadBuilder.CanonicalizeCapabilityPayload(
-                capabilityForVerification,
-                proof,
-                canonicalizer);
+            try
+            {
+                var capabilityForVerification = ProofSigningPayloadBuilder.CloneCapabilityWithoutProof(capability);
+                var canonicalizedData = ProofSigningPayloadBuilder.CanonicalizeCapabilityPayload(
+                    capabilityForVerification,
+                    proof,
+                    canonicalizer);
 
-            // Decode the signature
-            var signature = MultibaseCodec.Decode(proof.ProofValue);
+                var signature = MultibaseCodec.Decode(proof.ProofValue);
 
-            // Verify the signature
-            return suite.Verify(canonicalizedData, signature, publicKey);
+                if (suite.Verify(canonicalizedData, signature, publicKey))
+                    return true;
+            }
+            catch
+            {
+                // Try the next candidate proof.
+            }
         }
-        catch
-        {
-            return false;
-        }
+
+        return false;
     }
 
     /// <summary>

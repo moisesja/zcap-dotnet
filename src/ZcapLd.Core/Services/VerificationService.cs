@@ -157,7 +157,7 @@ public class VerificationService : IVerificationService
         Capability? parentCapabilityOverride,
         bool requireParentAuthorization)
     {
-        if (capability.Proof == null || capability.Proof.IsEmpty)
+        if (capability.Proof == null)
         {
             return false;
         }
@@ -228,9 +228,10 @@ public class VerificationService : IVerificationService
 
             return suite.Verify(canonicalBytes, signatureBytes, resolvedKey.PublicKeyBytes);
         }
-        catch
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             // A single malformed/unsupported proof must not abort evaluation of the rest.
+            // Cancellation is intentionally NOT swallowed so callers can still observe it.
             return false;
         }
     }
@@ -461,6 +462,10 @@ public class VerificationService : IVerificationService
 
             // A delegated zcap may carry several proofs; the delegation chain lives on a
             // capabilityDelegation proof. Use the first delegation proof that carries one.
+            // Assumption: every capabilityDelegation proof in a set describes the SAME chain
+            // (they are independent signatures over one delegation), so the first one with a
+            // chain is representative — VerifyDelegationProofAsync independently accepts any
+            // delegation proof whose signature and parent authorization hold.
             var chainProof = current.Proof?.FirstDelegationProofWithChain();
             if (chainProof?.CapabilityChain == null || chainProof.CapabilityChain.Length == 0)
             {
