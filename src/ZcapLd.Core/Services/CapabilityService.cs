@@ -330,32 +330,47 @@ public class CapabilityService : ICapabilityService
             // Parent is delegated
             // Its chain structure: [rootId, ...intermediateIds, grandparentObject]
 
-            // Extract all string IDs from parent's chain (these are root + intermediates)
+            // Extract all ancestor IDs from parent's chain (root + intermediates), de-duplicated.
+            // Our own chains emit the embedded ancestor's id as BOTH a preceding string AND the
+            // embedded object, so without dedup a directly-root-delegated parent produced a repeated
+            // id (e.g. [rootId, rootId, ...]) — Issue #5. A HashSet preserves first-occurrence order
+            // while still keeping an embedded ancestor's id when a spec-compliant foreign chain omits
+            // the redundant string form. Null/empty ids are skipped (never valid chain entries).
             var stringIds = new List<string>();
+            var seenIds = new HashSet<string>(StringComparer.Ordinal);
+
+            void AddAncestorId(string? id)
+            {
+                if (!string.IsNullOrEmpty(id) && seenIds.Add(id))
+                {
+                    stringIds.Add(id);
+                }
+            }
+
             for (int i = 0; i < parentChainProof.CapabilityChain.Length; i++)
             {
                 var element = parentChainProof.CapabilityChain[i];
                 if (element is string strId)
                 {
-                    stringIds.Add(strId);
+                    AddAncestorId(strId);
                 }
                 else if (element is System.Text.Json.JsonElement jsonEl && jsonEl.ValueKind == JsonValueKind.String)
                 {
-                    stringIds.Add(jsonEl.GetString() ?? "");
+                    AddAncestorId(jsonEl.GetString());
                 }
                 else
                 {
-                    // This is the embedded parent object (grandparent from our perspective)
-                    // Extract its ID to add as intermediate
+                    // This is an embedded ancestor object (grandparent from our perspective).
+                    // Extract its ID; the HashSet drops it when it already appeared as a string.
                     if (element is Capability cap)
                     {
-                        stringIds.Add(cap.Id);
+                        AddAncestorId(cap.Id);
                     }
                     else if (element is System.Text.Json.JsonElement jsonObj && jsonObj.ValueKind == JsonValueKind.Object)
                     {
                         if (jsonObj.TryGetProperty("id", out var idProp))
                         {
-                            stringIds.Add(idProp.GetString() ?? "");
+                            AddAncestorId(idProp.GetString());
                         }
                     }
                 }

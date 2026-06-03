@@ -1,7 +1,9 @@
+using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using ZcapLd.AspNetCore.Contracts;
+using ZcapLd.Core.Cryptography;
 using ZcapLd.Core.Models;
 using ZcapLd.Core.Services;
 
@@ -15,6 +17,12 @@ public static class ZcapRevocationEndpointRouteBuilderExtensions
     /// <summary>
     /// Maps revocation endpoints under the provided route prefix.
     /// Defaults to /zcaps/revocations.
+    /// <para>
+    /// The POST (revoke) endpoint requires a <b>signed</b> revocation request and resolves an
+    /// <see cref="IVerificationService"/> — register the full service graph via
+    /// <c>AddZcapServices()</c>. <c>AddZcapRevocationSupport()</c> alone (which registers only the
+    /// revocation store/service) is <b>not</b> sufficient for the POST endpoint.
+    /// </para>
     /// </summary>
     public static RouteGroupBuilder MapZcapRevocationEndpoints(
         this IEndpointRouteBuilder endpoints,
@@ -33,7 +41,8 @@ public static class ZcapRevocationEndpointRouteBuilderExtensions
         group.MapPost("/{*capabilityId}", RevokeCapabilityAsync)
             .WithName("ZcapRevokeCapability")
             .Produces<RevocationStatusHttpResponse>(StatusCodes.Status200OK)
-            .Produces<string>(StatusCodes.Status400BadRequest);
+            .Produces<string>(StatusCodes.Status400BadRequest)
+            .Produces(StatusCodes.Status403Forbidden);
 
         group.MapGet("/{*capabilityId}", GetRevocationStatusAsync)
             .WithName("ZcapGetRevocationStatus")
@@ -45,8 +54,8 @@ public static class ZcapRevocationEndpointRouteBuilderExtensions
 
     private static async Task<IResult> RevokeCapabilityAsync(
         string capabilityId,
-        RevokeCapabilityHttpRequest request,
-        IRevocationService revocationService,
+        HttpRequest httpRequest,
+        IVerificationService verificationService,
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(capabilityId))
@@ -54,23 +63,45 @@ public static class ZcapRevocationEndpointRouteBuilderExtensions
             return TypedResults.BadRequest("Capability ID route value is required.");
         }
 
-        if (request == null || string.IsNullOrWhiteSpace(request.RevokerDid))
+        // Deserialize with the ZCAP options (polymorphic caveat converter, etc.) so an embedded
+        // capability carrying typed caveats / a controller array round-trips byte-faithfully —
+        // otherwise dropped fields would drift the canonical bytes and fail verification.
+        SignedRevocationHttpRequest? request;
+        try
         {
-            return TypedResults.BadRequest("Body must include a non-empty revokerDid.");
+            request = await JsonSerializer.DeserializeAsync<SignedRevocationHttpRequest>(
+                httpRequest.Body, ZcapJsonOptions.Default, cancellationToken);
+        }
+        catch (JsonException)
+        {
+            return TypedResults.BadRequest("Request body is not valid JSON.");
+        }
+
+        if (request?.Capability == null || request.SignedRevocation == null)
+        {
+            return TypedResults.BadRequest("Body must include 'capability' and 'signedRevocation'.");
         }
 
         var decodedCapabilityId = Uri.UnescapeDataString(capabilityId);
-        var revocation = await revocationService.RevokeAsync(new RevocationRequest
+        if (!string.Equals(decodedCapabilityId, request.Capability.Id, StringComparison.Ordinal))
         {
-            CapabilityId = decodedCapabilityId,
-            RootCapabilityId = request.RootCapabilityId,
-            RevokedBy = request.RevokerDid,
-            ExpiresAt = request.ExpiresAt,
-            Reason = request.Reason,
-            Metadata = request.Metadata
-        }, cancellationToken);
+            return TypedResults.BadRequest("Route capability id does not match the body capability id.");
+        }
 
-        return TypedResults.Ok(ToHttpResponse(revocation, true));
+        // Authentication (signature/proof-of-possession) + authorization happen inside the verifier.
+        var revoked = await verificationService.RevokeCapabilityAsync(
+            request.Capability, request.SignedRevocation);
+
+        if (!revoked)
+        {
+            return TypedResults.StatusCode(StatusCodes.Status403Forbidden);
+        }
+
+        return TypedResults.Ok(new RevocationStatusHttpResponse
+        {
+            CapabilityId = request.Capability.Id,
+            IsRevoked = true
+        });
     }
 
     private static async Task<IResult> GetRevocationStatusAsync(

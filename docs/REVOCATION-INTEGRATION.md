@@ -23,8 +23,11 @@ using ZcapLd.AspNetCore.Endpoints;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Default: in-memory revocation store
-builder.Services.AddZcapRevocationSupport();
+// The POST (revoke) endpoint authenticates + authorizes a SIGNED revocation request via
+// IVerificationService, so register the full service graph. AddZcapRevocationSupport() alone
+// (store + service only) is sufficient only for a GET-status-only deployment.
+builder.Services.AddZcapServices();
+// Optionally override the in-memory store, e.g. AddZcapRevocationSupport(_ => new MyStore(...));
 
 var app = builder.Build();
 
@@ -38,7 +41,12 @@ app.Run();
 
 Default endpoint contract:
 
-- `POST /zcaps/revocations/{*capabilityId}`: create/update revocation record
+- `POST /zcaps/revocations/{*capabilityId}`: revoke from a **signed** request (proof-of-possession).
+  Body: `{ "capability": <the full capability being revoked>, "signedRevocation": <an Invocation
+  signed via ISigningService.SignRevocationAsync> }`. The endpoint verifies the signature
+  (authentication) and that the signer controls the capability or an ancestor (authorization).
+  Returns `200` on success, `403` when unauthenticated/unauthorized, `400` on a malformed body or a
+  route/body capability-id mismatch. There is **no** bare-`revokerDid` path.
 - `GET /zcaps/revocations/{*capabilityId}`: query revocation status
 
 Runnable demo:
@@ -46,6 +54,13 @@ Runnable demo:
 - `examples/ZcapLd.RevocationEndpointsDemo/README.md`
 
 ## 2. Expose Revocation in Other Ways
+
+> **Security:** `IRevocationService.RevokeAsync` is the **persistence primitive** — it performs **no
+> authentication or authorization** and records whatever it is given. Never call it directly from
+> untrusted input. To enforce proof-of-possession + chain authorization, route requests through
+> `IVerificationService.RevokeCapabilityAsync(Capability, Invocation)` (build the signed request with
+> `ISigningService.SignRevocationAsync`). The example below is for a host that has **already**
+> authenticated and authorized the caller out-of-band.
 
 `ZcapLd.Core` is transport-agnostic. You can expose revocation using any application boundary by depending on `IRevocationService`:
 

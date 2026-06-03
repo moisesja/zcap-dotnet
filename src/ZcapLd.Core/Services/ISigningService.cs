@@ -32,6 +32,25 @@ public interface ISigningService
     Task<Proof> SignInvocationAsync(Invocation invocation, string signerDid);
 
     /// <summary>
+    /// Produces a signed capability revocation request (proof-of-possession) bound to
+    /// <paramref name="capabilityId"/>, with <c>proofPurpose = capabilityRevocation</c> and
+    /// <c>capabilityAction = revoke</c>. Present the returned <see cref="Invocation"/> (alongside
+    /// the full capability) to <see cref="IVerificationService.RevokeCapabilityAsync(Capability, Invocation)"/>.
+    /// </summary>
+    /// <param name="capabilityId">The id of the capability to revoke (bound into the signed payload).</param>
+    /// <param name="signerDid">The DID whose key signs the request (must control the capability or an ancestor).</param>
+    /// <param name="invocationTarget">The capability's invocation target (bound into the signed payload).</param>
+    /// <param name="reason">Optional human-readable reason, signed and recorded on the revocation.</param>
+    /// <param name="metadata">Optional audit metadata, signed and recorded on the revocation.</param>
+    /// <returns>A signed revocation invocation.</returns>
+    Task<Invocation> SignRevocationAsync(
+        string capabilityId,
+        string signerDid,
+        string invocationTarget,
+        string? reason = null,
+        IDictionary<string, string>? metadata = null);
+
+    /// <summary>
     /// Resolves the JSON-LD security suite context URL for a signer's key type.
     /// Used by <see cref="CapabilityService"/> to set the correct context on delegated capabilities.
     /// </summary>

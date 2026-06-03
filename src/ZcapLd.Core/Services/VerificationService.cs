@@ -140,6 +140,18 @@ public class VerificationService : IVerificationService
             return capability.Proof == null;
         }
 
+        // Honour ANCESTOR revocation on the standalone path (Issue #63). VerifyCapabilityChainAsync
+        // resolves and revocation-checks every link, but this single-proof path resolves only the
+        // embedded immediate parent. The remaining ancestors (root + every intermediate) are present
+        // in the delegation proof's capabilityChain as id strings, so sweep the WHOLE chain and
+        // reject if ANY ancestor has been revoked — so a revoked root/grandparent fails here too,
+        // matching the chain path, not just a revoked immediate parent (the earlier depth-1 fix).
+        var chainProof = capability.Proof?.FirstDelegationProofWithChain();
+        if (chainProof != null && await IsAnyAncestorRevokedAsync(chainProof.CapabilityChain))
+        {
+            return false;
+        }
+
         try
         {
             // Standalone proof verification requires parent authorization context.
@@ -209,6 +221,11 @@ public class VerificationService : IVerificationService
                 return false;
             }
 
+            // Revocation is checked by the entry points, not here: VerifyBuiltChainAsync sweeps
+            // every link, and the standalone VerifyCapabilityProofAsync sweeps the full ancestry
+            // via IsAnyAncestorRevokedAsync (Issue #63). This method is purely signature + parent
+            // authorization, so a single delegation proof's check stays independent of chain state.
+
             if (requireParentAuthorization &&
                 (parentCapability == null || parentCapability.Controller is null || parentCapability.Controller.IsEmpty))
             {
@@ -266,12 +283,15 @@ public class VerificationService : IVerificationService
                 return false;
             }
 
-            // 1. Verify the capability chain is valid
-            if (!await VerifyCapabilityChainAsync(capability))
+            // 1. Verify the capability chain is valid. Build it once here and reuse the same chain
+            // for caveat evaluation in step 7 instead of rebuilding it (BuildCapabilityChainAsync
+            // throwing is caught by this method's outer fail-closed catch).
+            var chain = await BuildCapabilityChainAsync(capability);
+            if (!await VerifyBuiltChainAsync(chain))
                 return false;
 
             // 2. Verify invocation proof exists and has correct purpose
-            if (invocation.Proof == null || invocation.Proof.ProofPurpose != "capabilityInvocation")
+            if (invocation.Proof == null || invocation.Proof.ProofPurpose != Proof.CapabilityInvocationPurpose)
                 return false;
 
             // 2a. Invocation MUST reference the capability being verified
@@ -302,20 +322,7 @@ public class VerificationService : IVerificationService
                 return false;
 
             // 5. Verify the invocation signature
-            var resolvedKey = await _didResolver.ResolvePublicKeyAsync(invocation.Proof.VerificationMethod);
-            var suite = _suiteProvider.GetByProofType(invocation.Proof.Type)
-                ?? throw new CapabilityValidationException(
-                    $"Unsupported proof type: {invocation.Proof.Type}");
-
-            var canonicalizer = ResolveCanonicalizer(suite);
-            var invocationWithoutProof = ProofSigningPayloadBuilder.CloneInvocationWithoutProof(invocation);
-            var canonicalBytes = ProofSigningPayloadBuilder.CanonicalizeInvocationPayload(
-                invocationWithoutProof,
-                invocation.Proof,
-                canonicalizer);
-            var signatureBytes = MultibaseCodec.Decode(invocation.Proof.ProofValue);
-
-            if (!suite.Verify(canonicalBytes, signatureBytes, resolvedKey.PublicKeyBytes))
+            if (!await VerifyInvocationSignatureAsync(invocation))
                 return false;
 
             // 6. Verify the controller is authorized
@@ -323,8 +330,8 @@ public class VerificationService : IVerificationService
                 return false;
 
             // 7. SECURITY FIX S-05: Evaluate ALL caveats from the entire chain
-            // Per spec: Children inherit ALL parent caveats, so we must check the entire chain
-            var chain = await BuildCapabilityChainAsync(capability);
+            // Per spec: Children inherit ALL parent caveats, so we must check the entire chain.
+            // Reuses the chain built and verified in step 1 (no rebuild).
             var context = new InvocationContext
             {
                 InvocationTime = DateTime.UtcNow,
@@ -359,6 +366,33 @@ public class VerificationService : IVerificationService
     }
 
     /// <summary>
+    /// Verifies the cryptographic signature on an invocation-style proof (proof-of-possession):
+    /// resolves the proof's <c>verificationMethod</c> to a public key, re-canonicalizes the
+    /// invocation-without-proof plus proof options, and checks the signature. Shared by the
+    /// invocation and signed-revocation paths. Does NOT check <c>proofPurpose</c>, authorization,
+    /// or replay — callers own those. Throws <see cref="CapabilityValidationException"/> on an
+    /// unsupported proof type (both callers wrap this in a fail-closed catch).
+    /// </summary>
+    private async Task<bool> VerifyInvocationSignatureAsync(Invocation invocation)
+    {
+        var proof = invocation.Proof!;
+        var resolvedKey = await _didResolver.ResolvePublicKeyAsync(proof.VerificationMethod);
+        var suite = _suiteProvider.GetByProofType(proof.Type)
+            ?? throw new CapabilityValidationException(
+                $"Unsupported proof type: {proof.Type}");
+
+        var canonicalizer = ResolveCanonicalizer(suite);
+        var invocationWithoutProof = ProofSigningPayloadBuilder.CloneInvocationWithoutProof(invocation);
+        var canonicalBytes = ProofSigningPayloadBuilder.CanonicalizeInvocationPayload(
+            invocationWithoutProof,
+            proof,
+            canonicalizer);
+        var signatureBytes = MultibaseCodec.Decode(proof.ProofValue);
+
+        return suite.Verify(canonicalBytes, signatureBytes, resolvedKey.PublicKeyBytes);
+    }
+
+    /// <summary>
     /// Verifies a capability delegation chain
     /// Implements the chain verification algorithm from W3C ZCAP-LD spec section 6.1
     /// </summary>
@@ -369,9 +403,30 @@ public class VerificationService : IVerificationService
 
         try
         {
-            // Build the complete chain from leaf to root
+            // Build the complete chain from leaf to root, then verify it. Split so callers that
+            // also need the built chain (revocation authorization, invocation caveat evaluation)
+            // can build once and reuse it instead of rebuilding (see VerifyBuiltChainAsync callers).
             var chain = await BuildCapabilityChainAsync(capability);
+            return await VerifyBuiltChainAsync(chain);
+        }
+        catch
+        {
+            // For other unexpected exceptions, return false
+            return false;
+        }
+    }
 
+    /// <summary>
+    /// Verifies an already-built root→leaf capability chain: length bound, per-link revocation,
+    /// per-link delegation proof / attenuation / expiry / caveat compatibility, and root shape.
+    /// Fully fail-closed — any unexpected failure yields <c>false</c>. Callers that have already
+    /// built the chain (e.g. <see cref="IsRevokerAuthorizedAsync"/>, <see cref="VerifyInvocationAsync"/>)
+    /// pass it here to avoid a redundant rebuild.
+    /// </summary>
+    private async Task<bool> VerifyBuiltChainAsync(List<Capability> chain)
+    {
+        try
+        {
             // 1. Check chain length (MUST limit, SHOULD be max 10)
             if (chain.Count > MaxChainLength)
             {
@@ -687,6 +742,63 @@ public class VerificationService : IVerificationService
         return null;
     }
 
+    /// <summary>
+    /// Returns true if ANY capability referenced by a delegation proof's <c>capabilityChain</c> has
+    /// been revoked. The chain carries the root id and every intermediate ancestor id — including
+    /// the immediate parent — as id strings (the final embedded parent object's id also appears as
+    /// a string), so a string-level sweep covers the full ancestry without resolving each ancestor
+    /// as a <see cref="Capability"/>. This lets the standalone <see cref="VerifyCapabilityProofAsync"/>
+    /// path honour ancestor revocation at every depth, matching the per-link sweep in
+    /// <see cref="VerifyBuiltChainAsync"/> (Issue #63). Ids are de-duplicated so a chain that repeats
+    /// an ancestor id (e.g. a directly-root-delegated parent) is not queried twice.
+    /// </summary>
+    private async Task<bool> IsAnyAncestorRevokedAsync(object[]? capabilityChain)
+    {
+        if (capabilityChain == null)
+        {
+            return false;
+        }
+
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var element in capabilityChain)
+        {
+            var id = ExtractCapabilityId(element);
+            if (!string.IsNullOrEmpty(id) && seen.Add(id) &&
+                await IsCapabilityRevokedAsync(id))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Extracts the capability id from a <c>capabilityChain</c> element — a bare id string for
+    /// root/intermediate ancestors, or the <c>id</c> of an embedded parent object — without a
+    /// full model deserialization. Returns null when no id can be read.
+    /// </summary>
+    private static string? ExtractCapabilityId(object element)
+    {
+        if (TryExtractStringValue(element) is { Length: > 0 } stringId)
+        {
+            return stringId;
+        }
+
+        if (element is Capability cap)
+        {
+            return cap.Id;
+        }
+
+        if (element is JsonElement obj && obj.ValueKind == JsonValueKind.Object &&
+            obj.TryGetProperty("id", out var idProp) && idProp.ValueKind == JsonValueKind.String)
+        {
+            return idProp.GetString();
+        }
+
+        return null;
+    }
+
     private IDocumentCanonicalizer ResolveCanonicalizer(ICryptoSuite suite)
     {
         return _canonicalizerProvider.GetByMethod(suite.CanonicalizationMethod)
@@ -695,58 +807,171 @@ public class VerificationService : IVerificationService
     }
 
     /// <summary>
-    /// Revokes a capability after verifying the revoker is authorized: the revoker must control
-    /// the capability itself or any ancestor in its delegation chain (an up-chain delegator).
-    /// <paramref name="revokerDid"/> is a DID the host has already authenticated — the library
-    /// performs authorization, not authentication. Returns <c>false</c> (recording nothing) when
-    /// the revoker is not authorized or the chain cannot be cryptographically verified.
-    /// COMPLIANCE: MUST-21, SHOULD-07 — revoked capabilities are stored until their expiration.
+    /// Revokes a capability from a <b>cryptographically signed</b> revocation request
+    /// (proof-of-possession). The <paramref name="signedRevocation"/> must be a
+    /// <see cref="Proof.CapabilityRevocationPurpose"/> proof, carrying <c>capabilityAction =
+    /// "revoke"</c>, bound to <paramref name="capability"/> (its <c>capability</c> field equals
+    /// <c>capability.Id</c>). The method <i>authenticates</i> the revoker by verifying the
+    /// signature against the key resolved from <c>proof.verificationMethod</c> — possession of that
+    /// private key is the proof of control — then <i>authorizes</i> by requiring that verification
+    /// method to control the capability or any ancestor in its (cryptographically verified)
+    /// delegation chain. A signed <c>reason</c>/<c>metadata</c> in the proof is recorded.
     /// </summary>
-    public async Task<bool> RevokeCapabilityAsync(Capability capability, string revokerDid)
+    /// <remarks>
+    /// <b>Fail-closed:</b> any structural, signature, authorization, replay, or infrastructure
+    /// failure returns <c>false</c> and records nothing. Caveats are deliberately <b>not</b>
+    /// evaluated — revocation is a control-plane authority action, so an exhausted/expired caveat
+    /// must not prevent a legitimate controller from revoking. The recorded <c>RevokedBy</c> is the
+    /// authenticated verification method's bare DID, never a client-asserted string. Replay
+    /// protection keys on <c>signedRevocation.Id</c>; clients must mint a fresh id per request.
+    /// <para>
+    /// <b>Authorization requires a fully valid chain.</b> The caveat carve-out above is narrow:
+    /// authorization runs <see cref="VerifyCapabilityChainAsync"/>, which still enforces the leaf's
+    /// own <c>expires</c> and every link's revocation state (it only skips <i>evaluating</i> caveats,
+    /// not their delegation-time compatibility). Consequence: a capability that is itself expired, or
+    /// one of whose ancestors has already been revoked, fails chain verification and therefore
+    /// <b>cannot be explicitly (re-)revoked</b> — it is already inert, so this is by design rather
+    /// than a bug, but callers building revocation audit trails should not expect a record for an
+    /// already-dead capability.
+    /// </para>
+    /// COMPLIANCE: MUST-21, SHOULD-07.
+    /// </remarks>
+    /// <param name="capability">The capability to revoke, with its full delegation chain (for authorization).</param>
+    /// <param name="signedRevocation">The signed revocation request (see <see cref="ISigningService.SignRevocationAsync"/>).</param>
+    /// <returns>True if authenticated, authorized, fresh, and recorded; otherwise false.</returns>
+    public async Task<bool> RevokeCapabilityAsync(Capability capability, Invocation signedRevocation)
     {
         if (capability == null)
             throw new ArgumentNullException(nameof(capability));
-        if (string.IsNullOrEmpty(revokerDid))
-            throw new ArgumentException("Revoker DID cannot be null or empty", nameof(revokerDid));
-
-        if (!await IsRevokerAuthorizedAsync(capability, revokerDid))
-            return false;
-
-        return await RevokeCapabilityCoreAsync(capability.Id, revokerDid);
-    }
-
-    /// <summary>
-    /// True when <paramref name="revokerDid"/> may revoke <paramref name="capability"/> — i.e. it
-    /// controls the capability or any ancestor in its delegation chain. Cryptographically verifies
-    /// the chain before trusting any controller fields; a forged or invalid chain yields false.
-    /// </summary>
-    private async Task<bool> IsRevokerAuthorizedAsync(Capability capability, string revokerDid)
-    {
-        // Verify the chain cryptographically first so controller fields can be trusted.
-        // Without this, a caller passing a crafted Capability with a tampered controller
-        // could authorize themselves to revoke a legitimate capability.
-        if (!await VerifyCapabilityChainAsync(capability))
-            return false;
+        if (signedRevocation == null)
+            throw new ArgumentNullException(nameof(signedRevocation));
 
         try
         {
-            var chain = await BuildCapabilityChainAsync(capability);
-            // Authorization is a string-level controller match: revokerDid (a bare DID or a
-            // did#key-fragment) authorizes when it equals a chain controller, or its bare DID
-            // does. This covers did:key (the DID *is* the key) and a did:web controller whose
-            // bare DID matches the revoker's key fragment (did:web:issuer#key-1 → did:web:issuer).
-            // It does NOT resolve the controller's DID document, so a revoker key belonging to a
-            // *different* DID that the controller would authorize is not matched.
-            // TODO: support cross-DID key authorization by resolving the controller's DID
-            // document and checking its verificationMethod/capabilityDelegation relationships.
-            return chain.Any(link =>
-                link.Controller is not null &&
-                link.Controller.ContainsVerificationMethod(revokerDid));
+            if (string.IsNullOrWhiteSpace(signedRevocation.Id))
+                return false;
+
+            var proof = signedRevocation.Proof;
+            // Must be a revocation-purpose proof carrying the revoke action, bound to THIS capability.
+            if (proof is null || proof.ProofPurpose != Proof.CapabilityRevocationPurpose)
+                return false;
+            if (signedRevocation.CapabilityAction != Invocation.RevokeAction)
+                return false;
+            if (!string.Equals(signedRevocation.Capability, capability.Id, StringComparison.Ordinal))
+                return false;
+
+            // Proof payload fields MUST be consistent with the invocation body. Proof.Capability is
+            // object?: after a JSON round-trip it is a JsonElement, so normalize via
+            // TryExtractStringValue rather than an `as string` cast (issue #58).
+            var proofCapabilityId = proof.Capability is { } proofCapability
+                ? TryExtractStringValue(proofCapability)
+                : null;
+            if (!string.Equals(proofCapabilityId, signedRevocation.Capability, StringComparison.Ordinal) ||
+                !string.Equals(proof.CapabilityAction, signedRevocation.CapabilityAction, StringComparison.Ordinal) ||
+                !string.Equals(proof.InvocationTarget, signedRevocation.InvocationTarget, StringComparison.Ordinal))
+                return false;
+
+            // AUTHENTICATE: the signature proves the caller holds verificationMethod's private key.
+            if (!await VerifyInvocationSignatureAsync(signedRevocation))
+                return false;
+
+            // AUTHORIZE: the authenticated verificationMethod must control the capability or an
+            // ancestor. IsRevokerAuthorizedAsync verifies the chain first (fail-closed).
+            if (!await IsRevokerAuthorizedAsync(capability, proof.VerificationMethod))
+                return false;
+
+            // Record the revocation durably BEFORE consuming the replay nonce. If the store write
+            // throws, control passes to the fail-closed catch with the nonce still unconsumed, so a
+            // legitimate retry with the same signed request is not mistaken for a replay when nothing
+            // was actually recorded. Revocation is idempotent, so the only cost of this ordering is a
+            // replayed-after-eviction request re-applying the same record before the nonce check
+            // below rejects it — harmless. (INonceStore has no release primitive, so reordering is
+            // the minimal robust fix.)
+            var revokerDid = proof.VerificationMethod.Split('#')[0];
+            var (reason, metadata) = ExtractSignedRevocationDetails(proof);
+            if (!await RevokeCapabilityCoreAsync(capability.Id, revokerDid, reason, metadata))
+                return false;
+
+            // Replay protection (nonce = request id): consumed only after the durable write
+            // succeeded. A replayed id still returns false here; the record was idempotent.
+            var nonceExpiry = DateTime.UtcNow.Add(_nonceWindow);
+            if (await _nonceStore.TryMarkAsUsedAsync(signedRevocation.Id, nonceExpiry))
+                return false;
+
+            return true;
         }
-        catch (CapabilityValidationException)
+        catch
         {
             return false;
         }
+    }
+
+    /// <summary>
+    /// True when <paramref name="verificationMethod"/> may revoke <paramref name="capability"/> —
+    /// i.e. it controls the capability or any ancestor in its delegation chain. Cryptographically
+    /// verifies the chain before trusting any controller fields; a forged or invalid chain yields
+    /// false. <paramref name="verificationMethod"/> is the authenticated proof verification method
+    /// (or a bare DID); authentication is performed by the caller.
+    /// </summary>
+    private async Task<bool> IsRevokerAuthorizedAsync(Capability capability, string verificationMethod)
+    {
+        // Build the chain once, then verify it cryptographically before trusting controller fields.
+        // Without that verification, a caller passing a crafted Capability with a tampered controller
+        // could authorize themselves to revoke a legitimate capability. (VerifyBuiltChainAsync reuses
+        // this built chain instead of rebuilding it — see VerifyCapabilityChainAsync.)
+        List<Capability> chain;
+        try
+        {
+            chain = await BuildCapabilityChainAsync(capability);
+        }
+        catch
+        {
+            // A malformed/unbuildable chain → not authorized. Fail-closed.
+            return false;
+        }
+
+        if (!await VerifyBuiltChainAsync(chain))
+            return false;
+
+        // Authorization is a string-level controller match: verificationMethod (a bare DID or a
+        // did#key-fragment) authorizes when it equals a chain controller, or its bare DID
+        // does. This covers did:key (the DID *is* the key) and a did:web controller whose
+        // bare DID matches the revoker's key fragment (did:web:issuer#key-1 → did:web:issuer).
+        // It does NOT resolve the controller's DID document, so a revoker key belonging to a
+        // *different* DID that the controller would authorize is not matched.
+        // TODO: support cross-DID key authorization by resolving the controller's DID
+        // document and checking its verificationMethod/capabilityDelegation relationships.
+        return chain.Any(link =>
+            link.Controller is not null &&
+            link.Controller.ContainsVerificationMethod(verificationMethod));
+    }
+
+    /// <summary>
+    /// Extracts the signed <c>reason</c>/<c>metadata</c> a revocation proof carried in its
+    /// <see cref="Proof.AdditionalProperties"/>. These were part of the verified signature, so they
+    /// are authenticated by the time this is called.
+    /// </summary>
+    private static (string? Reason, IDictionary<string, string>? Metadata) ExtractSignedRevocationDetails(Proof proof)
+    {
+        string? reason = null;
+        IDictionary<string, string>? metadata = null;
+
+        if (proof.AdditionalProperties is { } extra)
+        {
+            if (extra.TryGetValue(Proof.RevocationReasonField, out var reasonElement) &&
+                reasonElement.ValueKind == JsonValueKind.String)
+            {
+                reason = reasonElement.GetString();
+            }
+
+            if (extra.TryGetValue(Proof.RevocationMetadataField, out var metadataElement) &&
+                metadataElement.ValueKind == JsonValueKind.Object)
+            {
+                metadata = metadataElement.Deserialize<Dictionary<string, string>>(ZcapJsonOptions.Default);
+            }
+        }
+
+        return (reason, metadata);
     }
 
     /// <summary>
@@ -761,12 +986,18 @@ public class VerificationService : IVerificationService
         return _revocationService.IsRevokedAsync(capabilityId);
     }
 
-    private async Task<bool> RevokeCapabilityCoreAsync(string capabilityId, string revokerDid)
+    private async Task<bool> RevokeCapabilityCoreAsync(
+        string capabilityId,
+        string revokerDid,
+        string? reason = null,
+        IDictionary<string, string>? metadata = null)
     {
         await _revocationService.RevokeAsync(new RevocationRequest
         {
             CapabilityId = capabilityId,
-            RevokedBy = revokerDid
+            RevokedBy = revokerDid,
+            Reason = reason,
+            Metadata = metadata
         });
 
         return true;

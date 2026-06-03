@@ -9,6 +9,36 @@ namespace ZcapLd.Core.Models;
 public class Proof
 {
     /// <summary>
+    /// The <c>proofPurpose</c> for a capability invocation proof.
+    /// </summary>
+    public const string CapabilityInvocationPurpose = "capabilityInvocation";
+
+    /// <summary>
+    /// The <c>proofPurpose</c> for a capability delegation proof.
+    /// </summary>
+    public const string CapabilityDelegationPurpose = "capabilityDelegation";
+
+    /// <summary>
+    /// The <c>proofPurpose</c> for a signed capability revocation request. Deliberately distinct
+    /// from <see cref="CapabilityInvocationPurpose"/> so a revocation request's signed bytes are
+    /// disjoint from any normal invocation — a normal invocation can never be replayed as a
+    /// revocation, nor vice-versa, regardless of the <c>capabilityAction</c> an application uses.
+    /// </summary>
+    public const string CapabilityRevocationPurpose = "capabilityRevocation";
+
+    /// <summary>
+    /// Signed proof extension key (in <see cref="AdditionalProperties"/>) carrying a revocation's
+    /// human-readable reason. Shared by the signing and verification revocation paths.
+    /// </summary>
+    internal const string RevocationReasonField = "revocationReason";
+
+    /// <summary>
+    /// Signed proof extension key (in <see cref="AdditionalProperties"/>) carrying a revocation's
+    /// audit metadata. Shared by the signing and verification revocation paths.
+    /// </summary>
+    internal const string RevocationMetadataField = "revocationMetadata";
+
+    /// <summary>
     /// The signature type (e.g., "Ed25519Signature2020")
     /// </summary>
     [JsonPropertyName("type")]

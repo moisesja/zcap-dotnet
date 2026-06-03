@@ -6,6 +6,33 @@
 
 ---
 
+## Update (3.0.0): Signed revocation (proof-of-possession)
+
+A later review found revocation accepted a bare `revokerDid` **string** with no proof of key
+possession. Since controller DIDs are public (embedded in the chain), anyone could revoke a
+capability by asserting a controller's DID — and the ASP.NET POST endpoint recorded revocations
+directly from the request body with no checks at all (denial-of-capability). **Fixed in 3.0.0**:
+revocation now requires a cryptographically **signed** request — `ISigningService.SignRevocationAsync`
+mints a `capabilityRevocation`-purpose, `revoke`-action invocation bound to the capability, and
+`IVerificationService.RevokeCapabilityAsync(Capability, Invocation)` verifies the signature
+(authentication) before authorizing the verified verification method against the capability's
+cryptographically verified delegation chain. All string-keyed revocation overloads are removed; the
+HTTP endpoint requires the signed request and returns 403 otherwise. See the CHANGELOG (Issue #60 +
+revocation hardening) and `docs/REVOCATION-INTEGRATION.md`.
+
+**Follow-up (Issue #63 — ancestor-revocation consistency):** the standalone single-proof check
+`IVerificationService.VerifyCapabilityProofAsync(Capability)` previously revocation-checked only the
+leaf and its *immediate* parent, so a capability whose **root or an intermediate ancestor** had been
+revoked still passed it — while `VerifyCapabilityChainAsync` correctly rejected it. A consumer
+treating the single-proof method as "is this still valid?" could therefore accept a capability with a
+revoked ancestor. **Fixed**: the standalone path now sweeps **every** ancestor id carried in the
+delegation proof's `capabilityChain` and rejects if any is revoked, matching the chain path at every
+depth. Hardening shipped alongside: the replay nonce on `RevokeCapabilityAsync` is now consumed only
+**after** the durable revocation write succeeds (a failed write no longer burns the request id), and
+`CapabilityService.BuildCapabilityChain` de-duplicates ancestor ids.
+
+---
+
 ## Executive Summary
 
 In response to a comprehensive security and compliance review that identified **critical vulnerabilities** and **non-compliance with W3C ZCAP-LD specification**, I have successfully addressed **all critical and high-severity issues**.
