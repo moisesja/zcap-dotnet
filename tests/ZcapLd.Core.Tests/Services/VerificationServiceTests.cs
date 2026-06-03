@@ -100,19 +100,23 @@ public class VerificationServiceTests
         var result = await verifier.VerifyCapabilityChainAsync(malformed);
 
         result.Should().BeFalse("fail-closed is preserved");
-        logger.Entries.Should().Contain(e => e.Level == LogLevel.Warning && e.Exception != null,
-            "the swallowed cause must be logged, not discarded");
+        // PR #84 review (Finding 1): an unbuildable capability is attacker-drivable validation
+        // input, so it logs at Debug (not Warning) to avoid log amplification — but the cause must
+        // still be recorded, with the exception, attributed to this method.
+        logger.Entries.Should().Contain(
+            e => e.Level == LogLevel.Debug && e.Exception != null && e.Message.Contains("VerifyCapabilityChainAsync"),
+            "the swallowed cause must be logged (at Debug for expected input), not discarded");
     }
 
     [Fact]
     public async Task RevokeCapability_WhenAuthorizationChainWalkFaults_FailsClosedAndLogs()
     {
         // PR #84 review (🔴): the revocation authorization step (IsRevokerAuthorizedAsync) must fail
-        // closed on ANY fault from the chain walk — not only CapabilityValidationException — so a
-        // transient/structural fault returns false instead of propagating as an unhandled exception
-        // through the public RevokeCapabilityAsync API and crashing callers that expect false. The
-        // cause is logged (Issue #64) so operators can tell a chain-walk failure apart from a
-        // genuine "not authorized".
+        // closed on ANY fault from the chain walk — not only CapabilityValidationException — returning
+        // false rather than letting the fault escape the authorization decision. The cause is logged
+        // (Issue #64) so operators can tell a chain-walk failure apart from a genuine "not authorized".
+        // The assertion pins the INNER catch's specific message so the test would fail if that catch
+        // were narrowed or removed (the outer RevokeCapabilityAsync catch logs a different message).
         var logger = new CapturingLogger<VerificationService>();
         var verifier = new VerificationService(
             _didProvider,
@@ -144,12 +148,47 @@ public class VerificationServiceTests
         var signedRevocation = await _signingService.SignRevocationAsync(
             malformed.Id, revokerDid, malformed.InvocationTarget);
 
-        // Must NOT throw; must return false (fail-closed) and log the swallowed cause.
+        // Must NOT throw; must return false (fail-closed) and log the swallowed cause at Debug
+        // (CapabilityValidationException is expected, attacker-drivable input — Finding 1).
         var result = await verifier.RevokeCapabilityAsync(malformed, signedRevocation);
 
-        result.Should().BeFalse("an unbuildable authorization chain means 'not authorized', not a crash");
-        logger.Entries.Should().Contain(e => e.Level == LogLevel.Warning && e.Exception != null,
-            "the swallowed chain-walk cause must be logged, not discarded");
+        result.Should().BeFalse("an unbuildable authorization chain means 'not authorized'");
+        logger.Entries.Should().Contain(
+            e => e.Level == LogLevel.Debug && e.Exception != null && e.Message.Contains("IsRevokerAuthorizedAsync"),
+            "the inner authorization catch must log the cause, attributed to IsRevokerAuthorizedAsync");
+    }
+
+    [Fact]
+    public async Task VerifyCapabilityChain_WhenUnexpectedFaultOccurs_LogsAtWarning()
+    {
+        // PR #84 review (Finding 1): the severity seam must work in BOTH directions. A genuinely
+        // unexpected, non-library fault — here a revocation-store InvalidOperationException standing
+        // in for a transient infra/config error — is exactly what #64 wants an operator to SEE, so it
+        // logs at Warning, not the Debug reserved for expected, attacker-drivable validation input.
+        var logger = new CapturingLogger<VerificationService>();
+        var verifier = new VerificationService(
+            _didProvider,
+            _caveatProcessor,
+            VerificationService.CreateDefaultSuiteProvider(),
+            new ThrowingRevocationService(),
+            new InMemoryNonceStore(),
+            SigningService.CreateDefaultCanonicalizerProvider(),
+            nonceWindow: null,
+            logger: logger);
+
+        var rootDid = "did:key:z6MkWarnBranchRoot";
+        _didProvider.GenerateAndRegisterKeyPair(rootDid);
+        var root = await _capabilityService.CreateRootCapabilityAsync(
+            rootDid, "https://example.com/resource", new[] { "read" });
+
+        // The chain builds fine; the per-link revocation check then hits the throwing store, so the
+        // fault is a non-library InvalidOperationException reaching a fail-closed catch.
+        var result = await verifier.VerifyCapabilityChainAsync(root);
+
+        result.Should().BeFalse("an infrastructure fault fails closed");
+        logger.Entries.Should().Contain(
+            e => e.Level == LogLevel.Warning && e.Exception is InvalidOperationException,
+            "a genuinely unexpected fault must surface at Warning so the operator sees it");
     }
 
     [Fact]
@@ -1551,6 +1590,22 @@ internal class ContentTypeCaveat : Caveat
             && value is string contentType
             && string.Equals(contentType, RequiredContentType, StringComparison.OrdinalIgnoreCase);
     }
+}
+
+/// <summary>
+/// Revocation service whose status check throws a non-library fault, standing in for a transient
+/// infrastructure/config error. Drives the Warning branch of <c>LogFailedClosed</c> (PR #84, Finding 1).
+/// </summary>
+internal sealed class ThrowingRevocationService : IRevocationService
+{
+    public Task<RevocationRecord> RevokeAsync(RevocationRequest request, CancellationToken cancellationToken = default)
+        => throw new NotSupportedException();
+
+    public Task<RevocationRecord?> GetRevocationAsync(string capabilityId, CancellationToken cancellationToken = default)
+        => throw new NotSupportedException();
+
+    public Task<bool> IsRevokedAsync(string capabilityId, CancellationToken cancellationToken = default)
+        => throw new InvalidOperationException("simulated revocation-store outage");
 }
 
 /// <summary>Minimal in-memory <see cref="ILogger{T}"/> that records emitted entries (Issue #64 test support).</summary>

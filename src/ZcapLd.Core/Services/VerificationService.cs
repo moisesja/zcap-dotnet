@@ -129,6 +129,44 @@ public class VerificationService : IVerificationService
     }
 
     /// <summary>
+    /// Logs the cause of a fail-closed verification at a severity chosen by exception type.
+    /// Expected, attacker-drivable validation/parse failures — a malformed or unbuildable
+    /// capability, an unsupported proof type, an unresolvable/malformed <c>verificationMethod</c>,
+    /// a malformed <c>proofValue</c>, malformed wire JSON — log at <see cref="LogLevel.Debug"/>, so a
+    /// hostile client posting bad wire data cannot flood the operator's Warning channel and mask a
+    /// real misconfiguration. <see cref="LogLevel.Warning"/> is reserved for genuinely unexpected
+    /// faults an operator must act on: a missing canonicalizer / crypto-suite registration
+    /// (<see cref="CryptographicException"/>), a transient DID-resolution / infrastructure error, or
+    /// any non-library exception. Fail-closed is unaffected either way (Issue #64; the structured
+    /// invalid-vs-couldn't-check channel remains #70).
+    /// </summary>
+    private void LogFailedClosed(Exception ex, string template, params object?[] args)
+    {
+        var expected = ex is CapabilityValidationException or DelegationException
+            or InvocationException or CaveatException or FormatException or JsonException;
+        _logger.Log(expected ? LogLevel.Debug : LogLevel.Warning, ex, template, args);
+    }
+
+    /// <summary>
+    /// Decodes a proof's multibase <c>proofValue</c>, retyping a malformed/unsupported value as a
+    /// <see cref="CapabilityValidationException"/>. A bad <c>proofValue</c> is invalid <i>input</i>,
+    /// not a crypto-configuration fault, so this keeps it on the Debug-severity side of
+    /// <see cref="LogFailedClosed"/> instead of colliding with the missing-canonicalizer
+    /// <see cref="CryptographicException"/> that must stay at Warning.
+    /// </summary>
+    private static byte[] DecodeProofValue(string proofValue)
+    {
+        try
+        {
+            return MultibaseCodec.Decode(proofValue);
+        }
+        catch (CryptographicException ex)
+        {
+            throw new CapabilityValidationException("Malformed or unsupported proofValue.", ex);
+        }
+    }
+
+    /// <summary>
     /// Verifies a capability's cryptographic proof
     /// </summary>
     public async Task<bool> VerifyCapabilityProofAsync(Capability capability)
@@ -173,7 +211,7 @@ public class VerificationService : IVerificationService
             // Fail closed, but record the cause: a config/transient fault (missing canonicalizer,
             // unsupported proof type, DID-resolution error) is otherwise indistinguishable from an
             // invalid capability (Issue #64).
-            _logger.LogWarning(ex,
+            LogFailedClosed(ex,
                 "VerifyCapabilityProofAsync failed closed for capability {CapabilityId}", capability.Id);
             return false;
         }
@@ -259,7 +297,7 @@ public class VerificationService : IVerificationService
                 capabilityWithoutProof,
                 proof,
                 canonicalizer);
-            var signatureBytes = MultibaseCodec.Decode(proof.ProofValue);
+            var signatureBytes = DecodeProofValue(proof.ProofValue);
 
             return suite.Verify(canonicalBytes, signatureBytes, resolvedKey.PublicKeyBytes);
         }
@@ -376,7 +414,7 @@ public class VerificationService : IVerificationService
         {
             // Fail closed, but record the cause so a misconfiguration/transient fault is
             // distinguishable from an invalid invocation (Issue #64).
-            _logger.LogWarning(ex,
+            LogFailedClosed(ex,
                 "VerifyInvocationAsync failed closed for invocation {InvocationId}", invocation.Id);
             return false;
         }
@@ -404,7 +442,7 @@ public class VerificationService : IVerificationService
             invocationWithoutProof,
             proof,
             canonicalizer);
-        var signatureBytes = MultibaseCodec.Decode(proof.ProofValue);
+        var signatureBytes = DecodeProofValue(proof.ProofValue);
 
         return suite.Verify(canonicalBytes, signatureBytes, resolvedKey.PublicKeyBytes);
     }
@@ -431,7 +469,7 @@ public class VerificationService : IVerificationService
             // Fail closed, but record the cause so a config/transient fault (an unbuildable chain,
             // a missing canonicalizer, a DID-resolution error) is distinguishable from an invalid
             // capability (Issue #64).
-            _logger.LogWarning(ex,
+            LogFailedClosed(ex,
                 "VerifyCapabilityChainAsync failed closed for capability {CapabilityId}", capability.Id);
             return false;
         }
@@ -441,7 +479,7 @@ public class VerificationService : IVerificationService
     /// Verifies an already-built root→leaf capability chain: length bound, per-link revocation,
     /// per-link delegation proof / attenuation / expiry / caveat compatibility, and root shape.
     /// Fully fail-closed — any unexpected failure yields <c>false</c>. Callers that have already
-    /// built the chain (e.g. <see cref="IsRevokerAuthorizedAsync"/>, <see cref="VerifyInvocationAsync"/>)
+    /// built the chain (e.g. <see cref="IsRevokerAuthorizedAsync"/>, <see cref="VerifyInvocationAsync(Invocation, Capability)"/>)
     /// pass it here to avoid a redundant rebuild.
     /// </summary>
     private async Task<bool> VerifyBuiltChainAsync(List<Capability> chain)
@@ -502,7 +540,7 @@ public class VerificationService : IVerificationService
             // Fail closed, but record the cause so a misconfiguration/transient fault is
             // distinguishable from an invalid chain (Issue #64). This helper only has the built
             // chain in scope, so key the diagnostic on the leaf capability being verified.
-            _logger.LogWarning(ex,
+            LogFailedClosed(ex,
                 "Chain verification failed closed for leaf capability {CapabilityId}",
                 chain.Count > 0 ? chain[^1].Id : "(empty chain)");
             return false;
@@ -931,7 +969,7 @@ public class VerificationService : IVerificationService
             // Fail closed, but record the cause so a misconfiguration/transient fault (a signature
             // verification error, a store write failure, a DID-resolution error) is distinguishable
             // from a structurally invalid or unauthorized revocation request (Issue #64).
-            _logger.LogWarning(ex,
+            LogFailedClosed(ex,
                 "RevokeCapabilityAsync failed closed for capability {CapabilityId}", capability.Id);
             return false;
         }
@@ -971,13 +1009,14 @@ public class VerificationService : IVerificationService
         }
         catch (Exception ex)
         {
-            // Fail closed on ANY fault, not just a malformed chain. BuildCapabilityChainAsync can
-            // throw InvalidOperationException, JsonException, or a DID-resolution network error;
-            // catching only CapabilityValidationException would let those propagate as unhandled
-            // exceptions through the public RevokeCapabilityAsync API, crashing callers that expect
-            // "not authorized" (false). Logging the cause lets operators tell a transient chain-walk
-            // failure apart from a genuine authorization denial (PR #84 review; Issue #64).
-            _logger.LogWarning(ex,
+            // Fail closed on ANY fault from the chain walk, not just a malformed chain.
+            // BuildCapabilityChainAsync can throw CapabilityValidationException, JsonException, or a
+            // DID-resolution error — all of which mean "cannot establish authorization", i.e. not
+            // authorized. RevokeCapabilityAsync's own top-level catch would also fail closed (no caller
+            // was ever at crash risk), but catching here keeps the authorization decision local and
+            // attributes the cause to THIS step rather than the broader revocation flow (PR #84 review;
+            // Issue #64). Severity is chosen by LogFailedClosed.
+            LogFailedClosed(ex,
                 "IsRevokerAuthorizedAsync failed closed for capability {CapabilityId}", capability.Id);
             return false;
         }
