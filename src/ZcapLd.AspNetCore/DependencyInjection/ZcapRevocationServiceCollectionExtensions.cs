@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Logging;
 using ZcapLd.AspNetCore.Services;
 using ZcapLd.Core.Cryptography;
 using ZcapLd.Core.Models;
@@ -86,7 +87,8 @@ public static class ZcapRevocationServiceCollectionExtensions
                 sp.GetRequiredService<ICryptoSuiteProvider>(),
                 sp.GetRequiredService<IRevocationService>(),
                 sp.GetRequiredService<INonceStore>(),
-                sp.GetRequiredService<IDocumentCanonicalizerProvider>()));
+                sp.GetRequiredService<IDocumentCanonicalizerProvider>(),
+                logger: sp.GetService<ILogger<VerificationService>>()));
 
         return services;
     }

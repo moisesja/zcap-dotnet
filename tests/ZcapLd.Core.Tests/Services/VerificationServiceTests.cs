@@ -1,5 +1,6 @@
 using System.Text.Json;
 using FluentAssertions;
+using Microsoft.Extensions.Logging;
 using Xunit;
 using ZcapLd.Core.Cryptography;
 using ZcapLd.Core.Exceptions;
@@ -67,6 +68,172 @@ public class VerificationServiceTests
 
         // Assert
         result.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task VerifyCapabilityChain_WhenItFailsClosed_LogsTheCause()
+    {
+        // Issue #64: failing closed is correct, but the cause must not be discarded silently.
+        // A delegated capability whose chain cannot be reconstructed throws internally; the
+        // top-level catch must return false AND emit a diagnostic via the injected logger.
+        var logger = new CapturingLogger<VerificationService>();
+        var verifier = new VerificationService(
+            _didProvider,
+            _caveatProcessor,
+            VerificationService.CreateDefaultSuiteProvider(),
+            new RevocationService(new InMemoryRevocationStore()),
+            new InMemoryNonceStore(),
+            SigningService.CreateDefaultCanonicalizerProvider(),
+            nonceWindow: null,
+            logger: logger);
+
+        // Looks delegated (has parentCapability) but carries no proof/chain → BuildCapabilityChainAsync throws.
+        var malformed = new Capability
+        {
+            Context = new object[] { "https://w3id.org/zcap/v1" },
+            Id = "urn:uuid:malformed",
+            Controller = "did:key:z6MkLogChild",
+            InvocationTarget = "https://example.com/resource",
+            ParentCapability = "urn:zcap:root:https%3A%2F%2Fexample.com%2Fresource"
+        };
+
+        var result = await verifier.VerifyCapabilityChainAsync(malformed);
+
+        result.Should().BeFalse("fail-closed is preserved");
+        // PR #84 review (Finding 1): an unbuildable capability is attacker-drivable validation
+        // input, so it logs at Debug (not Warning) to avoid log amplification — but the cause must
+        // still be recorded, with the exception, attributed to this method.
+        logger.Entries.Should().Contain(
+            e => e.Level == LogLevel.Debug && e.Exception != null && e.Message.Contains("VerifyCapabilityChainAsync"),
+            "the swallowed cause must be logged (at Debug for expected input), not discarded");
+    }
+
+    [Fact]
+    public async Task RevokeCapability_WhenAuthorizationChainWalkFaults_FailsClosedAndLogs()
+    {
+        // PR #84 review (🔴): the revocation authorization step (IsRevokerAuthorizedAsync) must fail
+        // closed on ANY fault from the chain walk — not only CapabilityValidationException — returning
+        // false rather than letting the fault escape the authorization decision. The cause is logged
+        // (Issue #64) so operators can tell a chain-walk failure apart from a genuine "not authorized".
+        // The assertion pins the INNER catch's specific message so the test would fail if that catch
+        // were narrowed or removed (the outer RevokeCapabilityAsync catch logs a different message).
+        var logger = new CapturingLogger<VerificationService>();
+        var verifier = new VerificationService(
+            _didProvider,
+            _caveatProcessor,
+            VerificationService.CreateDefaultSuiteProvider(),
+            new RevocationService(new InMemoryRevocationStore()),
+            new InMemoryNonceStore(),
+            SigningService.CreateDefaultCanonicalizerProvider(),
+            nonceWindow: null,
+            logger: logger);
+
+        var revokerDid = "did:key:z6MkRevokeFaultRevoker";
+        _didProvider.GenerateAndRegisterKeyPair(revokerDid);
+
+        // Looks delegated (has parentCapability) but carries no proof/chain, so authorization's
+        // BuildCapabilityChainAsync throws — and it throws AFTER the revocation request's own
+        // signature has already verified, exercising the authorization-step catch specifically.
+        var malformed = new Capability
+        {
+            Context = new object[] { "https://w3id.org/zcap/v1" },
+            Id = "urn:uuid:revoke-fault",
+            Controller = revokerDid,
+            InvocationTarget = "https://example.com/resource",
+            ParentCapability = "urn:zcap:root:https%3A%2F%2Fexample.com%2Fresource"
+        };
+
+        // A genuinely valid proof-of-possession revocation request bound to the malformed capability,
+        // so the structural and signature checks pass and control reaches the chain walk.
+        var signedRevocation = await _signingService.SignRevocationAsync(
+            malformed.Id, revokerDid, malformed.InvocationTarget);
+
+        // Must NOT throw; must return false (fail-closed) and log the swallowed cause at Debug
+        // (CapabilityValidationException is expected, attacker-drivable input — Finding 1).
+        var result = await verifier.RevokeCapabilityAsync(malformed, signedRevocation);
+
+        result.Should().BeFalse("an unbuildable authorization chain means 'not authorized'");
+        logger.Entries.Should().Contain(
+            e => e.Level == LogLevel.Debug && e.Exception != null && e.Message.Contains("IsRevokerAuthorizedAsync"),
+            "the inner authorization catch must log the cause, attributed to IsRevokerAuthorizedAsync");
+    }
+
+    [Fact]
+    public async Task VerifyCapabilityChain_WhenUnexpectedFaultOccurs_LogsAtWarning()
+    {
+        // PR #84 review (Finding 1): the severity seam must work in BOTH directions. A genuinely
+        // unexpected, non-library fault — here a revocation-store InvalidOperationException standing
+        // in for a transient infra/config error — is exactly what #64 wants an operator to SEE, so it
+        // logs at Warning, not the Debug reserved for expected, attacker-drivable validation input.
+        var logger = new CapturingLogger<VerificationService>();
+        var verifier = new VerificationService(
+            _didProvider,
+            _caveatProcessor,
+            VerificationService.CreateDefaultSuiteProvider(),
+            new ThrowingRevocationService(),
+            new InMemoryNonceStore(),
+            SigningService.CreateDefaultCanonicalizerProvider(),
+            nonceWindow: null,
+            logger: logger);
+
+        var rootDid = "did:key:z6MkWarnBranchRoot";
+        _didProvider.GenerateAndRegisterKeyPair(rootDid);
+        var root = await _capabilityService.CreateRootCapabilityAsync(
+            rootDid, "https://example.com/resource", new[] { "read" });
+
+        // The chain builds fine; the per-link revocation check then hits the throwing store, so the
+        // fault is a non-library InvalidOperationException reaching a fail-closed catch.
+        var result = await verifier.VerifyCapabilityChainAsync(root);
+
+        result.Should().BeFalse("an infrastructure fault fails closed");
+        logger.Entries.Should().Contain(
+            e => e.Level == LogLevel.Warning && e.Exception is InvalidOperationException,
+            "a genuinely unexpected fault must surface at Warning so the operator sees it");
+    }
+
+    [Fact]
+    public async Task VerifyInvocation_WithEmptyProofValue_LogsAtDebugNotWarning()
+    {
+        // PR #84 review (residual nit): an empty/null proofValue makes MultibaseCodec.Decode throw
+        // ArgumentException from a guard BEFORE its own try, so DecodeProofValue must retype that too
+        // (not only the wrapped CryptographicException) — otherwise this attacker-drivable input lands
+        // at Warning, the exact vector Finding 1 closed. Assert it fails closed and logs at Debug
+        // carrying a CapabilityValidationException whose inner cause is the ArgumentException.
+        var logger = new CapturingLogger<VerificationService>();
+        var verifier = new VerificationService(
+            _didProvider,
+            _caveatProcessor,
+            VerificationService.CreateDefaultSuiteProvider(),
+            new RevocationService(new InMemoryRevocationStore()),
+            new InMemoryNonceStore(),
+            SigningService.CreateDefaultCanonicalizerProvider(),
+            nonceWindow: null,
+            logger: logger);
+
+        var controllerDid = "did:key:z6MkEmptyProofValue";
+        _didProvider.GenerateAndRegisterKeyPair(controllerDid);
+        var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
+            controllerDid, "https://example.com/resource", new[] { "read" });
+
+        var invocation = new Invocation
+        {
+            Capability = rootCapability.Id,
+            CapabilityAction = "read",
+            InvocationTarget = "https://example.com/resource"
+        };
+        invocation.Proof = await _signingService.SignInvocationAsync(invocation, controllerDid);
+        // Structurally intact, but the signature encoding is empty — invalid input, not a config fault.
+        invocation.Proof.ProofValue = "";
+
+        var result = await verifier.VerifyInvocationAsync(invocation, rootCapability);
+
+        result.Should().BeFalse("an empty proofValue fails closed");
+        logger.Entries.Should().Contain(
+            e => e.Level == LogLevel.Debug && e.Exception is CapabilityValidationException
+                && e.Exception.InnerException is ArgumentException,
+            "an empty proofValue is malformed input — Debug, retyped from the decode ArgumentException");
+        logger.Entries.Should().NotContain(e => e.Level == LogLevel.Warning,
+            "a malformed proofValue must not reach the Warning channel");
     }
 
     [Fact]
@@ -1467,5 +1634,41 @@ internal class ContentTypeCaveat : Caveat
         return context.Properties.TryGetValue("contentType", out var value)
             && value is string contentType
             && string.Equals(contentType, RequiredContentType, StringComparison.OrdinalIgnoreCase);
+    }
+}
+
+/// <summary>
+/// Revocation service whose status check throws a non-library fault, standing in for a transient
+/// infrastructure/config error. Drives the Warning branch of <c>LogFailedClosed</c> (PR #84, Finding 1).
+/// </summary>
+internal sealed class ThrowingRevocationService : IRevocationService
+{
+    public Task<RevocationRecord> RevokeAsync(RevocationRequest request, CancellationToken cancellationToken = default)
+        => throw new NotSupportedException();
+
+    public Task<RevocationRecord?> GetRevocationAsync(string capabilityId, CancellationToken cancellationToken = default)
+        => throw new NotSupportedException();
+
+    public Task<bool> IsRevokedAsync(string capabilityId, CancellationToken cancellationToken = default)
+        => throw new InvalidOperationException("simulated revocation-store outage");
+}
+
+/// <summary>Minimal in-memory <see cref="ILogger{T}"/> that records emitted entries (Issue #64 test support).</summary>
+internal sealed class CapturingLogger<T> : ILogger<T>
+{
+    public List<(LogLevel Level, Exception? Exception, string Message)> Entries { get; } = new();
+
+    public IDisposable BeginScope<TState>(TState state) where TState : notnull => NullScope.Instance;
+
+    public bool IsEnabled(LogLevel logLevel) => true;
+
+    public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+        Func<TState, Exception?, string> formatter)
+        => Entries.Add((logLevel, exception, formatter(state, exception)));
+
+    private sealed class NullScope : IDisposable
+    {
+        public static readonly NullScope Instance = new();
+        public void Dispose() { }
     }
 }

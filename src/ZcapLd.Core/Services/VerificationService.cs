@@ -1,4 +1,6 @@
 using System.Text.Json;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using ZcapLd.Core.Cryptography;
 using ZcapLd.Core.Exceptions;
 using ZcapLd.Core.Models;
@@ -19,6 +21,7 @@ public class VerificationService : IVerificationService
     private readonly INonceStore _nonceStore;
     private readonly IDocumentCanonicalizerProvider _canonicalizerProvider;
     private readonly TimeSpan _nonceWindow;
+    private readonly ILogger _logger;
     private const int MaxChainLength = 10; // Per spec: SHOULD limit to 10
 
     /// <summary>
@@ -92,7 +95,10 @@ public class VerificationService : IVerificationService
     }
 
     /// <summary>
-    /// Full constructor with all dependencies including canonicalizer provider.
+    /// Full constructor with all dependencies including canonicalizer provider. The optional
+    /// <paramref name="logger"/> receives a diagnostic whenever verification fails closed on an
+    /// unexpected exception, so operators can tell a misconfiguration/transient fault apart from
+    /// an invalid capability (Issue #64). Defaults to <see cref="NullLogger"/> (no output).
     /// </summary>
     public VerificationService(
         IDidResolver didResolver,
@@ -101,7 +107,8 @@ public class VerificationService : IVerificationService
         IRevocationService revocationService,
         INonceStore nonceStore,
         IDocumentCanonicalizerProvider canonicalizerProvider,
-        TimeSpan? nonceWindow = null)
+        TimeSpan? nonceWindow = null,
+        ILogger<VerificationService>? logger = null)
     {
         _didResolver = didResolver ?? throw new ArgumentNullException(nameof(didResolver));
         _caveatProcessor = caveatProcessor ?? throw new ArgumentNullException(nameof(caveatProcessor));
@@ -110,6 +117,7 @@ public class VerificationService : IVerificationService
         _nonceStore = nonceStore ?? throw new ArgumentNullException(nameof(nonceStore));
         _canonicalizerProvider = canonicalizerProvider ?? throw new ArgumentNullException(nameof(canonicalizerProvider));
         _nonceWindow = nonceWindow ?? DefaultNonceWindow;
+        _logger = logger ?? NullLogger<VerificationService>.Instance;
     }
 
     internal static ICryptoSuiteProvider CreateDefaultSuiteProvider()
@@ -118,6 +126,55 @@ public class VerificationService : IVerificationService
         provider.Register(CryptoSuite.Ed25519());
         provider.Register(CryptoSuite.P256());
         return provider;
+    }
+
+    /// <summary>
+    /// Logs the cause of a fail-closed verification at a severity chosen by exception type.
+    /// Expected, attacker-drivable validation/parse failures — a malformed or unbuildable
+    /// capability, an unsupported proof type, an unresolvable/malformed <c>verificationMethod</c>,
+    /// a malformed <c>proofValue</c>, malformed wire JSON — log at <see cref="LogLevel.Debug"/>, so a
+    /// hostile client posting bad wire data cannot flood the operator's Warning channel and mask a
+    /// real misconfiguration. <see cref="LogLevel.Warning"/> is reserved for genuinely unexpected
+    /// faults an operator must act on: a missing canonicalizer / crypto-suite registration
+    /// (<see cref="CryptographicException"/>), a transient DID-resolution / infrastructure error, or
+    /// any non-library exception. Fail-closed is unaffected either way (Issue #64; the structured
+    /// invalid-vs-couldn't-check channel remains #70).
+    /// <para>
+    /// Classification is by exception <i>type</i>, so it is best-effort for third-party
+    /// <see cref="IDidResolver"/> implementations: a custom (e.g. network) resolver that throws its own
+    /// exception type on an attacker-referenced <c>verificationMethod</c> lands at Warning rather than
+    /// Debug. That is the conservative default — an unresolvable method is genuinely ambiguous (attacker
+    /// noise vs. a transient resolver outage the operator must see). The bundled <c>DidKeyResolver</c>
+    /// already maps resolution failures to <see cref="CapabilityValidationException"/> (Debug).
+    /// </para>
+    /// </summary>
+    private void LogFailedClosed(Exception ex, string template, params object?[] args)
+    {
+        var expected = ex is CapabilityValidationException or DelegationException
+            or InvocationException or CaveatException or FormatException or JsonException;
+        _logger.Log(expected ? LogLevel.Debug : LogLevel.Warning, ex, template, args);
+    }
+
+    /// <summary>
+    /// Decodes a proof's multibase <c>proofValue</c>, retyping a malformed/unsupported/empty value as
+    /// a <see cref="CapabilityValidationException"/>. A bad <c>proofValue</c> is invalid <i>input</i>,
+    /// not a crypto-configuration fault, so this keeps it on the Debug-severity side of
+    /// <see cref="LogFailedClosed"/> instead of colliding with the missing-canonicalizer
+    /// <see cref="CryptographicException"/> that must stay at Warning. <see cref="MultibaseCodec.Decode"/>
+    /// throws <see cref="ArgumentException"/> (null/empty), a guard before its own try, and
+    /// <see cref="CryptographicException"/> (bad prefix / undecodable) — both are an invalid proofValue
+    /// here (this call's only sources of those types), so both are retyped.
+    /// </summary>
+    private static byte[] DecodeProofValue(string proofValue)
+    {
+        try
+        {
+            return MultibaseCodec.Decode(proofValue);
+        }
+        catch (Exception ex) when (ex is CryptographicException or ArgumentException)
+        {
+            throw new CapabilityValidationException("Malformed or unsupported proofValue.", ex);
+        }
     }
 
     /// <summary>
@@ -160,8 +217,13 @@ public class VerificationService : IVerificationService
                 parentCapabilityOverride: null,
                 requireParentAuthorization: true);
         }
-        catch
+        catch (Exception ex)
         {
+            // Fail closed, but record the cause: a config/transient fault (missing canonicalizer,
+            // unsupported proof type, DID-resolution error) is otherwise indistinguishable from an
+            // invalid capability (Issue #64).
+            LogFailedClosed(ex,
+                "VerifyCapabilityProofAsync failed closed for capability {CapabilityId}", capability.Id);
             return false;
         }
     }
@@ -246,7 +308,7 @@ public class VerificationService : IVerificationService
                 capabilityWithoutProof,
                 proof,
                 canonicalizer);
-            var signatureBytes = MultibaseCodec.Decode(proof.ProofValue);
+            var signatureBytes = DecodeProofValue(proof.ProofValue);
 
             return suite.Verify(canonicalBytes, signatureBytes, resolvedKey.PublicKeyBytes);
         }
@@ -359,8 +421,12 @@ public class VerificationService : IVerificationService
 
             return true;
         }
-        catch
+        catch (Exception ex)
         {
+            // Fail closed, but record the cause so a misconfiguration/transient fault is
+            // distinguishable from an invalid invocation (Issue #64).
+            LogFailedClosed(ex,
+                "VerifyInvocationAsync failed closed for invocation {InvocationId}", invocation.Id);
             return false;
         }
     }
@@ -387,7 +453,7 @@ public class VerificationService : IVerificationService
             invocationWithoutProof,
             proof,
             canonicalizer);
-        var signatureBytes = MultibaseCodec.Decode(proof.ProofValue);
+        var signatureBytes = DecodeProofValue(proof.ProofValue);
 
         return suite.Verify(canonicalBytes, signatureBytes, resolvedKey.PublicKeyBytes);
     }
@@ -409,9 +475,13 @@ public class VerificationService : IVerificationService
             var chain = await BuildCapabilityChainAsync(capability);
             return await VerifyBuiltChainAsync(chain);
         }
-        catch
+        catch (Exception ex)
         {
-            // For other unexpected exceptions, return false
+            // Fail closed, but record the cause so a config/transient fault (an unbuildable chain,
+            // a missing canonicalizer, a DID-resolution error) is distinguishable from an invalid
+            // capability (Issue #64).
+            LogFailedClosed(ex,
+                "VerifyCapabilityChainAsync failed closed for capability {CapabilityId}", capability.Id);
             return false;
         }
     }
@@ -420,7 +490,7 @@ public class VerificationService : IVerificationService
     /// Verifies an already-built root→leaf capability chain: length bound, per-link revocation,
     /// per-link delegation proof / attenuation / expiry / caveat compatibility, and root shape.
     /// Fully fail-closed — any unexpected failure yields <c>false</c>. Callers that have already
-    /// built the chain (e.g. <see cref="IsRevokerAuthorizedAsync"/>, <see cref="VerifyInvocationAsync"/>)
+    /// built the chain (e.g. <see cref="IsRevokerAuthorizedAsync"/>, <see cref="VerifyInvocationAsync(Invocation, Capability)"/>)
     /// pass it here to avoid a redundant rebuild.
     /// </summary>
     private async Task<bool> VerifyBuiltChainAsync(List<Capability> chain)
@@ -476,9 +546,14 @@ public class VerificationService : IVerificationService
 
             return true;
         }
-        catch
+        catch (Exception ex)
         {
-            // For other unexpected exceptions, return false
+            // Fail closed, but record the cause so a misconfiguration/transient fault is
+            // distinguishable from an invalid chain (Issue #64). This helper only has the built
+            // chain in scope, so key the diagnostic on the leaf capability being verified.
+            LogFailedClosed(ex,
+                "Chain verification failed closed for leaf capability {CapabilityId}",
+                chain.Count > 0 ? chain[^1].Id : "(empty chain)");
             return false;
         }
     }
@@ -900,8 +975,13 @@ public class VerificationService : IVerificationService
 
             return true;
         }
-        catch
+        catch (Exception ex)
         {
+            // Fail closed, but record the cause so a misconfiguration/transient fault (a signature
+            // verification error, a store write failure, a DID-resolution error) is distinguishable
+            // from a structurally invalid or unauthorized revocation request (Issue #64).
+            LogFailedClosed(ex,
+                "RevokeCapabilityAsync failed closed for capability {CapabilityId}", capability.Id);
             return false;
         }
     }
@@ -915,35 +995,42 @@ public class VerificationService : IVerificationService
     /// </summary>
     private async Task<bool> IsRevokerAuthorizedAsync(Capability capability, string verificationMethod)
     {
-        // Build the chain once, then verify it cryptographically before trusting controller fields.
-        // Without that verification, a caller passing a crafted Capability with a tampered controller
-        // could authorize themselves to revoke a legitimate capability. (VerifyBuiltChainAsync reuses
-        // this built chain instead of rebuilding it — see VerifyCapabilityChainAsync.)
-        List<Capability> chain;
         try
         {
-            chain = await BuildCapabilityChainAsync(capability);
+            // Build the chain once, then verify it cryptographically before trusting controller fields.
+            // Without that verification, a caller passing a crafted Capability with a tampered controller
+            // could authorize themselves to revoke a legitimate capability. (VerifyBuiltChainAsync reuses
+            // this built chain instead of rebuilding it — see VerifyCapabilityChainAsync.)
+            var chain = await BuildCapabilityChainAsync(capability);
+
+            if (!await VerifyBuiltChainAsync(chain))
+                return false;
+
+            // Authorization is a string-level controller match: verificationMethod (a bare DID or a
+            // did#key-fragment) authorizes when it equals a chain controller, or its bare DID
+            // does. This covers did:key (the DID *is* the key) and a did:web controller whose
+            // bare DID matches the revoker's key fragment (did:web:issuer#key-1 → did:web:issuer).
+            // It does NOT resolve the controller's DID document, so a revoker key belonging to a
+            // *different* DID that the controller would authorize is not matched.
+            // TODO: support cross-DID key authorization by resolving the controller's DID
+            // document and checking its verificationMethod/capabilityDelegation relationships.
+            return chain.Any(link =>
+                link.Controller is not null &&
+                link.Controller.ContainsVerificationMethod(verificationMethod));
         }
-        catch
+        catch (Exception ex)
         {
-            // A malformed/unbuildable chain → not authorized. Fail-closed.
+            // Fail closed on ANY fault from the chain walk, not just a malformed chain.
+            // BuildCapabilityChainAsync can throw CapabilityValidationException, JsonException, or a
+            // DID-resolution error — all of which mean "cannot establish authorization", i.e. not
+            // authorized. RevokeCapabilityAsync's own top-level catch would also fail closed (no caller
+            // was ever at crash risk), but catching here keeps the authorization decision local and
+            // attributes the cause to THIS step rather than the broader revocation flow (PR #84 review;
+            // Issue #64). Severity is chosen by LogFailedClosed.
+            LogFailedClosed(ex,
+                "IsRevokerAuthorizedAsync failed closed for capability {CapabilityId}", capability.Id);
             return false;
         }
-
-        if (!await VerifyBuiltChainAsync(chain))
-            return false;
-
-        // Authorization is a string-level controller match: verificationMethod (a bare DID or a
-        // did#key-fragment) authorizes when it equals a chain controller, or its bare DID
-        // does. This covers did:key (the DID *is* the key) and a did:web controller whose
-        // bare DID matches the revoker's key fragment (did:web:issuer#key-1 → did:web:issuer).
-        // It does NOT resolve the controller's DID document, so a revoker key belonging to a
-        // *different* DID that the controller would authorize is not matched.
-        // TODO: support cross-DID key authorization by resolving the controller's DID
-        // document and checking its verificationMethod/capabilityDelegation relationships.
-        return chain.Any(link =>
-            link.Controller is not null &&
-            link.Controller.ContainsVerificationMethod(verificationMethod));
     }
 
     /// <summary>
