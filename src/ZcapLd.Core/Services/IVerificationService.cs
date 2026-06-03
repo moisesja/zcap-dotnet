@@ -48,27 +48,29 @@ public interface IVerificationService
     Task<ResolvedKey> ResolvePublicKeyAsync(string did);
 
     /// <summary>
-    /// Revokes a capability after verifying the revoker is authorized. A revoker is authorized
-    /// when it controls the capability itself or any ancestor in its delegation chain (an up-chain
-    /// delegator). <paramref name="revokerDid"/> is expected to be a DID the host has already
-    /// <i>authenticated</i> — the library performs authorization, not authentication. Returns
-    /// <c>false</c> (recording nothing) when the revoker is not authorized or the chain cannot be
-    /// cryptographically verified.
+    /// Revokes a capability from a <b>cryptographically signed</b> revocation request
+    /// (proof-of-possession). The library both <i>authenticates</i> the revoker — by verifying the
+    /// signature against the key resolved from the proof's <c>verificationMethod</c> — and
+    /// <i>authorizes</i> it, by requiring that verification method to control the capability or any
+    /// ancestor in its (cryptographically verified) delegation chain. This is the <b>only</b>
+    /// revocation entrypoint: there is no unauthenticated bare-DID path. Build the request with
+    /// <see cref="ISigningService.SignRevocationAsync"/>.
     /// COMPLIANCE: MUST-21, SHOULD-07 — revocation support.
     /// </summary>
     /// <remarks>
-    /// The method is <b>fail-closed</b>: any failure to cryptographically verify or structurally
-    /// build the delegation chain — including errors surfaced by DID resolution, network I/O (for a
-    /// remote <see cref="IDidResolver"/>), or the cryptography layer — yields <c>false</c> with
-    /// nothing recorded, because chain verification runs first and treats every such failure as
-    /// "unverifiable → not authorized". A revocation is recorded only when authorization positively
-    /// succeeds. The only exceptions thrown are <see cref="System.ArgumentNullException"/> /
-    /// <see cref="System.ArgumentException"/> for a null capability or null/empty revoker DID.
+    /// <b>Fail-closed:</b> any structural mismatch (wrong <c>proofPurpose</c>/<c>capabilityAction</c>,
+    /// wrong capability binding, body/proof inconsistency), an invalid signature, an unauthorized
+    /// signer, a replayed request, or any infrastructure error (DID resolution, network, crypto)
+    /// returns <c>false</c> and records nothing. Caveats are deliberately <b>not</b> evaluated —
+    /// revocation is a control-plane authority action. The recorded <c>RevokedBy</c> is the
+    /// authenticated verification method's bare DID; a signed <c>reason</c>/<c>metadata</c> is
+    /// recorded. Replay protection keys on the request's <c>id</c>, so each request needs a fresh id.
+    /// Only <see cref="System.ArgumentNullException"/> (null capability or request) is thrown.
     /// </remarks>
-    /// <param name="capability">The capability to revoke (its chain is cryptographically verified for authorization)</param>
-    /// <param name="revokerDid">The authenticated DID requesting revocation</param>
-    /// <returns>True if authorized and recorded; false if the revoker is not authorized or the chain is unverifiable</returns>
-    Task<bool> RevokeCapabilityAsync(Capability capability, string revokerDid);
+    /// <param name="capability">The capability to revoke, with its full delegation chain (for authorization).</param>
+    /// <param name="signedRevocation">The signed revocation request (from <see cref="ISigningService.SignRevocationAsync"/>).</param>
+    /// <returns>True if authenticated, authorized, fresh, and recorded; otherwise false.</returns>
+    Task<bool> RevokeCapabilityAsync(Capability capability, Invocation signedRevocation);
 
     /// <summary>
     /// Checks if a capability has been revoked

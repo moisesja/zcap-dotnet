@@ -1,3 +1,4 @@
+using System.Text.Json;
 using ZcapLd.Core.Cryptography;
 using ZcapLd.Core.Exceptions;
 using ZcapLd.Core.Models;
@@ -118,6 +119,62 @@ public class SigningService : ISigningService
         if (string.IsNullOrEmpty(signerDid))
             throw new ArgumentException("Signer DID cannot be null or empty", nameof(signerDid));
 
+        return await SignInvocationProofAsync(invocation, signerDid, Proof.CapabilityInvocationPurpose);
+    }
+
+    /// <summary>
+    /// Produces a signed capability revocation request (proof-of-possession). The returned
+    /// <see cref="Invocation"/> carries a <see cref="Proof.CapabilityRevocationPurpose"/> proof
+    /// over <c>{id, capability, capabilityAction="revoke", invocationTarget}</c> plus any signed
+    /// <paramref name="reason"/>/<paramref name="metadata"/>. Present it (with the full capability
+    /// being revoked) to <c>IVerificationService.RevokeCapabilityAsync(Capability, Invocation)</c>.
+    /// Possession of <paramref name="signerDid"/>'s private key is what authenticates the revoker.
+    /// </summary>
+    /// <param name="capabilityId">The id of the capability to revoke (bound into the signed payload).</param>
+    /// <param name="signerDid">The DID whose key signs the request — must control the capability or an ancestor.</param>
+    /// <param name="invocationTarget">The capability's invocation target (bound into the signed payload; informational for revocation).</param>
+    /// <param name="reason">Optional human-readable reason, signed and recorded on the revocation.</param>
+    /// <param name="metadata">Optional audit metadata, signed and recorded on the revocation.</param>
+    public async Task<Invocation> SignRevocationAsync(
+        string capabilityId,
+        string signerDid,
+        string invocationTarget,
+        string? reason = null,
+        IDictionary<string, string>? metadata = null)
+    {
+        if (string.IsNullOrEmpty(capabilityId))
+            throw new ArgumentException("Capability ID cannot be null or empty", nameof(capabilityId));
+        if (string.IsNullOrEmpty(signerDid))
+            throw new ArgumentException("Signer DID cannot be null or empty", nameof(signerDid));
+        if (string.IsNullOrEmpty(invocationTarget))
+            throw new ArgumentException("Invocation target cannot be null or empty", nameof(invocationTarget));
+
+        var revocation = new Invocation
+        {
+            Capability = capabilityId,
+            CapabilityAction = Invocation.RevokeAction,
+            InvocationTarget = invocationTarget
+        };
+
+        revocation.Proof = await SignInvocationProofAsync(
+            revocation, signerDid, Proof.CapabilityRevocationPurpose,
+            BuildRevocationExtensionData(reason, metadata));
+
+        return revocation;
+    }
+
+    /// <summary>
+    /// Shared invocation-proof assembly. The <paramref name="proofPurpose"/> and any
+    /// <paramref name="additionalProperties"/> are part of the canonical bytes that get signed,
+    /// so a revocation proof (purpose <c>capabilityRevocation</c>, carrying a signed reason) is
+    /// byte-disjoint from a normal <c>capabilityInvocation</c> proof.
+    /// </summary>
+    private async Task<Proof> SignInvocationProofAsync(
+        Invocation invocation,
+        string signerDid,
+        string proofPurpose,
+        IReadOnlyDictionary<string, JsonElement>? additionalProperties = null)
+    {
         var invocationWithoutProof = ProofSigningPayloadBuilder.CloneInvocationWithoutProof(invocation);
         var suite = await ResolveSuiteForDidAsync(signerDid);
         var canonicalizer = ResolveCanonicalizer(suite);
@@ -125,7 +182,7 @@ public class SigningService : ISigningService
         var created = ZcapTimestamps.Format(DateTime.UtcNow);
         var proofType = suite.ProofType;
 
-        // COMPLIANCE FIX C-05: Create the invocation proof with required fields
+        // COMPLIANCE FIX C-05: Create the invocation proof with required fields.
         // Per spec, invocation proofs MUST include capability, invocationTarget, and capabilityAction.
         // CapabilityChain is intentionally unset — invocation proofs don't carry one,
         // and emitting `"capabilityChain": []` breaks strict cross-language parsers (#37).
@@ -133,7 +190,7 @@ public class SigningService : ISigningService
         {
             Type = proofType,
             Created = created,
-            ProofPurpose = "capabilityInvocation",
+            ProofPurpose = proofPurpose,
             VerificationMethod = verificationMethod,
             ProofValue = string.Empty,
             // Required invocation proof fields:
@@ -142,6 +199,13 @@ public class SigningService : ISigningService
             CapabilityAction = invocation.CapabilityAction
         };
 
+        // Signed extension fields (e.g. revocation reason/metadata) ride in the proof's
+        // [JsonExtensionData] and are included in the canonical bytes, so they are tamper-evident.
+        if (additionalProperties is { Count: > 0 })
+        {
+            proof.AdditionalProperties = new Dictionary<string, JsonElement>(additionalProperties, StringComparer.Ordinal);
+        }
+
         var canonicalBytes = ProofSigningPayloadBuilder.CanonicalizeInvocationPayload(
             invocationWithoutProof, proof, canonicalizer);
         var result = await _signer.SignAsync(signerDid, canonicalBytes);
@@ -149,6 +213,26 @@ public class SigningService : ISigningService
         proof.ProofValue = MultibaseCodec.Encode(result.Signature);
 
         return proof;
+    }
+
+    /// <summary>
+    /// Builds the signed proof extension fields that carry a revocation's reason/metadata.
+    /// Returns <c>null</c> when there is nothing to carry.
+    /// </summary>
+    private static IReadOnlyDictionary<string, JsonElement>? BuildRevocationExtensionData(
+        string? reason, IDictionary<string, string>? metadata)
+    {
+        var hasReason = !string.IsNullOrEmpty(reason);
+        var hasMetadata = metadata is { Count: > 0 };
+        if (!hasReason && !hasMetadata)
+            return null;
+
+        var data = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+        if (hasReason)
+            data[Proof.RevocationReasonField] = JsonSerializer.SerializeToElement(reason, ZcapJsonOptions.Default);
+        if (hasMetadata)
+            data[Proof.RevocationMetadataField] = JsonSerializer.SerializeToElement(metadata, ZcapJsonOptions.Default);
+        return data;
     }
 
     /// <summary>

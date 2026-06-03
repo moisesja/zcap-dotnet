@@ -92,9 +92,10 @@ public class VerificationServiceTests
         // Sanity: before revocation the leaf's proof verifies.
         (await _verificationService.VerifyCapabilityProofAsync(leaf)).Should().BeTrue();
 
-        // Revoke the immediate parent (mid). rootDid controls the root (mid's ancestor),
-        // so it is authorized to revoke mid via the authorizing Capability overload.
-        (await _verificationService.RevokeCapabilityAsync(mid, rootDid)).Should().BeTrue();
+        // Revoke the immediate parent (mid). rootDid controls the root (mid's ancestor), so a
+        // revocation it signs is authorized via the signed Capability/Invocation overload.
+        var midRevocation = await _signingService.SignRevocationAsync(mid.Id, rootDid, mid.InvocationTarget);
+        (await _verificationService.RevokeCapabilityAsync(mid, midRevocation)).Should().BeTrue();
 
         // The single-proof check must now also reject the leaf, matching VerifyCapabilityChainAsync.
         (await _verificationService.VerifyCapabilityProofAsync(leaf)).Should().BeFalse();
@@ -963,7 +964,9 @@ public class VerificationServiceTests
             new[] { "read" },
             DateTime.UtcNow.AddDays(5));
 
-        await _verificationService.RevokeCapabilityAsync(delegatedCapability, rootControllerDid);
+        var signedRevocation = await _signingService.SignRevocationAsync(
+            delegatedCapability.Id, rootControllerDid, delegatedCapability.InvocationTarget);
+        await _verificationService.RevokeCapabilityAsync(delegatedCapability, signedRevocation);
 
         // Act
         var result = await _verificationService.VerifyCapabilityChainAsync(delegatedCapability);
@@ -1000,7 +1003,9 @@ public class VerificationServiceTests
         };
         invocation.Proof = await _signingService.SignInvocationAsync(invocation, delegatedControllerDid);
 
-        await _verificationService.RevokeCapabilityAsync(delegatedCapability, rootControllerDid);
+        var signedRevocation = await _signingService.SignRevocationAsync(
+            delegatedCapability.Id, rootControllerDid, delegatedCapability.InvocationTarget);
+        await _verificationService.RevokeCapabilityAsync(delegatedCapability, signedRevocation);
 
         // Act
         var result = await _verificationService.VerifyInvocationAsync(invocation, delegatedCapability);
@@ -1009,13 +1014,14 @@ public class VerificationServiceTests
         result.Should().BeFalse();
     }
 
-    [Fact]
-    public async Task RevokeCapability_AuthorizedUpChainController_RevokesAndReturnsTrue()
+    // ── Signed revocation (proof-of-possession) ──────────────────────────────────────────
+    // Revocation requires a cryptographically signed request. The signature authenticates the
+    // revoker (proof of key possession); the chain-walk authorizes it. There is no bare-DID path.
+
+    /// <summary>Builds root → delegated chain, registering keys for both controllers.</summary>
+    private async Task<(Capability Root, Capability Delegated)> BuildDelegatedChainAsync(
+        string rootControllerDid, string delegatedControllerDid)
     {
-        // Issue #60: the Capability overload authorizes the revoker against the delegation chain.
-        // The root controller is an up-chain delegator and must be allowed to revoke a child.
-        var rootControllerDid = "did:key:z6MkRevokeRoot";
-        var delegatedControllerDid = "did:key:z6MkRevokeChild";
         _didProvider.GenerateAndRegisterKeyPair(rootControllerDid);
         _didProvider.GenerateAndRegisterKeyPair(delegatedControllerDid);
 
@@ -1023,8 +1029,34 @@ public class VerificationServiceTests
             rootControllerDid, "https://example.com/resource", new[] { "read", "write" });
         var delegated = await _capabilityService.DelegateCapabilityAsync(
             root, delegatedControllerDid, new[] { "read" }, DateTime.UtcNow.AddDays(5));
+        return (root, delegated);
+    }
 
-        var revoked = await _verificationService.RevokeCapabilityAsync(delegated, rootControllerDid);
+    /// <summary>A VerificationService whose revocation store/service is held for assertions.</summary>
+    private (VerificationService Verifier, RevocationService Revocation, InMemoryRevocationStore Store)
+        CreateVerifierWithRevocationStore()
+    {
+        var store = new InMemoryRevocationStore();
+        var revocation = new RevocationService(store);
+        var suiteProvider = new CryptoSuiteProvider();
+        suiteProvider.Register(CryptoSuite.Ed25519());
+        var canon = new DocumentCanonicalizerProvider();
+        canon.Register(new JcsDocumentCanonicalizer());
+        var verifier = new VerificationService(
+            _didProvider, _caveatProcessor, suiteProvider, revocation, new InMemoryNonceStore(), canon);
+        return (verifier, revocation, store);
+    }
+
+    [Fact]
+    public async Task SignedRevoke_AuthorizedUpChainController_RevokesAndReturnsTrue()
+    {
+        // The root controller is an up-chain delegator and may revoke a child — when it proves
+        // possession of its key by signing the revocation request.
+        var (_, delegated) = await BuildDelegatedChainAsync("did:key:z6MkRevokeRoot", "did:key:z6MkRevokeChild");
+
+        var signed = await _signingService.SignRevocationAsync(
+            delegated.Id, "did:key:z6MkRevokeRoot", delegated.InvocationTarget);
+        var revoked = await _verificationService.RevokeCapabilityAsync(delegated, signed);
 
         revoked.Should().BeTrue();
         (await _verificationService.IsCapabilityRevokedAsync(delegated.Id)).Should().BeTrue();
@@ -1032,22 +1064,31 @@ public class VerificationServiceTests
     }
 
     [Fact]
-    public async Task RevokeCapability_UnauthorizedRevoker_ReturnsFalseAndDoesNotRevoke()
+    public async Task SignedRevoke_OwnControllerSelfRevoke_RevokesAndReturnsTrue()
     {
-        // Issue #60: Mallory controls nothing in the chain, so the authorizing overload must
-        // refuse to revoke — and must NOT record anything (no unauthenticated denial-of-capability).
-        var rootControllerDid = "did:key:z6MkAuthzRoot";
-        var delegatedControllerDid = "did:key:z6MkAuthzChild";
+        var (_, delegated) = await BuildDelegatedChainAsync("did:key:z6MkSelfRoot", "did:key:z6MkSelfChild");
+
+        var signed = await _signingService.SignRevocationAsync(
+            delegated.Id, "did:key:z6MkSelfChild", delegated.InvocationTarget);
+        var revoked = await _verificationService.RevokeCapabilityAsync(delegated, signed);
+
+        revoked.Should().BeTrue();
+        (await _verificationService.IsCapabilityRevokedAsync(delegated.Id)).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task SignedRevoke_UnauthorizedButValidlySigned_ReturnsFalse()
+    {
+        // Mallory holds a real, resolvable key and signs a perfectly valid revocation request —
+        // but she controls nothing in the chain. Authentication succeeds; authorization fails.
+        // Nothing is recorded (no denial-of-capability).
+        var (_, delegated) = await BuildDelegatedChainAsync("did:key:z6MkAuthzRoot", "did:key:z6MkAuthzChild");
         const string malloryDid = "did:key:z6MkMalloryHasNoAuthority";
-        _didProvider.GenerateAndRegisterKeyPair(rootControllerDid);
-        _didProvider.GenerateAndRegisterKeyPair(delegatedControllerDid);
+        _didProvider.GenerateAndRegisterKeyPair(malloryDid);
 
-        var root = await _capabilityService.CreateRootCapabilityAsync(
-            rootControllerDid, "https://example.com/resource", new[] { "read", "write" });
-        var delegated = await _capabilityService.DelegateCapabilityAsync(
-            root, delegatedControllerDid, new[] { "read" }, DateTime.UtcNow.AddDays(5));
-
-        var revoked = await _verificationService.RevokeCapabilityAsync(delegated, malloryDid);
+        var signed = await _signingService.SignRevocationAsync(
+            delegated.Id, malloryDid, delegated.InvocationTarget);
+        var revoked = await _verificationService.RevokeCapabilityAsync(delegated, signed);
 
         revoked.Should().BeFalse();
         (await _verificationService.IsCapabilityRevokedAsync(delegated.Id)).Should().BeFalse();
@@ -1055,38 +1096,198 @@ public class VerificationServiceTests
     }
 
     [Fact]
-    public async Task RevokeCapability_OwnControllerSelfRevoke_RevokesAndReturnsTrue()
+    public async Task SignedRevoke_ImpersonationVmClaimsControllerButSignedByAnotherKey_ReturnsFalse()
     {
-        // A capability's own controller is authorized to revoke it (self-revocation).
-        var rootControllerDid = "did:key:z6MkSelfRoot";
-        var delegatedControllerDid = "did:key:z6MkSelfChild";
-        _didProvider.GenerateAndRegisterKeyPair(rootControllerDid);
-        _didProvider.GenerateAndRegisterKeyPair(delegatedControllerDid);
+        // THE proof-of-possession regression: Mallory crafts a request CLAIMING the root
+        // controller's verification method, but the bytes are signed with Mallory's key. The
+        // verifier resolves the controller's public key and the signature fails — knowing the
+        // (public) controller DID is not enough to revoke.
+        var (_, delegated) = await BuildDelegatedChainAsync("did:key:z6MkImpRoot", "did:key:z6MkImpChild");
+        const string malloryDid = "did:key:z6MkMalloryImpersonator";
+        _didProvider.GenerateAndRegisterKeyPair(malloryDid);
 
-        var root = await _capabilityService.CreateRootCapabilityAsync(
-            rootControllerDid, "https://example.com/resource", new[] { "read", "write" });
-        var delegated = await _capabilityService.DelegateCapabilityAsync(
-            root, delegatedControllerDid, new[] { "read" }, DateTime.UtcNow.AddDays(5));
+        var forged = await _signingService.SignRevocationAsync(
+            delegated.Id, malloryDid, delegated.InvocationTarget);
+        // Claim the root controller's identity without holding its key.
+        forged.Proof!.VerificationMethod = await _didProvider.GetVerificationMethodAsync("did:key:z6MkImpRoot");
 
-        var revoked = await _verificationService.RevokeCapabilityAsync(delegated, delegatedControllerDid);
+        var revoked = await _verificationService.RevokeCapabilityAsync(delegated, forged);
 
-        revoked.Should().BeTrue();
-        (await _verificationService.IsCapabilityRevokedAsync(delegated.Id)).Should().BeTrue();
+        revoked.Should().BeFalse();
+        (await _verificationService.IsCapabilityRevokedAsync(delegated.Id)).Should().BeFalse();
     }
 
     [Fact]
-    public async Task RevokeCapability_NullCapability_ThrowsArgumentNullException()
+    public async Task SignedRevoke_ReplayedRequest_SecondAttemptReturnsFalse()
     {
-        var act = () => _verificationService.RevokeCapabilityAsync(null!, "did:key:z6MkAny");
+        // Replay protection (nonce = request id). To isolate it from the revocation-state guard,
+        // evict the recorded revocation after the first success so the chain verifies again; the
+        // replayed request must still be rejected because its id was already consumed.
+        var (verifier, _, store) = CreateVerifierWithRevocationStore();
+        var (_, delegated) = await BuildDelegatedChainAsync("did:key:z6MkReplayRoot", "did:key:z6MkReplayChild");
+
+        var signed = await _signingService.SignRevocationAsync(
+            delegated.Id, "did:key:z6MkReplayRoot", delegated.InvocationTarget);
+
+        (await verifier.RevokeCapabilityAsync(delegated, signed)).Should().BeTrue();
+        await store.DeleteAsync(delegated.Id);
+        (await verifier.RevokeCapabilityAsync(delegated, signed)).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task SignedRevoke_WrongCapabilityBinding_ReturnsFalse()
+    {
+        // A revocation signed for capability X cannot be used to revoke capability Y.
+        var (_, delegatedX) = await BuildDelegatedChainAsync("did:key:z6MkBindRootX", "did:key:z6MkBindChildX");
+        var (_, delegatedY) = await BuildDelegatedChainAsync("did:key:z6MkBindRootY", "did:key:z6MkBindChildY");
+
+        var signedForX = await _signingService.SignRevocationAsync(
+            delegatedX.Id, "did:key:z6MkBindRootX", delegatedX.InvocationTarget);
+
+        (await _verificationService.RevokeCapabilityAsync(delegatedY, signedForX)).Should().BeFalse();
+        (await _verificationService.IsCapabilityRevokedAsync(delegatedY.Id)).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task SignedRevoke_WrongProofPurpose_ReturnsFalse()
+    {
+        // Confused-deputy regression: a normal capabilityInvocation proof must not be accepted as
+        // a revocation, even if its capabilityAction happens to be "revoke".
+        var (_, delegated) = await BuildDelegatedChainAsync("did:key:z6MkPurposeRoot", "did:key:z6MkPurposeChild");
+
+        var invocation = new Invocation
+        {
+            Capability = delegated.Id,
+            CapabilityAction = Invocation.RevokeAction,
+            InvocationTarget = delegated.InvocationTarget
+        };
+        invocation.Proof = await _signingService.SignInvocationAsync(invocation, "did:key:z6MkPurposeRoot");
+        invocation.Proof.ProofPurpose.Should().Be(Proof.CapabilityInvocationPurpose);
+
+        (await _verificationService.RevokeCapabilityAsync(delegated, invocation)).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task SignedRevoke_WrongCapabilityAction_ReturnsFalse()
+    {
+        // A capabilityRevocation-purpose proof whose action is not "revoke" is rejected.
+        var (_, delegated) = await BuildDelegatedChainAsync("did:key:z6MkActionRoot", "did:key:z6MkActionChild");
+
+        var signed = await _signingService.SignRevocationAsync(
+            delegated.Id, "did:key:z6MkActionRoot", delegated.InvocationTarget);
+        signed.CapabilityAction = "read"; // body no longer says "revoke"
+
+        (await _verificationService.RevokeCapabilityAsync(delegated, signed)).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task SignedRevoke_ProofBodyMismatch_ReturnsFalse()
+    {
+        // Tampering the body's invocationTarget after signing breaks proof/body consistency.
+        var (_, delegated) = await BuildDelegatedChainAsync("did:key:z6MkMismatchRoot", "did:key:z6MkMismatchChild");
+
+        var signed = await _signingService.SignRevocationAsync(
+            delegated.Id, "did:key:z6MkMismatchRoot", delegated.InvocationTarget);
+        signed.InvocationTarget = "https://evil.example.com/other";
+
+        (await _verificationService.RevokeCapabilityAsync(delegated, signed)).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task SignedRevoke_SignedReason_IsRecordedOnRevocationRecord()
+    {
+        var (verifier, revocation, _) = CreateVerifierWithRevocationStore();
+        var (_, delegated) = await BuildDelegatedChainAsync("did:key:z6MkReasonRoot", "did:key:z6MkReasonChild");
+
+        var metadata = new Dictionary<string, string> { ["ticket"] = "SEC-123" };
+        var signed = await _signingService.SignRevocationAsync(
+            delegated.Id, "did:key:z6MkReasonRoot", delegated.InvocationTarget,
+            reason: "key compromised", metadata: metadata);
+
+        (await verifier.RevokeCapabilityAsync(delegated, signed)).Should().BeTrue();
+
+        var record = await revocation.GetRevocationAsync(delegated.Id);
+        record.Should().NotBeNull();
+        record!.Reason.Should().Be("key compromised");
+        record.RevokedBy.Should().Be("did:key:z6MkReasonRoot");
+        record.Metadata.Should().ContainKey("ticket").WhoseValue.Should().Be("SEC-123");
+    }
+
+    [Fact]
+    public async Task SignedRevoke_TamperedReason_FailsSignature_ReturnsFalse()
+    {
+        // The reason is part of the signed bytes — flipping it after signing invalidates the proof.
+        var (_, delegated) = await BuildDelegatedChainAsync("did:key:z6MkTamperRoot", "did:key:z6MkTamperChild");
+
+        var signed = await _signingService.SignRevocationAsync(
+            delegated.Id, "did:key:z6MkTamperRoot", delegated.InvocationTarget, reason: "legitimate");
+        signed.Proof!.AdditionalProperties![Proof.RevocationReasonField] =
+            JsonSerializer.SerializeToElement("forged-reason");
+
+        (await _verificationService.RevokeCapabilityAsync(delegated, signed)).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task SignedRevoke_NullCapability_ThrowsArgumentNullException()
+    {
+        var act = () => _verificationService.RevokeCapabilityAsync(null!, new Invocation());
         await act.Should().ThrowAsync<ArgumentNullException>().WithParameterName("capability");
     }
 
     [Fact]
-    public async Task RevokeCapability_EmptyRevokerDid_ThrowsArgumentException()
+    public async Task SignedRevoke_NullInvocation_ThrowsArgumentNullException()
     {
         var capability = new Capability { Id = "urn:uuid:some-id" };
-        var act = () => _verificationService.RevokeCapabilityAsync(capability, "");
-        await act.Should().ThrowAsync<ArgumentException>().WithParameterName("revokerDid");
+        var act = () => _verificationService.RevokeCapabilityAsync(capability, null!);
+        await act.Should().ThrowAsync<ArgumentNullException>().WithParameterName("signedRevocation");
+    }
+
+    [Fact]
+    public async Task VerifyInvocation_WithCapabilityRevocationPurpose_ReturnsFalse()
+    {
+        // Cross-direction exclusivity: a signed revocation must not pass as a normal invocation.
+        var (_, delegated) = await BuildDelegatedChainAsync("did:key:z6MkXdirRoot", "did:key:z6MkXdirChild");
+
+        var signed = await _signingService.SignRevocationAsync(
+            delegated.Id, "did:key:z6MkXdirChild", delegated.InvocationTarget);
+
+        (await _verificationService.VerifyInvocationAsync(signed, delegated)).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task SignRevocation_ProducesCapabilityRevocationPurposeAndRevokeAction()
+    {
+        var did = "did:key:z6MkSignShape";
+        _didProvider.GenerateAndRegisterKeyPair(did);
+
+        var signed = await _signingService.SignRevocationAsync(
+            "urn:uuid:target-cap", did, "https://example.com/resource");
+
+        signed.CapabilityAction.Should().Be(Invocation.RevokeAction);
+        signed.Capability.Should().Be("urn:uuid:target-cap");
+        signed.Proof.Should().NotBeNull();
+        signed.Proof!.ProofPurpose.Should().Be(Proof.CapabilityRevocationPurpose);
+        signed.Proof.ProofValue.Should().NotBeNullOrEmpty();
+    }
+
+    [Fact]
+    public async Task SignInvocation_BehaviorUnchanged_StillCapabilityInvocation()
+    {
+        // Regression guard for the SignInvocationAsync → SignInvocationProofAsync refactor.
+        var did = "did:key:z6MkInvShape";
+        _didProvider.GenerateAndRegisterKeyPair(did);
+
+        var invocation = new Invocation
+        {
+            Capability = "urn:uuid:some-cap",
+            CapabilityAction = "read",
+            InvocationTarget = "https://example.com/resource"
+        };
+        var proof = await _signingService.SignInvocationAsync(invocation, did);
+
+        proof.ProofPurpose.Should().Be(Proof.CapabilityInvocationPurpose);
+        proof.CapabilityAction.Should().Be("read");
+        proof.ProofValue.Should().NotBeNullOrEmpty();
     }
 
     #endregion

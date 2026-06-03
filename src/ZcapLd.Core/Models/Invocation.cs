@@ -9,6 +9,12 @@ namespace ZcapLd.Core.Models;
 public class Invocation
 {
     /// <summary>
+    /// The <c>capabilityAction</c> value that marks a signed revocation request. Carried in the
+    /// signed payload so the verifier can distinguish a revocation from any other invocation.
+    /// </summary>
+    public const string RevokeAction = "revoke";
+
+    /// <summary>
     /// Unique identifier for this invocation (for replay protection)
     /// SECURITY: This should be a nonce, UUID, or timestamp-based identifier
     /// that is validated to prevent replay attacks
