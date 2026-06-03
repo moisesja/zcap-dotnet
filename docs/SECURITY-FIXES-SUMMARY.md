@@ -20,6 +20,17 @@ cryptographically verified delegation chain. All string-keyed revocation overloa
 HTTP endpoint requires the signed request and returns 403 otherwise. See the CHANGELOG (Issue #60 +
 revocation hardening) and `docs/REVOCATION-INTEGRATION.md`.
 
+**Follow-up (Issue #63 — ancestor-revocation consistency):** the standalone single-proof check
+`IVerificationService.VerifyCapabilityProofAsync(Capability)` previously revocation-checked only the
+leaf and its *immediate* parent, so a capability whose **root or an intermediate ancestor** had been
+revoked still passed it — while `VerifyCapabilityChainAsync` correctly rejected it. A consumer
+treating the single-proof method as "is this still valid?" could therefore accept a capability with a
+revoked ancestor. **Fixed**: the standalone path now sweeps **every** ancestor id carried in the
+delegation proof's `capabilityChain` and rejects if any is revoked, matching the chain path at every
+depth. Hardening shipped alongside: the replay nonce on `RevokeCapabilityAsync` is now consumed only
+**after** the durable revocation write succeeds (a failed write no longer burns the request id), and
+`CapabilityService.BuildCapabilityChain` de-duplicates ancestor ids.
+
 ---
 
 ## Executive Summary

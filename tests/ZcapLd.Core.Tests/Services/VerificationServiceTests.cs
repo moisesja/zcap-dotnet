@@ -103,6 +103,74 @@ public class VerificationServiceTests
     }
 
     [Fact]
+    public async Task VerifyCapabilityProof_WithRevokedRootAncestor_ShouldReturnFalse()
+    {
+        // Issue #63 (depth-1 gap): the original fix only revocation-checked the leaf's IMMEDIATE
+        // parent embedded in proof.capabilityChain. A revoked grandparent/root still passed the
+        // single-proof check while VerifyCapabilityChainAsync rejected it — the exact divergence the
+        // PR set out to remove. Revoking the ROOT (the grandparent) must now fail BOTH paths.
+        var rootDid = "did:key:z6MkRevRootRoot";
+        var midDid = "did:key:z6MkRevRootMid";
+        var leafDid = "did:key:z6MkRevRootLeaf";
+        _didProvider.GenerateAndRegisterKeyPair(rootDid);
+        _didProvider.GenerateAndRegisterKeyPair(midDid);
+        _didProvider.GenerateAndRegisterKeyPair(leafDid);
+
+        var root = await _capabilityService.CreateRootCapabilityAsync(
+            rootDid, "https://example.com/resource", new[] { "read", "write" });
+        var mid = await _capabilityService.DelegateCapabilityAsync(
+            root, midDid, new[] { "read" }, DateTime.UtcNow.AddDays(20));
+        var leaf = await _capabilityService.DelegateCapabilityAsync(
+            mid, leafDid, new[] { "read" }, DateTime.UtcNow.AddDays(10));
+
+        // Sanity: before revocation the leaf's proof verifies on both paths.
+        (await _verificationService.VerifyCapabilityProofAsync(leaf)).Should().BeTrue();
+        (await _verificationService.VerifyCapabilityChainAsync(leaf)).Should().BeTrue();
+
+        // Revoke the ROOT (leaf's grandparent). rootDid controls the root, so it may self-revoke it.
+        var rootRevocation = await _signingService.SignRevocationAsync(root.Id, rootDid, root.InvocationTarget);
+        (await _verificationService.RevokeCapabilityAsync(root, rootRevocation)).Should().BeTrue();
+
+        // Both paths must now reject the leaf — ancestor revocation honoured at every depth.
+        (await _verificationService.VerifyCapabilityProofAsync(leaf)).Should().BeFalse();
+        (await _verificationService.VerifyCapabilityChainAsync(leaf)).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task VerifyCapabilityProof_WithRevokedIntermediateAncestor_ShouldReturnFalse()
+    {
+        // A 4-deep chain root -> a -> b -> leaf. Revoke 'a', an intermediate ancestor that is
+        // neither the root nor the leaf's immediate parent (b). The intermediate's id is carried as
+        // a string in leaf's capabilityChain, so the standalone sweep must catch it (Issue #63).
+        var rootDid = "did:key:z6MkRevMidRoot";
+        var aDid = "did:key:z6MkRevMidA";
+        var bDid = "did:key:z6MkRevMidB";
+        var leafDid = "did:key:z6MkRevMidLeaf";
+        _didProvider.GenerateAndRegisterKeyPair(rootDid);
+        _didProvider.GenerateAndRegisterKeyPair(aDid);
+        _didProvider.GenerateAndRegisterKeyPair(bDid);
+        _didProvider.GenerateAndRegisterKeyPair(leafDid);
+
+        var root = await _capabilityService.CreateRootCapabilityAsync(
+            rootDid, "https://example.com/resource", new[] { "read", "write" });
+        var a = await _capabilityService.DelegateCapabilityAsync(
+            root, aDid, new[] { "read" }, DateTime.UtcNow.AddDays(30));
+        var b = await _capabilityService.DelegateCapabilityAsync(
+            a, bDid, new[] { "read" }, DateTime.UtcNow.AddDays(20));
+        var leaf = await _capabilityService.DelegateCapabilityAsync(
+            b, leafDid, new[] { "read" }, DateTime.UtcNow.AddDays(10));
+
+        (await _verificationService.VerifyCapabilityProofAsync(leaf)).Should().BeTrue();
+
+        // 'a' self-revokes (aDid controls a).
+        var aRevocation = await _signingService.SignRevocationAsync(a.Id, aDid, a.InvocationTarget);
+        (await _verificationService.RevokeCapabilityAsync(a, aRevocation)).Should().BeTrue();
+
+        (await _verificationService.VerifyCapabilityProofAsync(leaf)).Should().BeFalse();
+        (await _verificationService.VerifyCapabilityChainAsync(leaf)).Should().BeFalse();
+    }
+
+    [Fact]
     public async Task VerifyCapabilityProof_AfterJsonRoundTrip_ShouldReturnTrue()
     {
         // Arrange — simulates HTTP POST: serialize capability → deserialize on server
