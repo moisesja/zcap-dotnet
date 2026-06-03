@@ -426,9 +426,13 @@ public class VerificationService : IVerificationService
             var chain = await BuildCapabilityChainAsync(capability);
             return await VerifyBuiltChainAsync(chain);
         }
-        catch
+        catch (Exception ex)
         {
-            // For other unexpected exceptions, return false
+            // Fail closed, but record the cause so a config/transient fault (an unbuildable chain,
+            // a missing canonicalizer, a DID-resolution error) is distinguishable from an invalid
+            // capability (Issue #64).
+            _logger.LogWarning(ex,
+                "VerifyCapabilityChainAsync failed closed for capability {CapabilityId}", capability.Id);
             return false;
         }
     }
@@ -496,9 +500,11 @@ public class VerificationService : IVerificationService
         catch (Exception ex)
         {
             // Fail closed, but record the cause so a misconfiguration/transient fault is
-            // distinguishable from an invalid chain (Issue #64).
+            // distinguishable from an invalid chain (Issue #64). This helper only has the built
+            // chain in scope, so key the diagnostic on the leaf capability being verified.
             _logger.LogWarning(ex,
-                "VerifyCapabilityChainAsync failed closed for capability {CapabilityId}", capability.Id);
+                "Chain verification failed closed for leaf capability {CapabilityId}",
+                chain.Count > 0 ? chain[^1].Id : "(empty chain)");
             return false;
         }
     }
@@ -920,8 +926,13 @@ public class VerificationService : IVerificationService
 
             return true;
         }
-        catch
+        catch (Exception ex)
         {
+            // Fail closed, but record the cause so a misconfiguration/transient fault (a signature
+            // verification error, a store write failure, a DID-resolution error) is distinguishable
+            // from a structurally invalid or unauthorized revocation request (Issue #64).
+            _logger.LogWarning(ex,
+                "RevokeCapabilityAsync failed closed for capability {CapabilityId}", capability.Id);
             return false;
         }
     }
@@ -935,35 +946,41 @@ public class VerificationService : IVerificationService
     /// </summary>
     private async Task<bool> IsRevokerAuthorizedAsync(Capability capability, string verificationMethod)
     {
-        // Build the chain once, then verify it cryptographically before trusting controller fields.
-        // Without that verification, a caller passing a crafted Capability with a tampered controller
-        // could authorize themselves to revoke a legitimate capability. (VerifyBuiltChainAsync reuses
-        // this built chain instead of rebuilding it — see VerifyCapabilityChainAsync.)
-        List<Capability> chain;
         try
         {
-            chain = await BuildCapabilityChainAsync(capability);
+            // Build the chain once, then verify it cryptographically before trusting controller fields.
+            // Without that verification, a caller passing a crafted Capability with a tampered controller
+            // could authorize themselves to revoke a legitimate capability. (VerifyBuiltChainAsync reuses
+            // this built chain instead of rebuilding it — see VerifyCapabilityChainAsync.)
+            var chain = await BuildCapabilityChainAsync(capability);
+
+            if (!await VerifyBuiltChainAsync(chain))
+                return false;
+
+            // Authorization is a string-level controller match: verificationMethod (a bare DID or a
+            // did#key-fragment) authorizes when it equals a chain controller, or its bare DID
+            // does. This covers did:key (the DID *is* the key) and a did:web controller whose
+            // bare DID matches the revoker's key fragment (did:web:issuer#key-1 → did:web:issuer).
+            // It does NOT resolve the controller's DID document, so a revoker key belonging to a
+            // *different* DID that the controller would authorize is not matched.
+            // TODO: support cross-DID key authorization by resolving the controller's DID
+            // document and checking its verificationMethod/capabilityDelegation relationships.
+            return chain.Any(link =>
+                link.Controller is not null &&
+                link.Controller.ContainsVerificationMethod(verificationMethod));
         }
-        catch
+        catch (Exception ex)
         {
-            // A malformed/unbuildable chain → not authorized. Fail-closed.
+            // Fail closed on ANY fault, not just a malformed chain. BuildCapabilityChainAsync can
+            // throw InvalidOperationException, JsonException, or a DID-resolution network error;
+            // catching only CapabilityValidationException would let those propagate as unhandled
+            // exceptions through the public RevokeCapabilityAsync API, crashing callers that expect
+            // "not authorized" (false). Logging the cause lets operators tell a transient chain-walk
+            // failure apart from a genuine authorization denial (PR #84 review; Issue #64).
+            _logger.LogWarning(ex,
+                "IsRevokerAuthorizedAsync failed closed for capability {CapabilityId}", capability.Id);
             return false;
         }
-
-        if (!await VerifyBuiltChainAsync(chain))
-            return false;
-
-        // Authorization is a string-level controller match: verificationMethod (a bare DID or a
-        // did#key-fragment) authorizes when it equals a chain controller, or its bare DID
-        // does. This covers did:key (the DID *is* the key) and a did:web controller whose
-        // bare DID matches the revoker's key fragment (did:web:issuer#key-1 → did:web:issuer).
-        // It does NOT resolve the controller's DID document, so a revoker key belonging to a
-        // *different* DID that the controller would authorize is not matched.
-        // TODO: support cross-DID key authorization by resolving the controller's DID
-        // document and checking its verificationMethod/capabilityDelegation relationships.
-        return chain.Any(link =>
-            link.Controller is not null &&
-            link.Controller.ContainsVerificationMethod(verificationMethod));
     }
 
     /// <summary>

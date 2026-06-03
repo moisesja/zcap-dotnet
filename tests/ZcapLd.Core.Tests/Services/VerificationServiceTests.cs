@@ -105,6 +105,54 @@ public class VerificationServiceTests
     }
 
     [Fact]
+    public async Task RevokeCapability_WhenAuthorizationChainWalkFaults_FailsClosedAndLogs()
+    {
+        // PR #84 review (🔴): the revocation authorization step (IsRevokerAuthorizedAsync) must fail
+        // closed on ANY fault from the chain walk — not only CapabilityValidationException — so a
+        // transient/structural fault returns false instead of propagating as an unhandled exception
+        // through the public RevokeCapabilityAsync API and crashing callers that expect false. The
+        // cause is logged (Issue #64) so operators can tell a chain-walk failure apart from a
+        // genuine "not authorized".
+        var logger = new CapturingLogger<VerificationService>();
+        var verifier = new VerificationService(
+            _didProvider,
+            _caveatProcessor,
+            VerificationService.CreateDefaultSuiteProvider(),
+            new RevocationService(new InMemoryRevocationStore()),
+            new InMemoryNonceStore(),
+            SigningService.CreateDefaultCanonicalizerProvider(),
+            nonceWindow: null,
+            logger: logger);
+
+        var revokerDid = "did:key:z6MkRevokeFaultRevoker";
+        _didProvider.GenerateAndRegisterKeyPair(revokerDid);
+
+        // Looks delegated (has parentCapability) but carries no proof/chain, so authorization's
+        // BuildCapabilityChainAsync throws — and it throws AFTER the revocation request's own
+        // signature has already verified, exercising the authorization-step catch specifically.
+        var malformed = new Capability
+        {
+            Context = new object[] { "https://w3id.org/zcap/v1" },
+            Id = "urn:uuid:revoke-fault",
+            Controller = revokerDid,
+            InvocationTarget = "https://example.com/resource",
+            ParentCapability = "urn:zcap:root:https%3A%2F%2Fexample.com%2Fresource"
+        };
+
+        // A genuinely valid proof-of-possession revocation request bound to the malformed capability,
+        // so the structural and signature checks pass and control reaches the chain walk.
+        var signedRevocation = await _signingService.SignRevocationAsync(
+            malformed.Id, revokerDid, malformed.InvocationTarget);
+
+        // Must NOT throw; must return false (fail-closed) and log the swallowed cause.
+        var result = await verifier.RevokeCapabilityAsync(malformed, signedRevocation);
+
+        result.Should().BeFalse("an unbuildable authorization chain means 'not authorized', not a crash");
+        logger.Entries.Should().Contain(e => e.Level == LogLevel.Warning && e.Exception != null,
+            "the swallowed chain-walk cause must be logged, not discarded");
+    }
+
+    [Fact]
     public async Task VerifyCapabilityProof_WithRevokedImmediateParent_ShouldReturnFalse()
     {
         // Issue #63: VerifyCapabilityProofAsync previously checked only the leaf's revocation,
