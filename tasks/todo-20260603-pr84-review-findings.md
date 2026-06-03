@@ -42,6 +42,21 @@ Branch: `64-verification-logging` (PR #84). Plan approved at
       pre-existing `examples/ZcapLd.Examples/Program.cs` nullable warnings (untouched).
 - [x] `dotnet test ZcapLd.sln` → 382 Core + 6 AspNetCore green (+1 net new test).
 
+## Residual nits (follow-up review)
+
+- [x] **Empty/null `proofValue` → Warning** — `MultibaseCodec.Decode` throws `ArgumentException`
+      from a null/empty guard *before* its own try, so `DecodeProofValue`'s `catch
+      (CryptographicException)` missed it → it reached `LogFailedClosed` as `ArgumentException`
+      (not expected) → Warning. Broadened the catch to also retype `ArgumentException` (the call's
+      only source of it) → `CapabilityValidationException` → Debug. Guarded by
+      `VerifyInvocation_WithEmptyProofValue_LogsAtDebugNotWarning` (asserts Debug + retyped inner
+      `ArgumentException`, and **no** Warning entry).
+- [x] **Resolver-dependent classification** — left as the conservative Warning default (an
+      unresolvable `verificationMethod` is genuinely ambiguous: attacker noise vs. transient
+      outage). Added a `<para>` note to `LogFailedClosed` that type-based classification is
+      best-effort for third-party `IDidResolver`s; `ArgumentException` deliberately stays OUT of
+      the global expected set (it's a config/programmer-error signal elsewhere).
+
 ## Review
 
 - All 4 findings addressed. The severity seam is guarded in both directions (Debug for expected

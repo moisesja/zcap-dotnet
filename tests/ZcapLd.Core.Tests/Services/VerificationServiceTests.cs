@@ -192,6 +192,51 @@ public class VerificationServiceTests
     }
 
     [Fact]
+    public async Task VerifyInvocation_WithEmptyProofValue_LogsAtDebugNotWarning()
+    {
+        // PR #84 review (residual nit): an empty/null proofValue makes MultibaseCodec.Decode throw
+        // ArgumentException from a guard BEFORE its own try, so DecodeProofValue must retype that too
+        // (not only the wrapped CryptographicException) — otherwise this attacker-drivable input lands
+        // at Warning, the exact vector Finding 1 closed. Assert it fails closed and logs at Debug
+        // carrying a CapabilityValidationException whose inner cause is the ArgumentException.
+        var logger = new CapturingLogger<VerificationService>();
+        var verifier = new VerificationService(
+            _didProvider,
+            _caveatProcessor,
+            VerificationService.CreateDefaultSuiteProvider(),
+            new RevocationService(new InMemoryRevocationStore()),
+            new InMemoryNonceStore(),
+            SigningService.CreateDefaultCanonicalizerProvider(),
+            nonceWindow: null,
+            logger: logger);
+
+        var controllerDid = "did:key:z6MkEmptyProofValue";
+        _didProvider.GenerateAndRegisterKeyPair(controllerDid);
+        var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
+            controllerDid, "https://example.com/resource", new[] { "read" });
+
+        var invocation = new Invocation
+        {
+            Capability = rootCapability.Id,
+            CapabilityAction = "read",
+            InvocationTarget = "https://example.com/resource"
+        };
+        invocation.Proof = await _signingService.SignInvocationAsync(invocation, controllerDid);
+        // Structurally intact, but the signature encoding is empty — invalid input, not a config fault.
+        invocation.Proof.ProofValue = "";
+
+        var result = await verifier.VerifyInvocationAsync(invocation, rootCapability);
+
+        result.Should().BeFalse("an empty proofValue fails closed");
+        logger.Entries.Should().Contain(
+            e => e.Level == LogLevel.Debug && e.Exception is CapabilityValidationException
+                && e.Exception.InnerException is ArgumentException,
+            "an empty proofValue is malformed input — Debug, retyped from the decode ArgumentException");
+        logger.Entries.Should().NotContain(e => e.Level == LogLevel.Warning,
+            "a malformed proofValue must not reach the Warning channel");
+    }
+
+    [Fact]
     public async Task VerifyCapabilityProof_WithRevokedImmediateParent_ShouldReturnFalse()
     {
         // Issue #63: VerifyCapabilityProofAsync previously checked only the leaf's revocation,

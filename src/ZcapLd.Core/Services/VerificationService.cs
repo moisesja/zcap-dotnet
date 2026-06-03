@@ -139,6 +139,14 @@ public class VerificationService : IVerificationService
     /// (<see cref="CryptographicException"/>), a transient DID-resolution / infrastructure error, or
     /// any non-library exception. Fail-closed is unaffected either way (Issue #64; the structured
     /// invalid-vs-couldn't-check channel remains #70).
+    /// <para>
+    /// Classification is by exception <i>type</i>, so it is best-effort for third-party
+    /// <see cref="IDidResolver"/> implementations: a custom (e.g. network) resolver that throws its own
+    /// exception type on an attacker-referenced <c>verificationMethod</c> lands at Warning rather than
+    /// Debug. That is the conservative default — an unresolvable method is genuinely ambiguous (attacker
+    /// noise vs. a transient resolver outage the operator must see). The bundled <c>DidKeyResolver</c>
+    /// already maps resolution failures to <see cref="CapabilityValidationException"/> (Debug).
+    /// </para>
     /// </summary>
     private void LogFailedClosed(Exception ex, string template, params object?[] args)
     {
@@ -148,11 +156,14 @@ public class VerificationService : IVerificationService
     }
 
     /// <summary>
-    /// Decodes a proof's multibase <c>proofValue</c>, retyping a malformed/unsupported value as a
-    /// <see cref="CapabilityValidationException"/>. A bad <c>proofValue</c> is invalid <i>input</i>,
+    /// Decodes a proof's multibase <c>proofValue</c>, retyping a malformed/unsupported/empty value as
+    /// a <see cref="CapabilityValidationException"/>. A bad <c>proofValue</c> is invalid <i>input</i>,
     /// not a crypto-configuration fault, so this keeps it on the Debug-severity side of
     /// <see cref="LogFailedClosed"/> instead of colliding with the missing-canonicalizer
-    /// <see cref="CryptographicException"/> that must stay at Warning.
+    /// <see cref="CryptographicException"/> that must stay at Warning. <see cref="MultibaseCodec.Decode"/>
+    /// throws <see cref="ArgumentException"/> (null/empty), a guard before its own try, and
+    /// <see cref="CryptographicException"/> (bad prefix / undecodable) — both are an invalid proofValue
+    /// here (this call's only sources of those types), so both are retyped.
     /// </summary>
     private static byte[] DecodeProofValue(string proofValue)
     {
@@ -160,7 +171,7 @@ public class VerificationService : IVerificationService
         {
             return MultibaseCodec.Decode(proofValue);
         }
-        catch (CryptographicException ex)
+        catch (Exception ex) when (ex is CryptographicException or ArgumentException)
         {
             throw new CapabilityValidationException("Malformed or unsupported proofValue.", ex);
         }
