@@ -33,7 +33,10 @@ builder.Services.AddZcapRevocationSupport<MyRevocationStore>();
 
 `MapZcapRevocationEndpoints()` exposes:
 
-- `POST /zcaps/revocations/{*capabilityId}`
+- `POST /zcaps/revocations/{*capabilityId}` — revoke from a **signed** request (proof-of-possession).
+  Body: `{ capability, signedRevocation }` (the latter from `ISigningService.SignRevocationAsync`).
+  Returns `403` when unauthenticated/unauthorized. Requires `AddZcapServices()` (it resolves
+  `IVerificationService`), not `AddZcapRevocationSupport()` alone.
 - `GET /zcaps/revocations/{*capabilityId}`
 
 To customize route prefix:

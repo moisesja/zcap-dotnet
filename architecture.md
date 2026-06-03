@@ -171,9 +171,9 @@ Implement `IRevocationStore` to persist revocation records in any backend:
 
 For ASP.NET hosts, use `ZcapLd.AspNetCore` to expose revocation APIs quickly:
 
-- Register revocation services via `AddZcapRevocationSupport(...)`
+- Register the service graph via `AddZcapServices()` — the POST/revoke endpoint resolves `IVerificationService` to authenticate + authorize a **signed** revocation request (proof-of-possession). Override the store with `AddZcapRevocationSupport<MyStore>()`.
 - Expose routes via `MapZcapRevocationEndpoints(...)`
-- Default route prefix is `/zcaps/revocations`
+- POST body is `{ capability, signedRevocation }`; the endpoint returns `403` when unauthenticated/unauthorized. Default route prefix is `/zcaps/revocations`
 
 ### Alternative Revocation Exposure Patterns
 
@@ -185,7 +185,7 @@ The core library does not require ASP.NET. Revocation can be exposed through:
 - CLI/admin tooling
 - smart-contract relayers/oracles
 
-These patterns should call `IRevocationService` so transport logic stays separate from revocation domain logic.
+These patterns should drive `IVerificationService.RevokeCapabilityAsync(Capability, Invocation)` (which enforces signature authentication + chain authorization). `IRevocationService` is the unauthenticated persistence primitive — call it directly only after authenticating and authorizing the caller yourself.
 
 ### Persistence Strategy Configuration
 

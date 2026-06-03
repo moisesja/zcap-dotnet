@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" Version="10.0.1" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.6.0" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5" />
+    <PackageReference Include="FluentAssertions" Version="8.10.0" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/ZcapLd.Core/ZcapLd.Core.csproj" />
+    <ProjectReference Include="../../src/ZcapLd.AspNetCore/ZcapLd.AspNetCore.csproj" />
+    <!-- The demo is the system-under-test, exposing a public partial Program for WebApplicationFactory. -->
+    <ProjectReference Include="../../examples/ZcapLd.RevocationEndpointsDemo/ZcapLd.RevocationEndpointsDemo.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Reuse the test DID signer/resolver without a test-to-test project dependency. -->
+    <Compile Include="../ZcapLd.Core.Tests/Helpers/InMemoryDidProvider.cs" Link="Helpers/InMemoryDidProvider.cs" />
+  </ItemGroup>
+
+</Project>

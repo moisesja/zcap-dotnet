@@ -15,21 +15,39 @@ dotnet run --project examples/ZcapLd.RevocationEndpointsDemo/ZcapLd.RevocationEn
 
 ## Example Requests
 
-Revoke a capability:
+Revocation requires **proof of possession** — there is no bare-`revokerDid` path. The body carries the
+full capability being revoked plus a revocation request signed by a key that controls the capability
+(or an ancestor), produced by `ISigningService.SignRevocationAsync(...)`:
+
+```jsonc
+// signed-revocation.json
+{
+  "capability": { /* the full delegated capability, including its proof + capabilityChain */ },
+  "signedRevocation": {
+    "id": "urn:uuid:…",
+    "capability": "urn:uuid:12345",
+    "capabilityAction": "revoke",
+    "invocationTarget": "https://api.example.com/resource",
+    "proof": {
+      "type": "Ed25519Signature2020",
+      "proofPurpose": "capabilityRevocation",
+      "verificationMethod": "did:key:z6Mk…#z6Mk…",
+      "proofValue": "z…",
+      "revocationReason": "credential compromised"
+    }
+  }
+}
+```
 
 ```bash
 curl -X POST "http://localhost:5099/zcaps/revocations/urn%3Auuid%3A12345" \
   -H "Content-Type: application/json" \
-  -d '{
-    "revokerDid": "did:key:z6MkDemo",
-    "rootCapabilityId": "urn:zcap:root:https%3A%2F%2Fapi.example.com%2Fresource",
-    "expiresAt": "2026-06-01T00:00:00Z",
-    "reason": "credential compromised",
-    "metadata": {
-      "ticket": "SEC-741"
-    }
-  }'
+  --data @signed-revocation.json
 ```
+
+A request that is unauthenticated (bad/forged signature) or unauthorized (the signer controls no link
+in the chain) returns **403** and records nothing. A route id that disagrees with the body capability id
+returns **400**.
 
 Check status:
 

@@ -118,11 +118,24 @@ var delegatedByBob = await capabilityService.DelegateCapabilityAsync(
 
 ## Revocation Extensibility
 
-The core package is storage-agnostic for revocation.
+Revocation requires **proof of possession**: a revoker proves control by *signing* a revocation
+request, which the library authenticates (signature) and authorizes (against the capability's
+verified delegation chain). There is no unauthenticated bare-DID path.
 
+- `ISigningService.SignRevocationAsync(...)`: mint a signed revocation request
+- `IVerificationService.RevokeCapabilityAsync(Capability, Invocation)`: authenticate + authorize + record
 - `IRevocationStore`: plug in your own backend (database, contract gateway, oracle bridge, cache)
-- `IRevocationService`: orchestration for persistence and expiry-aware lookups
+- `IRevocationService`: **persistence primitive** — performs no auth; never call directly from untrusted input
 - `VerificationService`: checks revocation status during capability/invocation verification
+
+```csharp
+// Revoker side — sign a revocation request bound to the capability:
+var signedRevocation = await signingService.SignRevocationAsync(
+    delegated.Id, revokerDid, delegated.InvocationTarget, reason: "key compromised");
+
+// Verifier side — authenticate, authorize against the chain, then record:
+bool revoked = await verificationService.RevokeCapabilityAsync(delegated, signedRevocation);
+```
 
 Optional ASP.NET endpoint rails are provided by `ZcapLd.AspNetCore`:
 
@@ -131,7 +144,8 @@ using ZcapLd.AspNetCore.DependencyInjection;
 using ZcapLd.AspNetCore.Endpoints;
 
 var builder = WebApplication.CreateBuilder(args);
-builder.Services.AddZcapRevocationSupport(); // Or AddZcapRevocationSupport<MyStore>()
+builder.Services.AddZcapServices(); // registers IVerificationService (required by the POST endpoint)
+// Optionally override the store: builder.Services.AddZcapRevocationSupport<MyStore>();
 
 var app = builder.Build();
 app.MapZcapRevocationEndpoints(); // /zcaps/revocations/{*capabilityId}
@@ -142,18 +156,17 @@ app.Run();
 
 Use `ZcapLd.AspNetCore` when your runtime is ASP.NET and you want ready-made minimal API rails:
 
-- Register services via `AddZcapRevocationSupport(...)`
+- Register services via `AddZcapServices()` (the POST/revoke endpoint resolves `IVerificationService`)
 - Map routes via `MapZcapRevocationEndpoints(...)`
+- POST a signed `{ capability, signedRevocation }`; the endpoint returns `403` if unauthenticated/unauthorized
 - Override route prefix when needed (for example `/wallet/revocations`)
 
 ### Expose Revocation in Other Ways
 
-If you do not want ASP.NET endpoints, call `IRevocationService` from your own transport layer:
-
-- gRPC handler
-- message consumer
-- admin CLI
-- worker-triggered orchestration
+If you do not want ASP.NET endpoints, drive `IVerificationService.RevokeCapabilityAsync(Capability,
+Invocation)` from your own transport layer (gRPC handler, message consumer, admin CLI, worker). Call
+the lower-level `IRevocationService` directly **only** after you have authenticated and authorized the
+caller yourself — it records whatever it is given.
 
 ### Persistence Strategy Options
 
@@ -173,7 +186,8 @@ The `ValidWhileTrue` caveat (per the W3C ZCAP-LD spec) enables remote revocation
 **Controller side** (hosts the revocation status endpoint):
 
 ```csharp
-builder.Services.AddZcapRevocationSupport<MyStore>();
+builder.Services.AddZcapServices();              // POST/revoke endpoint needs IVerificationService
+builder.Services.AddZcapRevocationSupport<MyStore>(); // override the store
 app.MapZcapRevocationEndpoints();
 
 // When delegating, attach the caveat pointing to your endpoint:
