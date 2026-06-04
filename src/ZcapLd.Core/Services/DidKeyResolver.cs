@@ -1,5 +1,7 @@
 using NetCid;
 using NetDid.Core.Crypto;
+using NetDid.Core.Model;
+using NetDid.Core.Resolution;
 using NetDid.Method.Key;
 using ZcapLd.Core.Exceptions;
 using ZcapLd.Core.Models;
@@ -10,10 +12,15 @@ namespace ZcapLd.Core.Services;
 /// Resolves did:key DIDs to their public keys and verification method URIs.
 /// Delegates to NetDid's <see cref="DidKeyMethod"/> for DID document resolution
 /// and adapts the result to ZcapLd's <see cref="IDidResolver"/> interface.
+///
+/// Also implements <see cref="IVerificationRelationshipResolver"/> so the verifier can authorize
+/// a controller's verification method against the controller's resolved did:key document
+/// (capabilityInvocation / capabilityDelegation) without separate wiring — Issue #65.
 /// </summary>
-public class DidKeyResolver : IDidResolver
+public class DidKeyResolver : IDidResolver, IVerificationRelationshipResolver
 {
     private readonly DidKeyMethod _didKeyMethod;
+    private readonly IVerificationRelationshipResolver _relationshipResolver;
 
     /// <summary>
     /// Creates a DidKeyResolver with default NetDid key generator support.
@@ -29,7 +36,15 @@ public class DidKeyResolver : IDidResolver
     public DidKeyResolver(DidKeyMethod didKeyMethod)
     {
         _didKeyMethod = didKeyMethod ?? throw new ArgumentNullException(nameof(didKeyMethod));
+        _relationshipResolver = new DefaultVerificationRelationshipResolver(_didKeyMethod);
     }
+
+    /// <inheritdoc />
+    public Task<VerificationRelationshipAuthorizationResult> IsAuthorizedForRelationshipAsync(
+        string controllerDid, string verificationMethodDidUrl,
+        VerificationRelationship relationship, CancellationToken ct = default) =>
+        _relationshipResolver.IsAuthorizedForRelationshipAsync(
+            controllerDid, verificationMethodDidUrl, relationship, ct);
 
     /// <summary>
     /// Resolves a did:key DID or verification method URI to its public key material.

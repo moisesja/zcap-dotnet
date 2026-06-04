@@ -49,8 +49,8 @@
          CryptoSuite calls NetDid's format-aware overloads with EcdsaSignatureFormat.IeeeP1363.
          See CryptoSuite.cs. -->
     <PackageReference Include="dotNetRdf.Core" Version="3.5.1" />
-    <PackageReference Include="NetDid.Core" Version="1.3.0" />
-    <PackageReference Include="NetDid.Method.Key" Version="1.3.0" />
+    <PackageReference Include="NetDid.Core" Version="1.3.1" />
+    <PackageReference Include="NetDid.Method.Key" Version="1.3.1" />
 
     <!-- Logging abstraction only: lets the verifier emit a diagnostic when it fails closed,
          so a misconfiguration/transient fault is distinguishable from an invalid capability

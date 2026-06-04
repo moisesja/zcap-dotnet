@@ -103,10 +103,16 @@ public sealed class ControllerSet : IEquatable<ControllerSet>
         _values.Any(v => string.Equals(v, controller, StringComparison.Ordinal));
 
     /// <summary>
-    /// True when a proof's verification method is authorized by this set — i.e. one of the
-    /// controllers equals either the verification method's bare DID (<c>vm.Split('#')[0]</c>)
-    /// or the full verification method URI. This is the multi-controller authorization check
-    /// used for both invocation and delegation.
+    /// String-level containment helper: true when one of the controllers equals either the
+    /// verification method's bare DID (<c>vm.Split('#')[0]</c>) or the full verification method URI.
+    /// <para>
+    /// NOTE: this is NOT the authorization check. Controller authorization is performed by
+    /// <c>VerificationService</c> via an <c>IVerificationRelationshipResolver</c>, which resolves the
+    /// controller's DID document and confirms the verification method appears in the relevant
+    /// verification relationship (<c>capabilityInvocation</c> / <c>capabilityDelegation</c>) — Issue #65.
+    /// This helper only compares DID strings and cannot honor cross-DID references or per-purpose
+    /// key separation; use it for display/containment, not to decide authorization.
+    /// </para>
     /// </summary>
     public bool ContainsVerificationMethod(string verificationMethod)
     {

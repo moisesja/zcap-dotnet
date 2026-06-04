@@ -56,6 +56,9 @@ Primary assembly: `src/ZcapLd.Core`.
   - Verifies invocation proof + action/target + caveats
   - Enforces invocation replay protection via `INonceStore`
   - Resolves public keys via `IDidResolver` and revocation checks
+  - Authorizes the proof's verification method against the controller's DID document via
+    `IVerificationRelationshipResolver` (`capabilityInvocation` for invocations,
+    `capabilityDelegation` for delegations) — Issue #65
 - `RevocationService`
   - Persists revocation records via `IRevocationStore`
   - Applies retention/expiry behavior for revocation lookups
@@ -108,7 +111,9 @@ Primary assembly: `src/ZcapLd.Core`.
    - capability chain validity
    - invocation proof purpose and signature
    - action and target constraints
-   - controller authorization
+   - controller authorization — resolves the controller's DID document and confirms the
+     verification method is in the `capabilityInvocation` relationship (delegations use
+     `capabilityDelegation`); honors cross-DID references and per-purpose key separation
    - all caveats across root→leaf chain
 
 ## Capability Chain Semantics
@@ -157,6 +162,8 @@ The `ValidWhileTrueCaveat` embeds a URI that the verifier checks at invocation t
 ### DID Resolution
 
 DID resolution for did:key is handled by `DidKeyResolver`, which wraps NetDid's `DidKeyMethod`. For additional DID methods (did:web, did:ion, etc.), implement `IDidResolver` and register in `CompositeDidResolver`. The resolver returns `ResolvedKey(byte[] PublicKeyBytes, string KeyType)` so the verification service knows which crypto suite to use.
+
+**Controller authorization** is a separate concern from key resolution. `VerificationService` resolves the controller's DID *document* through a NetDid `IVerificationRelationshipResolver` (1.3.1) and confirms the proof's verification method appears in the relevant relationship (`capabilityInvocation` / `capabilityDelegation`). `DidKeyResolver` also implements this interface (so did:key works out of the box); for other methods, supply a method-appropriate `IVerificationRelationshipResolver` (e.g. one wired by NetDid's `AddNetDid`) either by having your `IDidResolver` implement it or by passing it to `VerificationService` / registering it for `AddZcapServices`. Controllers whose document cannot be resolved fail closed (logged at Warning).
 
 ### Revocation Storage
 
