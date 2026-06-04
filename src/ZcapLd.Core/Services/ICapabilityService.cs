@@ -13,14 +13,17 @@ public interface ICapabilityService
     /// <param name="controller">The controller(s) of the capability — a single DID
     /// (implicit from <see cref="string"/>) or several (implicit from <c>string[]</c>)</param>
     /// <param name="invocationTarget">The target resource URI</param>
-    /// <param name="allowedActions">Actions allowed by this capability</param>
+    /// <param name="allowedActions">Optional; ignored for root capabilities. A root carries no
+    /// <c>allowedAction</c> per W3C ZCAP-LD (it represents complete authority over the resource),
+    /// so the implementation discards this. The interface previously declared it required, forcing
+    /// callers to pass a throwaway array; the signature now matches the implementation (Issue #66).</param>
     /// <param name="expires">Optional expiration time</param>
     /// <param name="caveats">Optional caveats to apply</param>
     /// <returns>The created capability</returns>
     Task<Capability> CreateRootCapabilityAsync(
         ControllerSet controller,
         string invocationTarget,
-        string[] allowedActions,
+        string[]? allowedActions = null,
         DateTime? expires = null,
         Caveat[]? caveats = null);
 
