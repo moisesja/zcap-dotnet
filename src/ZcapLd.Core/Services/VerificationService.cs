@@ -756,6 +756,17 @@ public class VerificationService : IVerificationService
     /// this capability. A capability may have multiple controllers; the proof is authorized
     /// when its verification method matches any one of them (by bare DID or full VM URI).
     /// </summary>
+    /// <remarks>
+    /// Authorization is at DID-string granularity: it matches the verification method's DID
+    /// against the controller set without resolving the controller's DID document. This is
+    /// sound for <c>did:key</c> (where the verification method's DID is derived from the key, so
+    /// VM-DID == controller-DID). For DID methods where the controller DID differs from the
+    /// verification-method-containing DID, or a controller authorizes multiple keys, confirming
+    /// the verification method actually appears in the controller's <c>capabilityDelegation</c> /
+    /// <c>capabilityInvocation</c> relationship would require resolving the controller document
+    /// (an extension of <see cref="IDidResolver"/>) — tracked as the remaining part of Issue #65.
+    /// No forgery is enabled today: the signature itself is always verified independently.
+    /// </remarks>
     private bool IsControllerAuthorized(string verificationMethod, Capability capability)
     {
         return capability.Controller is not null &&
