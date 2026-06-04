@@ -184,6 +184,18 @@ public class VerificationService : IVerificationService
     }
 
     /// <summary>
+    /// True when a <see cref="AuthorizationDecision.ControllerNotResolvable"/> resolution error is an
+    /// expected, attacker-drivable outcome (the presented capability's controller DID is malformed,
+    /// unknown, or of an unsupported method) rather than an unexpected fault an operator must act on.
+    /// Applies the same severity philosophy as <see cref="LogFailedClosed"/> to the relationship
+    /// resolver's tri-state result (Issue #64 / #65): these W3C DID-resolution codes log at Debug; an
+    /// unrecognized/null code (a possible transient or infrastructure fault on a legitimate controller)
+    /// stays at Warning.
+    /// </summary>
+    private static bool IsExpectedResolutionError(string? resolutionError) => resolutionError is
+        "notFound" or "invalidDid" or "invalidDidUrl" or "methodNotSupported" or "representationNotSupported";
+
+    /// <summary>
     /// Decodes a proof's multibase <c>proofValue</c>, retyping a malformed/unsupported/empty value as
     /// a <see cref="CapabilityValidationException"/>. A bad <c>proofValue</c> is invalid <i>input</i>,
     /// not a crypto-configuration fault, so this keeps it on the Debug-severity side of
@@ -305,25 +317,11 @@ public class VerificationService : IVerificationService
                 }
             }
 
-            if (parentCapability != null &&
-                !await IsControllerAuthorizedAsync(
-                    proof.VerificationMethod, parentCapability, VerificationRelationship.CapabilityDelegation))
-            {
-                return false;
-            }
-
-            // Revocation is checked by the entry points, not here: VerifyBuiltChainAsync sweeps
-            // every link, and the standalone VerifyCapabilityProofAsync sweeps the full ancestry
-            // via IsAnyAncestorRevokedAsync (Issue #63). This method is purely signature + parent
-            // authorization, so a single delegation proof's check stays independent of chain state.
-
-            if (requireParentAuthorization &&
-                (parentCapability == null || parentCapability.Controller is null || parentCapability.Controller.IsEmpty))
-            {
-                return false;
-            }
-
-            // Get the public key and look up the crypto suite for this proof type
+            // Verify the proof signature FIRST — before any authorization resolver I/O. A forged
+            // delegation proof is then rejected on the cryptographic gate without resolving any
+            // controller's DID document and without emitting authorization-path logs (defense in
+            // depth; also keeps a forged chain from driving the relationship resolver). The
+            // invocation path (VerifyInvocationAsync) orders signature before authorization likewise.
             var resolvedKey = await _didResolver.ResolvePublicKeyAsync(proof.VerificationMethod);
             var suite = _suiteProvider.GetByProofType(proof.Type);
             if (suite == null)
@@ -339,7 +337,27 @@ public class VerificationService : IVerificationService
                 canonicalizer);
             var signatureBytes = DecodeProofValue(proof.ProofValue);
 
-            return suite.Verify(canonicalBytes, signatureBytes, resolvedKey.PublicKeyBytes);
+            if (!suite.Verify(canonicalBytes, signatureBytes, resolvedKey.PublicKeyBytes))
+                return false;
+
+            // Signature is valid; now enforce parent authorization. Revocation is checked by the
+            // entry points, not here: VerifyBuiltChainAsync sweeps every link, and the standalone
+            // VerifyCapabilityProofAsync sweeps the full ancestry via IsAnyAncestorRevokedAsync
+            // (Issue #63), so a single delegation proof's check stays independent of chain state.
+            if (requireParentAuthorization &&
+                (parentCapability == null || parentCapability.Controller is null || parentCapability.Controller.IsEmpty))
+            {
+                return false;
+            }
+
+            if (parentCapability != null &&
+                !await IsControllerAuthorizedAsync(
+                    proof.VerificationMethod, parentCapability, VerificationRelationship.CapabilityDelegation))
+            {
+                return false;
+            }
+
+            return true;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -795,10 +813,13 @@ public class VerificationService : IVerificationService
     /// controllers whose authorized key lives under a different DID (cross-DID references) and the
     /// per-purpose key separation DID Core defines (a key authorized only for
     /// <c>capabilityInvocation</c> cannot delegate). Fail-closed and severity-aware (Issue #64):
-    /// an expected denial logs at Debug, while a controller that cannot be resolved
-    /// (<see cref="AuthorizationDecision.ControllerNotResolvable"/> — a missing/transient resolver
-    /// for that DID method) logs at Warning and is treated as not authorized. No forgery is enabled:
-    /// the signature itself is always verified independently.
+    /// an expected denial logs at Debug; a controller that cannot be resolved
+    /// (<see cref="AuthorizationDecision.ControllerNotResolvable"/>) is severity-classified by its
+    /// resolution error (<see cref="IsExpectedResolutionError"/>) — an attacker-drivable malformed/
+    /// unknown/unsupported controller DID logs at Debug (so a hostile client cannot flood the Warning
+    /// channel — Issue #64), while an unexpected/transient resolver fault logs at Warning. Either way
+    /// it is treated as not authorized. No forgery is enabled: the signature is always verified
+    /// independently.
     /// </remarks>
     private async Task<bool> IsControllerAuthorizedAsync(
         string verificationMethod, Capability capability, VerificationRelationship relationship)
@@ -816,7 +837,14 @@ public class VerificationService : IVerificationService
                 case AuthorizationDecision.Authorized:
                     return true;
                 case AuthorizationDecision.ControllerNotResolvable:
-                    _logger.LogWarning(
+                    // The controller string comes from the presented capability, so an attacker can
+                    // drive this with a fabricated/undecodable controller (e.g. did:web:does-not-exist).
+                    // Per the Issue #64 severity policy, an attacker-drivable resolution failure logs at
+                    // Debug (so it cannot flood the Warning channel and mask a real fault); an unexpected
+                    // resolution error code (possible transient/infrastructure fault on a legitimate
+                    // controller) stays at Warning.
+                    _logger.Log(
+                        IsExpectedResolutionError(result.ResolutionError) ? LogLevel.Debug : LogLevel.Warning,
                         "Controller '{Controller}' could not be resolved during {Relationship} authorization: {Error}",
                         controller, relationship, result.ResolutionError);
                     break;
@@ -1075,17 +1103,23 @@ public class VerificationService : IVerificationService
             if (!await VerifyBuiltChainAsync(chain))
                 return false;
 
-            // Authorization is a string-level controller match: verificationMethod (a bare DID or a
-            // did#key-fragment) authorizes when it equals a chain controller, or its bare DID
-            // does. This covers did:key (the DID *is* the key) and a did:web controller whose
-            // bare DID matches the revoker's key fragment (did:web:issuer#key-1 → did:web:issuer).
-            // It does NOT resolve the controller's DID document, so a revoker key belonging to a
-            // *different* DID that the controller would authorize is not matched.
-            // TODO: support cross-DID key authorization by resolving the controller's DID
-            // document and checking its verificationMethod/capabilityDelegation relationships.
-            return chain.Any(link =>
-                link.Controller is not null &&
-                link.Controller.ContainsVerificationMethod(verificationMethod));
+            // Document-based authorization (Issue #65): the revoker is authorized when ANY link in
+            // the cryptographically verified chain authorizes its verification method for the
+            // capabilityDelegation relationship — revocation is a delegation-authority action (the
+            // authority to delegate is the authority to revoke that delegation). This resolves each
+            // controller's DID document (via the same IVerificationRelationshipResolver the
+            // invocation/delegation paths use), so it honors cross-DID references and per-purpose key
+            // separation: a key the controller's document lists only under capabilityInvocation can
+            // no longer revoke. Self-revoke (the leaf's own controller) and up-chain delegators are
+            // both covered because every link is checked.
+            foreach (var link in chain)
+            {
+                if (await IsControllerAuthorizedAsync(
+                        verificationMethod, link, VerificationRelationship.CapabilityDelegation))
+                    return true;
+            }
+
+            return false;
         }
         catch (Exception ex)
         {

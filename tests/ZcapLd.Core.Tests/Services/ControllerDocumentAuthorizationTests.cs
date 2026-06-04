@@ -100,13 +100,18 @@ public class ControllerDocumentAuthorizationTests
     }
 
     [Fact]
-    public async Task RootInvocation_ControllerNotResolvable_FailsClosed_AndLogsWarning()
+    public async Task RootInvocation_ControllerNotResolvable_TransientError_FailsClosed_AndLogsWarning()
     {
+        // An UNEXPECTED resolution error code (not an attacker-drivable notFound/invalidDid/…) on a
+        // controller is the genuine infrastructure/transient case: it fails closed AND logs at Warning
+        // so an operator sees it (Issue #64). The Debug (attacker-drivable) case is covered separately.
         var alice = _didProvider.GenerateDidKey();
         var root = await _capabilityService.CreateRootCapabilityAsync(alice, Target, new[] { "read" });
         var logger = new CapturingLogger<VerificationService>();
         var verifier = BuildVerifier(
-            new RecordingRelationshipResolver((_, _, _) => AuthorizationDecision.ControllerNotResolvable),
+            new RecordingRelationshipResolver(
+                (_, _, _) => AuthorizationDecision.ControllerNotResolvable,
+                notResolvableError: "serviceUnavailable"),
             logger);
 
         var invocation = await SignedInvocationAsync(root, alice, "read");
@@ -115,7 +120,7 @@ public class ControllerDocumentAuthorizationTests
             "an unresolvable controller fails closed");
         logger.Entries.Should().Contain(
             e => e.Level == LogLevel.Warning && e.Message.Contains("could not be resolved"),
-            "the operator must see an infrastructure/config fault, not a silent denial (Issue #64)");
+            "an unexpected/transient resolver fault must surface at Warning, not be silently denied (Issue #64)");
     }
 
     [Fact]
@@ -208,6 +213,60 @@ public class ControllerDocumentAuthorizationTests
         (await verifier.VerifyInvocationAsync(invocation, root)).Should().BeFalse(
             "the key is authorized only for capabilityDelegation, not capabilityInvocation");
     }
+
+    // ─── Shipped default resolver + severity classification ──────────────────────────
+
+    [Fact]
+    public async Task RootInvocation_WithBuiltInDefaultResolver_AuthorizesRealDidKey()
+    {
+        // Pins the out-of-the-box default: when the IDidResolver does NOT self-provide
+        // IVerificationRelationshipResolver and none is supplied, VerificationService falls back to
+        // CreateDefaultRelationshipResolver() (a did:key DidKeyMethod). A real did:key controller must
+        // authorize end-to-end through it — confirming did:key lists its key under capabilityInvocation.
+        var alice = _didProvider.GenerateDidKey();
+        var root = await _capabilityService.CreateRootCapabilityAsync(alice, Target, new[] { "read" });
+
+        // KeyOnlyDidResolver resolves keys (for the signature) but does not implement
+        // IVerificationRelationshipResolver, so the built-in did:key default handles authorization.
+        var verifier = new VerificationService(
+            new KeyOnlyDidResolver(),
+            new CaveatProcessor(),
+            VerificationService.CreateDefaultSuiteProvider(),
+            new RevocationService(new InMemoryRevocationStore()),
+            new InMemoryNonceStore(),
+            SigningService.CreateDefaultCanonicalizerProvider());
+
+        var invocation = await SignedInvocationAsync(root, alice, "read");
+
+        (await verifier.VerifyInvocationAsync(invocation, root)).Should().BeTrue(
+            "the built-in did:key default relationship resolver authorizes a real did:key controller");
+    }
+
+    [Fact]
+    public async Task RootInvocation_FabricatedUnresolvableController_FailsClosed_LogsDebugNotWarning()
+    {
+        // Issue #64/#65: the controller is attacker-supplied, so an unresolvable/undecodable controller
+        // (here a did:web not known to the resolver) must NOT emit a Warning per request — it logs at
+        // Debug (notFound is an expected, attacker-drivable resolution failure) and fails closed.
+        var alice = _didProvider.GenerateDidKey();
+        const string controller = "did:web:does-not-exist.example";
+        var logger = new CapturingLogger<VerificationService>();
+
+        // A real resolver that knows no documents -> every controller resolves to notFound.
+        var verifier = BuildVerifier(
+            new DefaultVerificationRelationshipResolver(new StaticDidDocumentResolver()), logger);
+
+        var root = await _capabilityService.CreateRootCapabilityAsync(controller, Target, new[] { "read" });
+        var invocation = await SignedInvocationAsync(root, alice, "read");
+
+        (await verifier.VerifyInvocationAsync(invocation, root)).Should().BeFalse("controller is unresolvable");
+        logger.Entries.Should().Contain(
+            e => e.Level == LogLevel.Debug && e.Message.Contains("could not be resolved"),
+            "an attacker-drivable unresolvable controller logs at Debug, not Warning");
+        logger.Entries.Should().NotContain(
+            e => e.Level == LogLevel.Warning && e.Message.Contains("could not be resolved"),
+            "no Warning-channel amplification from attacker-supplied controllers");
+    }
 }
 
 /// <summary>
@@ -217,11 +276,17 @@ public class ControllerDocumentAuthorizationTests
 internal sealed class RecordingRelationshipResolver : IVerificationRelationshipResolver
 {
     private readonly Func<string, string, VerificationRelationship, AuthorizationDecision> _decide;
+    private readonly string _notResolvableError;
 
     public List<(string Controller, string Vm, VerificationRelationship Relationship)> Calls { get; } = new();
 
     public RecordingRelationshipResolver(
-        Func<string, string, VerificationRelationship, AuthorizationDecision> decide) => _decide = decide;
+        Func<string, string, VerificationRelationship, AuthorizationDecision> decide,
+        string notResolvableError = "notFound") // the resolution error code reported for ControllerNotResolvable
+    {
+        _decide = decide;
+        _notResolvableError = notResolvableError;
+    }
 
     public Task<VerificationRelationshipAuthorizationResult> IsAuthorizedForRelationshipAsync(
         string controllerDid, string verificationMethodDidUrl,
@@ -232,7 +297,7 @@ internal sealed class RecordingRelationshipResolver : IVerificationRelationshipR
         {
             AuthorizationDecision.Authorized => VerificationRelationshipAuthorizationResult.Authorized(),
             AuthorizationDecision.ControllerNotResolvable =>
-                VerificationRelationshipAuthorizationResult.NotResolvable("notFound", "test: controller not resolvable"),
+                VerificationRelationshipAuthorizationResult.NotResolvable(_notResolvableError, "test: controller not resolvable"),
             _ => VerificationRelationshipAuthorizationResult.NotAuthorized()
         };
         return Task.FromResult(result);
@@ -258,4 +323,22 @@ internal sealed class StaticDidDocumentResolver : NetDid.Core.IDidResolver
         Task.FromResult(_docs.TryGetValue(did, out var doc)
             ? new DidResolutionResult { DidDocument = doc, ResolutionMetadata = new DidResolutionMetadata() }
             : DidResolutionResult.NotFound(did));
+}
+
+/// <summary>
+/// A zcap <see cref="IDidResolver"/> that resolves did:key public keys (delegating to
+/// <see cref="DidKeyResolver"/>) but deliberately does NOT implement
+/// <see cref="IVerificationRelationshipResolver"/> — so VerificationService cannot self-provide
+/// authorization from it and must fall back to its built-in did:key default. Used to exercise
+/// <c>CreateDefaultRelationshipResolver()</c> end-to-end.
+/// </summary>
+internal sealed class KeyOnlyDidResolver : IDidResolver
+{
+    private readonly DidKeyResolver _inner = new();
+
+    public Task<ResolvedKey> ResolvePublicKeyAsync(string didOrVerificationMethod) =>
+        _inner.ResolvePublicKeyAsync(didOrVerificationMethod);
+
+    public Task<string> GetVerificationMethodAsync(string did) =>
+        _inner.GetVerificationMethodAsync(did);
 }
