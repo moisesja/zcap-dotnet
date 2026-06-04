@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
 using NetDid.Core.Crypto;
+using NetDid.Core.Model;
+using NetDid.Core.Resolution;
 using ZcapLd.Core.Cryptography;
 using ZcapLd.Core.Models;
 using ZcapLd.Core.Services;
@@ -7,14 +9,16 @@ using ZcapLd.Core.Services;
 namespace ZcapLd.Examples;
 
 /// <summary>
-/// Example IDidSigner + IDidResolver for demonstration purposes.
-/// Stores Ed25519 private keys in plaintext memory — NOT for production use.
+/// Example IDidSigner + IDidResolver (+ IVerificationRelationshipResolver) for demonstration
+/// purposes. Stores Ed25519 private keys in plaintext memory — NOT for production use.
 ///
 /// In production, implement IDidSigner backed by your secure key management system
 /// (HSM, Azure Key Vault, AWS KMS, Trinsic, etc.) and IDidResolver backed by a
-/// universal resolver or DID method-specific resolver.
+/// universal resolver or DID method-specific resolver. A resolver that also implements
+/// IVerificationRelationshipResolver lets the verifier authorize controllers by resolving
+/// their DID document (capabilityInvocation / capabilityDelegation) — Issue #65.
 /// </summary>
-public class InMemoryDidProvider : IDidSigner, IDidResolver
+public class InMemoryDidProvider : IDidSigner, IDidResolver, IVerificationRelationshipResolver
 {
     private static readonly DefaultCryptoProvider Crypto = new();
     private static readonly DefaultKeyGenerator KeyGen = new();
@@ -48,6 +52,22 @@ public class InMemoryDidProvider : IDidSigner, IDidResolver
             return _didKeyResolver.GetVerificationMethodAsync(did);
 
         return Task.FromResult($"{did}#key-1");
+    }
+
+    /// <summary>
+    /// did:key-equivalent authorization for this demo backend: the DID is the key identity, so a
+    /// verification method is authorized for every relationship of the controller whose DID it
+    /// belongs to (controller == the VM's base DID), mirroring a real did:key document. A real
+    /// resolver would resolve the controller's document and check the named relationship list.
+    /// </summary>
+    public Task<VerificationRelationshipAuthorizationResult> IsAuthorizedForRelationshipAsync(
+        string controllerDid, string verificationMethodDidUrl,
+        VerificationRelationship relationship, CancellationToken ct = default)
+    {
+        var vmBaseDid = verificationMethodDidUrl.Split('#')[0];
+        return Task.FromResult(string.Equals(vmBaseDid, controllerDid, StringComparison.Ordinal)
+            ? VerificationRelationshipAuthorizationResult.Authorized()
+            : VerificationRelationshipAuthorizationResult.NotAuthorized());
     }
 
     public void GenerateAndRegisterKeyPair(string did)

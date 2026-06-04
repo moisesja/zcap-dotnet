@@ -791,7 +791,7 @@ Based on the specification, a compliant implementation MUST:
 - [ ] Support root capabilities with exact field requirements
 - [ ] Support delegated capabilities with all required/optional fields
 - [ ] Enforce `@context` requirements (string for root, array for delegated)
-- [ ] Support `controller` as string or array of strings
+- [x] Support `controller` as string or array of strings (Issue #47 deserialization + Issue #65 document-based authorization)
 - [ ] Validate `invocationTarget` as URI
 - [ ] Validate `expires` as XSD date-time
 - [ ] Support `allowedAction` as string or array

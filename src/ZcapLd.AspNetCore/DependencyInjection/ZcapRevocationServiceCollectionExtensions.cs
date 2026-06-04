@@ -1,6 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
+using NetDid.Core.Resolution;
 using ZcapLd.AspNetCore.Services;
 using ZcapLd.Core.Cryptography;
 using ZcapLd.Core.Models;
@@ -79,7 +80,10 @@ public static class ZcapRevocationServiceCollectionExtensions
 
         // VerificationService depends on ICryptoSuiteProvider for proof type dispatch,
         // INonceStore for invocation replay protection, and IDocumentCanonicalizerProvider
-        // for suite-specific canonicalization
+        // for suite-specific canonicalization. The optional IVerificationRelationshipResolver
+        // (Issue #65) performs controller authorization by resolving the controller's DID document;
+        // when a consumer has registered one (e.g. a multi-method resolver from NetDid's AddNetDid)
+        // it is used, otherwise VerificationService falls back to its built-in did:key default.
         services.TryAddSingleton<IVerificationService>(sp =>
             new VerificationService(
                 sp.GetRequiredService<IDidResolver>(),
@@ -88,7 +92,8 @@ public static class ZcapRevocationServiceCollectionExtensions
                 sp.GetRequiredService<IRevocationService>(),
                 sp.GetRequiredService<INonceStore>(),
                 sp.GetRequiredService<IDocumentCanonicalizerProvider>(),
-                logger: sp.GetService<ILogger<VerificationService>>()));
+                logger: sp.GetService<ILogger<VerificationService>>(),
+                relationshipResolver: sp.GetService<IVerificationRelationshipResolver>()));
 
         return services;
     }

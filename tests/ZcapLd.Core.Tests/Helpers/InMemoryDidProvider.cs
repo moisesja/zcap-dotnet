@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
 using NetDid.Core.Crypto;
+using NetDid.Core.Model;
+using NetDid.Core.Resolution;
 using ZcapLd.Core.Cryptography;
 using ZcapLd.Core.Models;
 using ZcapLd.Core.Services;
@@ -7,10 +9,10 @@ using ZcapLd.Core.Services;
 namespace ZcapLd.Core.Tests.Helpers;
 
 /// <summary>
-/// Test-only IDidSigner + IDidResolver backed by in-memory Ed25519 keys.
-/// NOT for production use — private keys are stored in plaintext memory.
+/// Test-only IDidSigner + IDidResolver (+ IVerificationRelationshipResolver) backed by in-memory
+/// Ed25519 keys. NOT for production use — private keys are stored in plaintext memory.
 /// </summary>
-public class InMemoryDidProvider : IDidSigner, IDidResolver
+public class InMemoryDidProvider : IDidSigner, IDidResolver, IVerificationRelationshipResolver
 {
     private static readonly DefaultCryptoProvider Crypto = new();
     private static readonly DefaultKeyGenerator KeyGen = new();
@@ -64,6 +66,25 @@ public class InMemoryDidProvider : IDidSigner, IDidResolver
 
         // For other DID methods, return with a standard key fragment
         return Task.FromResult($"{did}#key-1");
+    }
+
+    // --- IVerificationRelationshipResolver ---
+
+    /// <summary>
+    /// did:key-equivalent authorization for this in-memory backend: the DID <em>is</em> the key
+    /// identity, so a verification method is authorized for every relationship of the controller
+    /// whose DID it belongs to (controller == the VM's base DID). This mirrors a real did:key
+    /// document, which lists its single key under all verification relationships — and lets tests
+    /// use synthetic <c>did:key:…</c> identifiers that a standalone <c>DidKeyMethod</c> could not decode.
+    /// </summary>
+    public Task<VerificationRelationshipAuthorizationResult> IsAuthorizedForRelationshipAsync(
+        string controllerDid, string verificationMethodDidUrl,
+        VerificationRelationship relationship, CancellationToken ct = default)
+    {
+        var vmBaseDid = verificationMethodDidUrl.Split('#')[0];
+        return Task.FromResult(string.Equals(vmBaseDid, controllerDid, StringComparison.Ordinal)
+            ? VerificationRelationshipAuthorizationResult.Authorized()
+            : VerificationRelationshipAuthorizationResult.NotAuthorized());
     }
 
     // --- Convenience methods ---
