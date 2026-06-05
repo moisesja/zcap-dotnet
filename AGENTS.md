@@ -4,7 +4,7 @@ This file provides instructions for AI agents and human contributors working in 
 
 ## Project Overview
 
-W3C's ZCAP-LD (Authorization Capabilities for Linked Data) specification defines an object-capability model where authority is granted by possessing a signed "capability" document, rather than by identity or ACLs. A ZCAP-LD capability is a JSON-LD object containing fields like id, invocationTarget, and a cryptographic proof. It can delegate authority by linking to a parent capability (parentCapability) and attaching restrictions called caveats. This model "shifts the burden of identification…to directly work with individuals' actual capabilities" – in other words, "if you have a valid 'capability', you have the authorization" (akin to holding a car key). Our goal is to build a .NET 10 library (for use in-process or via gRPC) that can create, sign, delegate, invoke, and verify ZCAP-LD capabilities for digital wallet agents (using Trinsic for DID/key management). Below are the key requirements and design points.
+W3C's ZCAP-LD (Authorization Capabilities for Linked Data) specification defines an object-capability model where authority is granted by possessing a signed "capability" document, rather than by identity or ACLs. A ZCAP-LD capability is a JSON-LD object containing fields like id, invocationTarget, and a cryptographic proof. It can delegate authority by linking to a parent capability (parentCapability) and attaching restrictions called caveats. This model "shifts the burden of identification…to directly work with individuals' actual capabilities" – in other words, "if you have a valid 'capability', you have the authorization" (akin to holding a car key). Our goal is to build a .NET 10 library (for use in-process or via gRPC) that can create, sign, delegate, invoke, and verify ZCAP-LD capabilities for digital wallet agents. Below are the key requirements and design points.
 
 ## Key Requirements and Design
 
@@ -18,7 +18,7 @@ W3C's ZCAP-LD (Authorization Capabilities for Linked Data) specification defines
 
 - Caveat Support: Implement handling of caveats (restrictions). The spec notes that each capability may add restrictions via a caveat property, and that child capabilities inherit all caveats of their parents. For example, one could add a time-based caveat (e.g. ValidUntil) or an action-limiting caveat. At minimum, design a Caveat class or interface so common types (timestamp checks, count limits, etc.) can be enforced at invocation time. When verifying a delegated capability, ensure that all caveats from the root through to the leaf are evaluated and honored. (For a minimal implementation, you can start by supporting a simple expiration or true/false caveat and expand later.)
 
-- Digital Identity Integration: In practice, capabilities will be issued by entities (e.g. users or services) with DIDs and keypairs managed by Trinsic. Your code should plan for implementors to provide their own DID managing library to fetch a DID document, extract the public key (verificationMethod) for signature verification, or to sign data with a private key. For example, you may call Trinsic APIs to get the public key for a DID used in controller or verificationMethod. In code, this may be abstracted as functions like ResolvePublicKey(did) and SignWithPrivateKey(data, did).
+- Digital Identity Integration: In practice, capabilities will be issued by entities (e.g. users or services) with DIDs and keypairs. Your code should plan for implementors to provide their own DID managing library to fetch a DID document, extract the public key (verificationMethod) for signature verification, or to sign data with a private key. For example, you may call a crypto library to get the public key for a DID used in controller or verificationMethod. In code, this may be abstracted as functions like ResolvePublicKey(did) and SignWithPrivateKey(data, did).
 
 - Architecture (In-Process vs gRPC): Since signing uses private keys, implementing this logic in-process (within the same application or service) is simplest. However, you may optionally expose the functionality over gRPC or HTTP for remote agents. For a library, ensure that signing and verification functions are thread-safe and do not persist private keys beyond needed scope. If exposing via gRPC, design service methods like CreateCapability(), DelegateCapability(), VerifyInvocation().
 
@@ -121,6 +121,8 @@ dotnet run --project examples/ZcapLd.Examples                          # Run con
 - If something goes sideways, STOP and re-plan immediately - don't keep pushing
 - Use plan mode for verification steps, not just building
 - Write detailed specs upfront to reduce ambiguity
+- A workflow (see §2a) usually _follows_ a plan rather than replacing it — plan
+  the approach first, then orchestrate the fan-out as an execution phase
 
 ### 2. Subagent Strategy
 
@@ -128,6 +130,30 @@ dotnet run --project examples/ZcapLd.Examples                          # Run con
 - Offload research, exploration, and parallel analysis to subagents
 - For complex problems, throw more compute at it via subagents
 - One task per subagent for focused execution
+
+### 2a. Workflow Orchestration (Multi-Agent)
+
+- **Opt-in only**: launch a Workflow ONLY when the user explicitly asks (says
+  "workflow", "fan out", "orchestrate with subagents") or runs a skill that
+  calls it. Otherwise use a single subagent, or describe the workflow and its
+  rough token cost and let the user decide. Never auto-launch — workflows can
+  spawn dozens of agents and consume a large token budget.
+- **High-value workflows in this repo**:
+  - _Security review_ — fan out review dimensions (chain validation, caveat
+    inheritance, attenuation, replay/nonce, revocation), then spawn N skeptics
+    per finding to refute it; keep only findings that survive a majority vote.
+  - _Spec-compliance sweep_ — one agent per normative requirement cluster →
+    verify implementation + `tests/Compliance/` coverage → completeness critic
+    flags untested MUST/SHOULD.
+  - _Cross-package migration_ — discover call sites across Core / AspNetCore /
+    examples / tests → transform each in worktree isolation → verify it builds.
+  - _Test-gap analysis_ — multi-modal sweep by requirement, public API surface,
+    and error path.
+- **Default to `pipeline()` over barriers**: verify each finding as its review
+  lands; only use a barrier when a stage genuinely needs all prior results
+  (e.g. dedup before expensive verification).
+- **Always adversarially verify security findings** — a plausible-but-wrong
+  auth-bypass claim is worse than none.
 
 ### 3. Self-Improvement Loop
 
@@ -142,6 +168,8 @@ dotnet run --project examples/ZcapLd.Examples                          # Run con
 - Diff behavior between main and your changes when relevant
 - Ask yourself: "Would a staff engineer approve this,"
 - Run tests, check logs, demonstrate correctness
+- For security-sensitive changes, prefer adversarial multi-agent verification
+  (see §2a) — spawn skeptics to refute findings rather than trusting one pass
 
 ### 5. Demand Elegance (Balanced)
 

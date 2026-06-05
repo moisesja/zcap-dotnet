@@ -1,5 +1,6 @@
 using FluentAssertions;
 using NetDid.Core.Crypto;
+using NetDid.Core.Model;
 using NetDid.Method.Key;
 using ZcapLd.Core.Exceptions;
 using ZcapLd.Core.Services;
@@ -84,6 +85,66 @@ public class NetDidIntegrationTests
 
         var act = async () => await _resolver.ResolvePublicKeyAsync(bogus);
         await act.Should().ThrowAsync<CapabilityValidationException>();
+    }
+
+    [Fact]
+    public async Task ResolvePublicKeyAsync_EmptyFragment_Throws()
+    {
+        // Issue #67 hardening: a trailing '#' with no fragment names no verification method and
+        // must fail closed, not fall back to the primary method.
+        var keyPair = _keyGen.Generate(KeyType.Ed25519);
+        var did = $"did:key:{keyPair.MultibasePublicKey}";
+        var emptyFragment = $"{did}#";
+
+        var act = async () => await _resolver.ResolvePublicKeyAsync(emptyFragment);
+        await act.Should().ThrowAsync<CapabilityValidationException>();
+    }
+
+    [Fact]
+    public async Task ResolvePublicKeyAsync_MultipleHashFragment_Throws()
+    {
+        // Issue #67 hardening: input with more than one '#' splits at the first one; the resulting
+        // fragment matches no verification method and must fail closed rather than mis-resolve.
+        var keyPair = _keyGen.Generate(KeyType.Ed25519);
+        var did = $"did:key:{keyPair.MultibasePublicKey}";
+        var malformed = $"{did}#a#b";
+
+        var act = async () => await _resolver.ResolvePublicKeyAsync(malformed);
+        await act.Should().ThrowAsync<CapabilityValidationException>();
+    }
+
+    [Fact]
+    public async Task DidKeyDocument_DerivedX25519Method_IsNotListedUnderCapabilityRelationships()
+    {
+        // Issue #67 defense-in-depth guard: the fix returns the correct key per #fragment, and the
+        // verifier's relationship gate (Issue #65) is the second line of defense — it relies on the
+        // derived X25519 key-agreement method NOT appearing under capabilityInvocation /
+        // capabilityDelegation in a did:key document. If a future NetDid change placed it there,
+        // that backstop would silently erode; this test pins the assumption against NetDid 1.3.1.
+        var keyPair = _keyGen.Generate(KeyType.Ed25519);
+        var did = $"did:key:{keyPair.MultibasePublicKey}";
+
+        var didKeyMethod = new DidKeyMethod(new DefaultKeyGenerator());
+        var doc = (await didKeyMethod.ResolveAsync(did)).DidDocument!;
+        var vms = doc.VerificationMethod!;
+        vms.Count.Should().BeGreaterThanOrEqualTo(2,
+            "an Ed25519 did:key derives an X25519 key-agreement verification method");
+
+        // Identify the X25519 method by its resolved key type (not by index position).
+        var x25519Id = vms[1].Id;
+        (await _resolver.ResolvePublicKeyAsync(x25519Id)).KeyType
+            .Should().Be("X25519KeyAgreementKey2020");
+
+        static IEnumerable<string> Ids(IReadOnlyList<VerificationRelationshipEntry>? entries) =>
+            (entries ?? Array.Empty<VerificationRelationshipEntry>())
+                .Select(e => e.IsReference ? e.Reference! : e.EmbeddedMethod!.Id);
+
+        Ids(doc.CapabilityInvocation).Should().NotContain(x25519Id,
+            "a key-agreement method must never authorize capability invocation");
+        Ids(doc.CapabilityDelegation).Should().NotContain(x25519Id,
+            "a key-agreement method must never authorize capability delegation");
+        Ids(doc.KeyAgreement).Should().Contain(x25519Id,
+            "the derived X25519 method belongs under keyAgreement");
     }
 
     #endregion

@@ -29,16 +29,16 @@ We have successfully implemented a **complete, production-ready W3C ZCAP-LD (Aut
 
 ### Code Metrics
 
-| Metric | Count | Details |
-|--------|-------|---------|
-| **Total Tests** | 245 | All passing ✅ |
-| **Test Files** | 20 | Comprehensive coverage |
-| **Source Files** | 30+ | Well-organized structure |
-| **Lines of Code** | 8,000+ | Production-quality |
-| **Documentation** | Complete | README, API docs, examples |
-| **Examples** | 7 | Runnable scenarios + revocation demo |
-| **Services Implemented** | 8+ | All interfaces complete |
-| **Packages** | 2 | ZcapLd.Core + ZcapLd.AspNetCore |
+| Metric                   | Count    | Details                              |
+| ------------------------ | -------- | ------------------------------------ |
+| **Total Tests**          | 245      | All passing ✅                       |
+| **Test Files**           | 20       | Comprehensive coverage               |
+| **Source Files**         | 30+      | Well-organized structure             |
+| **Lines of Code**        | 8,000+   | Production-quality                   |
+| **Documentation**        | Complete | README, API docs, examples           |
+| **Examples**             | 7        | Runnable scenarios + revocation demo |
+| **Services Implemented** | 8+       | All interfaces complete              |
+| **Packages**             | 2        | ZcapLd.Core + ZcapLd.AspNetCore      |
 
 ### Test Breakdown
 
@@ -71,13 +71,13 @@ TOTAL                                 245    ✅ All Passing
 
 ### Compliance Score Evolution
 
-| Phase | Before | After | Improvement |
-|-------|--------|-------|-------------|
-| **Phase 1: Cryptography** | 0% (stubs) | 100% | Real Ed25519, multibase, canonicalization |
-| **Phase 2: Delegation** | 5% (partial) | 100% | Full proof creation, chain building |
-| **Phase 3: Verification** | 0% (none) | 100% | Complete chain verification |
-| **Phase 4: Caveats** | 20% (models) | 100% | Full evaluation & inheritance |
-| **Overall Project** | 15-20% | 95%+ | Production-ready |
+| Phase                     | Before       | After | Improvement                               |
+| ------------------------- | ------------ | ----- | ----------------------------------------- |
+| **Phase 1: Cryptography** | 0% (stubs)   | 100%  | Real Ed25519, multibase, canonicalization |
+| **Phase 2: Delegation**   | 5% (partial) | 100%  | Full proof creation, chain building       |
+| **Phase 3: Verification** | 0% (none)    | 100%  | Complete chain verification               |
+| **Phase 4: Caveats**      | 20% (models) | 100%  | Full evaluation & inheritance             |
+| **Overall Project**       | 15-20%       | 95%+  | Production-ready                          |
 
 ---
 
@@ -182,6 +182,7 @@ zcap-dotnet/
 ### Phase 1: Core Cryptography ✅
 
 **Implemented:**
+
 - **ICryptoSuite / ICryptoSuiteProvider** — pluggable algorithm abstraction
   - `ICryptoSuite`: proof type, key type, multicodec prefix, sign/verify
   - `ICryptoSuiteProvider`: registry for lookup by proof type or multicodec prefix
@@ -201,6 +202,7 @@ zcap-dotnet/
 **Tests:** 79 tests covering all cryptographic operations (Ed25519, P-256, multibase codec, suite provider, point compression, JSON canonicalization)
 
 **Key Features:**
+
 ```csharp
 // Pluggable crypto suite registration
 var provider = new CryptoSuiteProvider();
@@ -218,6 +220,7 @@ bool isValid = suite.Verify(data, signature, publicKey);
 ### Phase 2: Proof Creation & Delegation ✅
 
 **Implemented:**
+
 - **SigningService** for creating proofs
   - Delegation proofs with Ed25519Signature2020
   - Invocation proofs
@@ -234,6 +237,7 @@ bool isValid = suite.Verify(data, signature, publicKey);
 **Tests:** 18 tests for delegation and proof creation
 
 **Key Features:**
+
 ```csharp
 // Create root capability
 var root = await capabilityService.CreateRootCapabilityAsync(
@@ -258,6 +262,7 @@ var delegated = await capabilityService.DelegateCapabilityAsync(
 ### Phase 3: Verification ✅
 
 **Implemented:**
+
 - **VerificationService** for complete verification
   - Capability chain verification
   - Attenuation validation at each level
@@ -269,6 +274,7 @@ var delegated = await capabilityService.DelegateCapabilityAsync(
 **Tests:** 25 tests covering all verification scenarios
 
 **Key Features:**
+
 ```csharp
 // Verify capability chain
 bool isValidChain = await verificationService
@@ -291,6 +297,7 @@ bool canInvoke = await verificationService
 ### Phase 4: Caveats & Invocation ✅
 
 **Implemented:**
+
 - **CaveatProcessor** for restrictions
   - Caveat evaluation
   - Caveat merging (inheritance)
@@ -301,6 +308,7 @@ bool canInvoke = await verificationService
 **Tests:** 33 tests for caveat handling
 
 **Key Features:**
+
 ```csharp
 // Create capability with caveats
 var caveats = new Caveat[]
@@ -333,6 +341,7 @@ bool satisfied = await caveatProcessor
 ### Phase 5: Integration & Documentation ✅
 
 **Implemented:**
+
 - **Integration Tests** (15 tests)
   - Complete workflows: root → delegate → invoke → verify
   - Multi-level delegation chains (3+ levels)
@@ -365,6 +374,7 @@ bool satisfied = await caveatProcessor
 Based on the [W3C ZCAP-LD Specification Requirements](./ZCAP-LD-SPECIFICATION-REQUIREMENTS.md):
 
 #### Data Model (8/8) ✅ 100%
+
 - [x] Support root capabilities with exact field requirements
 - [x] Support delegated capabilities with all required/optional fields
 - [x] Enforce `@context` requirements (string for root, array for delegated)
@@ -375,6 +385,7 @@ Based on the [W3C ZCAP-LD Specification Requirements](./ZCAP-LD-SPECIFICATION-RE
 - [x] Support `caveat` array with type-based objects
 
 #### Proofs (7/7) ✅ 100%
+
 - [x] Create capability delegation proofs with required fields
 - [x] Create capability invocation proofs with required fields
 - [x] Support `Ed25519Signature2020` (recommended)
@@ -384,6 +395,7 @@ Based on the [W3C ZCAP-LD Specification Requirements](./ZCAP-LD-SPECIFICATION-RE
 - [x] Set `proofPurpose` correctly for delegation vs invocation
 
 #### Delegation (6/6) ✅ 100%
+
 - [x] Create delegated capabilities from root or delegated parents
 - [x] Enforce attenuation rules (no expansion of authority)
 - [x] Support URL path/query-based attenuation
@@ -392,6 +404,7 @@ Based on the [W3C ZCAP-LD Specification Requirements](./ZCAP-LD-SPECIFICATION-RE
 - [x] Enforce expiration constraints (not later than parent)
 
 #### Invocation (5/5) ✅ 100%
+
 - [x] Support DI proof invocation method
 - [x] Include required fields in invocation proofs
 - [x] Validate action against `allowedAction`
@@ -399,6 +412,7 @@ Based on the [W3C ZCAP-LD Specification Requirements](./ZCAP-LD-SPECIFICATION-RE
 - [x] Verify invocation signature
 
 #### Verification (10/10) ✅ 100%
+
 - [x] Dereference root capabilities locally (no network)
 - [x] Verify complete capability chain
 - [x] Validate each delegation proof signature
@@ -411,6 +425,7 @@ Based on the [W3C ZCAP-LD Specification Requirements](./ZCAP-LD-SPECIFICATION-RE
 - [x] Check invocation target and action
 
 #### Security (6/6) ✅ 100%
+
 - [x] No network requests during chain verification
 - [x] Enforce chain length limit (10)
 - [x] Thread-safe implementation (async/await)
@@ -419,6 +434,7 @@ Based on the [W3C ZCAP-LD Specification Requirements](./ZCAP-LD-SPECIFICATION-RE
 - [x] Revocation system (`IRevocationService` / `IRevocationStore`)
 
 #### JSON-LD/Canonicalization (3/4) ✅ 75%
+
 - [x] Canonicalize documents before signing (RFC 8785)
 - [x] Use Data Integrity proof format
 - [x] Preserve exact JSON structure
@@ -426,19 +442,21 @@ Based on the [W3C ZCAP-LD Specification Requirements](./ZCAP-LD-SPECIFICATION-RE
 
 **Overall Compliance: 45/46 = 97.8%** ✅
 
-*Note: Full URDNA2015 canonicalization is marked for future enhancement. Current implementation uses RFC 8785 JSON canonicalization which is sufficient for most ZCAP-LD use cases.*
+_Note: Full URDNA2015 canonicalization is marked for future enhancement. Current implementation uses RFC 8785 JSON canonicalization which is sufficient for most ZCAP-LD use cases._
 
 ---
 
 ## 📚 Key Features & Capabilities
 
 ### 1. Object Capability Security Model ✅
+
 - Authorization by possession of signed capability
 - No ambient authority
 - Principle of least authority (attenuation)
 - Delegation without central server
 
 ### 2. Cryptographic Proofs ✅
+
 - Pluggable crypto suites (`ICryptoSuite` / `ICryptoSuiteProvider`)
 - Ed25519 included via `Ed25519CryptoSuite`; P-256 included via `P256CryptoSuite`; additional curves extensible
 - Multibase encoding (base58-btc)
@@ -446,24 +464,28 @@ Based on the [W3C ZCAP-LD Specification Requirements](./ZCAP-LD-SPECIFICATION-RE
 - Deterministic JSON canonicalization
 
 ### 3. Delegation Chains ✅
+
 - Multi-level delegation (tested up to 5 levels)
 - Automatic chain construction
 - Parent capability embedding
 - Chain verification without network calls
 
 ### 4. Attenuation Enforcement ✅
+
 - Permission reduction only (no expansion)
 - Action subsetting
 - Target URI restriction
 - Expiration constraints
 
 ### 5. Caveat System ✅
+
 - ExpirationCaveat (time limits)
 - UsageCountCaveat (rate limiting)
 - Automatic inheritance
 - Custom caveat support
 
 ### 6. Invocation Verification ✅
+
 - Complete chain validation
 - Signature verification
 - Action authorization
@@ -592,6 +614,7 @@ Console.WriteLine($"3-level chain valid: {isValid}"); // true
 #### 1. Cryptography Tests (79 tests)
 
 **Ed25519SignerTests.cs** (21 tests):
+
 - Key generation and management
 - Signing and verification round-trips
 - Multibase encoding/decoding
@@ -599,70 +622,89 @@ Console.WriteLine($"3-level chain valid: {isValid}"); // true
 - Input validation and error handling
 
 **JsonCanonicalizerTests.cs** (13 tests):
+
 - Deterministic serialization, property sorting, proof field removal
 
 **MultibaseCodecTests.cs** (10 tests):
+
 - Algorithm-agnostic encoding/decoding, canonicalization
 
 **CryptoSuiteProviderTests.cs** (8 tests):
+
 - Suite registration, lookup by proof type / multicodec prefix / key type
 
 **Ed25519CryptoSuiteTests.cs** (8 tests):
+
 - Ed25519 suite adapter sign/verify
 
 **P256CryptoSuiteTests.cs** (12 tests):
+
 - P-256 signing/verification, compressed point handling
 
 **EcPointCompressionTests.cs** (7 tests):
+
 - P-256 point compression/decompression
 
 #### 2. Service Tests (116 tests)
 
 **CapabilityServiceTests.cs** (16 tests):
+
 - Root capability creation, delegation with attenuation, multi-level chains, caveat inheritance
 
 **CaveatProcessorTests.cs** (33 tests):
+
 - Caveat evaluation, merging, compatibility validation, chain evaluation, specific types
 
 **VerificationServiceTests.cs** (27 tests):
+
 - Proof verification, chain verification, attenuation, invocation, DID resolution
 
 **VerificationServiceReplayTests.cs** (4 tests):
+
 - Nonce-based invocation replay protection
 
 **RevocationServiceTests.cs** (3 tests):
+
 - Revocation persistence, expiry pruning, unknown capability handling
 
 **InMemoryDidProviderTests.cs** (24 tests):
+
 - Test helper key management, signing, resolution
 
 **InMemoryNonceStoreTests.cs** (8 tests):
+
 - Nonce tracking, concurrent access, expiration
 
 **NullNonceStoreTests.cs** (1 test):
+
 - No-op nonce store behavior
 
 #### 3. Compliance Tests (24 tests)
 
 **NormativeUnitComplianceTests.cs** (17 tests):
+
 - MUST/SHOULD requirement verification at unit level
 
 **NormativeIntegrationComplianceTests.cs** (7 tests):
+
 - End-to-end spec compliance workflows
 
 #### 4. Integration Tests (15 tests)
 
 **EndToEndTests.cs**:
+
 - Complete workflows, caveat integration, attenuation enforcement, error handling
 
 #### 5. Model Tests (3 tests)
 
 **CapabilityTests.cs**:
+
 - Serialization/deserialization, property initialization
 
 #### 6. Basic Tests (2 tests)
 
 **BasicTests.cs**:
+
 - Sanity checks, model initialization
 
 ### Test Results
@@ -686,14 +728,14 @@ Total tests: 245
 
 ### Benchmarks
 
-| Operation | Time | Notes |
-|-----------|------|-------|
-| Key Generation | < 1ms | Ed25519 key pair |
-| Sign Capability | < 2ms | Includes canonicalization |
-| Verify Signature | < 1ms | Single proof verification |
-| Verify Chain (3 levels) | < 5ms | Complete chain traversal |
-| Verify Chain (10 levels) | < 15ms | Maximum allowed depth |
-| Caveat Evaluation | < 1ms | Per caveat |
+| Operation                | Time   | Notes                     |
+| ------------------------ | ------ | ------------------------- |
+| Key Generation           | < 1ms  | Ed25519 key pair          |
+| Sign Capability          | < 2ms  | Includes canonicalization |
+| Verify Signature         | < 1ms  | Single proof verification |
+| Verify Chain (3 levels)  | < 5ms  | Complete chain traversal  |
+| Verify Chain (10 levels) | < 15ms | Maximum allowed depth     |
+| Caveat Evaluation        | < 1ms  | Per caveat                |
 
 ### Scalability
 
@@ -708,19 +750,19 @@ Total tests: 245
 
 ### Production Dependencies
 
-| Package | Version | Purpose |
-|---------|---------|---------|
-| NSec.Cryptography | 25.4.0 | Ed25519 signing/verification |
-| SimpleBase | 4.0.0 | Base58-btc multibase encoding |
-| System.Text.Json | 9.0.1 | JSON serialization |
+| Package           | Version | Purpose                       |
+| ----------------- | ------- | ----------------------------- |
+| NSec.Cryptography | 25.4.0  | Ed25519 signing/verification  |
+| SimpleBase        | 4.0.0   | Base58-btc multibase encoding |
+| System.Text.Json  | 9.0.1   | JSON serialization            |
 
 ### Development Dependencies
 
-| Package | Version | Purpose |
-|---------|---------|---------|
-| xUnit | 2.9.3 | Test framework |
-| FluentAssertions | 7.0.0 | Assertion library |
-| Microsoft.NET.Test.Sdk | 17.12.0 | Test runner |
+| Package                | Version | Purpose           |
+| ---------------------- | ------- | ----------------- |
+| xUnit                  | 2.9.3   | Test framework    |
+| FluentAssertions       | 7.0.0   | Assertion library |
+| Microsoft.NET.Test.Sdk | 17.12.0 | Test runner       |
 
 **Total Dependencies**: 6 packages (3 production, 3 dev)
 
@@ -777,26 +819,21 @@ Total tests: 245
 
 ### Possible (Future)
 
-9. **DID Integration (Trinsic SDK)** 🔄
-   - Full DID resolution
-   - DID document processing
-   - Multiple DID methods
-
-10. **gRPC Service Layer** 🔄
+11. **gRPC Service Layer** 🔄
     - Remote capability service
     - gRPC endpoints
     - Client libraries
 
-11. **WASM/WASI Support** 🔄
+12. **WASM/WASI Support** 🔄
     - WebAssembly compilation
     - Cross-platform usage
     - JavaScript interop
 
-12. **CBOR-LD Compression** 🔄
+13. **CBOR-LD Compression** 🔄
     - Semantic compression
     - Smaller capability sizes
 
-13. **Additional Caveat Types** 🔄
+14. **Additional Caveat Types** 🔄
     - IPAddressRestrictionCaveat
     - GeofenceCaveat
     - CustomPropertyCaveat
@@ -834,6 +871,7 @@ Total tests: 245
 ### API Documentation
 
 Inline XML documentation for all:
+
 - Public classes and interfaces
 - Methods and properties
 - Parameters and return values
@@ -841,6 +879,7 @@ Inline XML documentation for all:
 - Usage examples
 
 Generate API docs:
+
 ```bash
 dotnet build -c Release
 # API docs in bin/Release/net10.0/ZcapLd.Core.xml
@@ -887,6 +926,7 @@ dotnet run --project examples/ZcapLd.Examples
 Starting from a **15-20% complete** codebase with **stub implementations** and **critical security vulnerabilities**, we achieved:
 
 ✅ **100% Functional Implementation**
+
 - Fixed all 42 identified issues
 - Real cryptographic signing (not stubs)
 - Complete chain verification
@@ -894,24 +934,28 @@ Starting from a **15-20% complete** codebase with **stub implementations** and *
 - Invocation verification
 
 ✅ **Comprehensive Testing**
+
 - 245 tests (from 9)
 - 100% pass rate
 - Integration + compliance tests
 - Real-world scenarios
 
 ✅ **Production Quality**
+
 - Clean architecture
 - Proper error handling
 - Thread-safe operations
 - Extensive documentation
 
 ✅ **W3C Specification Compliance**
+
 - 95.7% overall compliance
 - 100% in all core areas
 - Proper proof formats
 - Correct chain structures
 
 ✅ **Developer Experience**
+
 - 7 working examples
 - Complete API docs
 - Quick start guide
@@ -919,17 +963,17 @@ Starting from a **15-20% complete** codebase with **stub implementations** and *
 
 ### Before & After
 
-| Aspect | Before | After |
-|--------|--------|-------|
-| **Cryptography** | Stubs (security risk) | Pluggable suites (Ed25519 + P-256) |
-| **Tests** | 9 basic tests | 245 comprehensive tests |
-| **Delegation** | No proof creation | Full spec compliance |
-| **Verification** | Not implemented | Complete algorithm |
-| **Caveats** | Models only | Full evaluation system |
-| **Compliance** | 15-20% | 95%+ |
-| **Documentation** | Minimal | Comprehensive |
-| **Examples** | 1 basic | 7 scenarios |
-| **Status** | Early development | Production-ready |
+| Aspect            | Before                | After                              |
+| ----------------- | --------------------- | ---------------------------------- |
+| **Cryptography**  | Stubs (security risk) | Pluggable suites (Ed25519 + P-256) |
+| **Tests**         | 9 basic tests         | 245 comprehensive tests            |
+| **Delegation**    | No proof creation     | Full spec compliance               |
+| **Verification**  | Not implemented       | Complete algorithm                 |
+| **Caveats**       | Models only           | Full evaluation system             |
+| **Compliance**    | 15-20%                | 95%+                               |
+| **Documentation** | Minimal               | Comprehensive                      |
+| **Examples**      | 1 basic               | 7 scenarios                        |
+| **Status**        | Early development     | Production-ready                   |
 
 ---
 
@@ -964,19 +1008,23 @@ Starting from a **15-20% complete** codebase with **stub implementations** and *
 ## 📞 Support & Resources
 
 ### Documentation
+
 - [README.md](../README.md) - Main documentation
 - [Examples](../examples/ZcapLd.Examples/Program.cs) - Runnable code
 - [API Docs](../README.md#api-documentation) - Service reference
 
 ### Specification
+
 - [W3C ZCAP-LD Spec](https://w3c-ccg.github.io/zcap-spec/) - Official specification
 - [Spec Requirements](./ZCAP-LD-SPECIFICATION-REQUIREMENTS.md) - Our analysis
 
 ### Community
+
 - [GitHub Issues](https://github.com/moisesja/zcap-dotnet/issues) - Bug reports & features
 - [GitHub Discussions](https://github.com/moisesja/zcap-dotnet/discussions) - Questions & ideas
 
 ### Related Projects
+
 - [W3C CCG](https://www.w3.org/community/credentials/) - Credentials Community Group
 - [Data Integrity](https://w3c.github.io/vc-data-integrity/) - Proof format spec
 - [Decentralized Identifiers](https://www.w3.org/TR/did-core/) - DID spec
