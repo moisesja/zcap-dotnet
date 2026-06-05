@@ -8,10 +8,19 @@ namespace ZcapLd.Core.Services;
 public interface IVerificationService
 {
     /// <summary>
-    /// Verifies a capability's cryptographic proof
+    /// Verifies the soundness of a delegated capability's <b>single delegation link</b>: its proof
+    /// signature, that the signer is authorized by the embedded immediate parent's controller, that
+    /// the proof-chain ancestry has not been revoked, that the child does not exceed the parent
+    /// (attenuation), and that the child has not expired. A root capability is valid iff it carries
+    /// no proof.
+    /// <para>
+    /// This is <b>not</b> a full authorization gate: it does not walk the whole chain back to the
+    /// root or independently verify every ancestor's own proof. For an authorization decision, use
+    /// <see cref="VerifyCapabilityChainAsync"/> (full chain) or <see cref="VerifyInvocationAsync(Invocation, Capability)"/>.
+    /// </para>
     /// </summary>
-    /// <param name="capability">The capability to verify</param>
-    /// <returns>True if the proof is valid</returns>
+    /// <param name="capability">The capability whose delegation proof to verify</param>
+    /// <returns>True if the single delegation link is sound</returns>
     Task<bool> VerifyCapabilityProofAsync(Capability capability);
 
     /// <summary>
