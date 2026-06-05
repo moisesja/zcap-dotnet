@@ -25,6 +25,7 @@ public class VerificationService : IVerificationService
     private readonly INonceStore _nonceStore;
     private readonly IDocumentCanonicalizerProvider _canonicalizerProvider;
     private readonly TimeSpan _nonceWindow;
+    private readonly TimeSpan _freshnessClockSkew;
     private readonly ILogger _logger;
     private readonly IVerificationRelationshipResolver _relationshipResolver;
     private readonly IRootCapabilityResolver? _rootResolver;
@@ -32,9 +33,20 @@ public class VerificationService : IVerificationService
     private const string RootIdPrefix = "urn:zcap:root:";
 
     /// <summary>
-    /// Default window during which invocation nonces are tracked for replay protection.
+    /// Default window during which invocation nonces are tracked for replay protection. Also serves as
+    /// the upper staleness bound for <c>proof.created</c> freshness checking (Issue #71): widening this
+    /// window extends BOTH the replay window and the acceptable signing age, so an invocation signed up
+    /// to this long ago is accepted. Configurable per instance via the <c>nonceWindow</c> constructor
+    /// parameter.
     /// </summary>
     public static readonly TimeSpan DefaultNonceWindow = TimeSpan.FromMinutes(5);
+
+    /// <summary>
+    /// Default tolerance for a signed proof's <c>created</c> time being in the future (clock skew between
+    /// signer and verifier) before it is rejected as not-yet-valid (Issue #71). Configurable per instance
+    /// via the <c>freshnessClockSkew</c> constructor parameter.
+    /// </summary>
+    public static readonly TimeSpan DefaultFreshnessClockSkew = TimeSpan.FromMinutes(1);
 
     /// <summary>
     /// Backward-compatible constructor (Ed25519 only). Each instance gets its own process-local
@@ -104,9 +116,11 @@ public class VerificationService : IVerificationService
         ICryptoSuiteProvider suiteProvider,
         IRevocationService revocationService,
         INonceStore nonceStore,
-        TimeSpan? nonceWindow = null)
+        TimeSpan? nonceWindow = null,
+        TimeSpan? freshnessClockSkew = null)
         : this(didResolver, caveatProcessor, suiteProvider, revocationService,
-               nonceStore, SigningService.CreateDefaultCanonicalizerProvider(), nonceWindow)
+               nonceStore, SigningService.CreateDefaultCanonicalizerProvider(), nonceWindow,
+               freshnessClockSkew: freshnessClockSkew)
     {
     }
 
@@ -124,6 +138,10 @@ public class VerificationService : IVerificationService
     /// else a <c>did:key</c>-backed default (<see cref="CreateDefaultRelationshipResolver"/>). Supply
     /// a method-appropriate resolver (e.g. one wired by NetDid's <c>AddNetDid</c>) for other DID
     /// methods, otherwise their controllers fail closed as not authorized.
+    /// The optional <paramref name="freshnessClockSkew"/> tolerates a signed <c>proof.created</c> being
+    /// up to that far in the future before rejecting it (Issue #71); defaults to
+    /// <see cref="DefaultFreshnessClockSkew"/> (1 minute). The staleness bound is the nonce window, not
+    /// this value.
     /// </summary>
     public VerificationService(
         IDidResolver didResolver,
@@ -135,7 +153,8 @@ public class VerificationService : IVerificationService
         TimeSpan? nonceWindow = null,
         ILogger<VerificationService>? logger = null,
         IVerificationRelationshipResolver? relationshipResolver = null,
-        IRootCapabilityResolver? rootResolver = null)
+        IRootCapabilityResolver? rootResolver = null,
+        TimeSpan? freshnessClockSkew = null)
     {
         _didResolver = didResolver ?? throw new ArgumentNullException(nameof(didResolver));
         _caveatProcessor = caveatProcessor ?? throw new ArgumentNullException(nameof(caveatProcessor));
@@ -144,6 +163,7 @@ public class VerificationService : IVerificationService
         _nonceStore = nonceStore ?? throw new ArgumentNullException(nameof(nonceStore));
         _canonicalizerProvider = canonicalizerProvider ?? throw new ArgumentNullException(nameof(canonicalizerProvider));
         _nonceWindow = nonceWindow ?? DefaultNonceWindow;
+        _freshnessClockSkew = freshnessClockSkew ?? DefaultFreshnessClockSkew;
         _logger = logger ?? NullLogger<VerificationService>.Instance;
         _relationshipResolver = relationshipResolver
             ?? didResolver as IVerificationRelationshipResolver
@@ -576,7 +596,16 @@ public class VerificationService : IVerificationService
                 return VerificationResult.Fail(VerificationOutcome.MalformedCapability,
                     "Invocation proof is missing or does not have the capabilityInvocation proofPurpose.");
 
-            // 2a. The invocation MUST reference the capability being verified, in the spec-defined
+            // 2a. Freshness (Issue #71): the signed proof.created must be present and within the
+            // freshness window, bounding replay independently of nonce-store eviction. Runs before the
+            // expensive signature/authorization work. The validated instant is reused for caveat
+            // evaluation in step 7 (InvocationTime), so time-based caveats honour the signed time.
+            var invocationCreatedUtc = GetFreshProofCreatedUtc(invocation.Proof);
+            if (invocationCreatedUtc is null)
+                return VerificationResult.Fail(VerificationOutcome.StaleProof,
+                    "Invocation proof.created is missing, future-dated beyond clock skew, or older than the replay window.");
+
+            // 2b. The invocation MUST reference the capability being verified, in the spec-defined
             // shape (Issue #51): a root invocation carries the root zcap id STRING; a delegated DI
             // invocation MUST embed the FULL delegated zcap object. Strict spec mode — a delegated
             // invocation that supplies only an id string is rejected: the verifier requires the
@@ -604,7 +633,7 @@ public class VerificationService : IVerificationService
                         "Delegated invocation must embed the full delegated capability object.");
             }
 
-            // 2b. Proof payload fields MUST be semantically consistent with the invocation body: the
+            // 2c. Proof payload fields MUST be semantically consistent with the invocation body: the
             // proof's signed `capability` MUST reference the same id in the same shape (root id string
             // vs embedded object) as the invocation, and the action/target MUST match.
             var proofCapability = invocation.Proof.Capability;
@@ -645,7 +674,9 @@ public class VerificationService : IVerificationService
             // Reuses the chain built and verified in step 1 (no rebuild).
             var context = new InvocationContext
             {
-                InvocationTime = DateTime.UtcNow,
+                // Use the signed proof.created (validated fresh in step 2c) so time-based caveats
+                // evaluate against the invoker's signed time rather than the verifier's wall clock.
+                InvocationTime = invocationCreatedUtc.Value,
                 RequestedAction = invocation.CapabilityAction,
                 TargetResource = invocation.InvocationTarget
             };
@@ -681,6 +712,29 @@ public class VerificationService : IVerificationService
                 "VerifyInvocationAsync failed closed for invocation {InvocationId}", invocation.Id);
             return VerificationResult.Fail(VerificationOutcome.CouldNotVerify, ex.Message);
         }
+    }
+
+    /// <summary>
+    /// Validates a signed invocation/revocation proof's <c>created</c> freshness (Issue #71): it must be
+    /// present and parseable, not future-dated beyond <see cref="_freshnessClockSkew"/>, and no older than
+    /// <see cref="_nonceWindow"/>. Reusing the nonce window as the staleness bound gives the invariant
+    /// "anything still evictable from the nonce store is already too stale to pass freshness," so replay is
+    /// bounded even after the nonce entry evicts (or when replay protection is the no-op opt-out). Returns
+    /// the parsed UTC instant on success; <c>null</c> means the caller must fail closed.
+    /// </summary>
+    private DateTime? GetFreshProofCreatedUtc(Proof proof)
+    {
+        var createdAt = proof.CreatedAt; // ZcapTimestamps.ParseOrNull(Created); null if missing/unparseable
+        if (createdAt is null)
+            return null;
+
+        var nowUtc = DateTime.UtcNow;
+        if (createdAt.Value > nowUtc + _freshnessClockSkew)
+            return null; // future-dated beyond clock skew
+        if (nowUtc - createdAt.Value > _nonceWindow)
+            return null; // older than the replay window
+
+        return createdAt;
     }
 
     /// <summary>
@@ -1455,6 +1509,10 @@ public class VerificationService : IVerificationService
             var proof = signedRevocation.Proof;
             // Must be a revocation-purpose proof carrying the revoke action, bound to THIS capability.
             if (proof is null || proof.ProofPurpose != Proof.CapabilityRevocationPurpose)
+                return false;
+            // Freshness (Issue #71): same created-window gate as the invocation path, so a captured
+            // signed revocation cannot be replayed after its nonce entry evicts.
+            if (GetFreshProofCreatedUtc(proof) is null)
                 return false;
             if (signedRevocation.CapabilityAction != Invocation.RevokeAction)
                 return false;

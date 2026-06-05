@@ -112,14 +112,24 @@ public class SigningService : ISigningService
     /// Signs an invocation request
     /// COMPLIANCE FIX C-05: Populates required invocation proof fields per W3C ZCAP-LD spec
     /// </summary>
-    public async Task<Proof> SignInvocationAsync(Invocation invocation, string signerDid)
+    public Task<Proof> SignInvocationAsync(Invocation invocation, string signerDid)
+        => SignInvocationAsync(invocation, signerDid, createdOverride: null);
+
+    /// <summary>
+    /// Determinism overload of <see cref="SignInvocationAsync(Invocation, string)"/> that stamps an
+    /// explicit proof <c>created</c> instant instead of the current UTC time. Provided for deterministic
+    /// signing (test vectors, freshness tests). Not on <see cref="ISigningService"/>; production callers
+    /// should use the two-argument overload.
+    /// </summary>
+    public async Task<Proof> SignInvocationAsync(Invocation invocation, string signerDid, DateTime? createdOverride)
     {
         if (invocation == null)
             throw new ArgumentNullException(nameof(invocation));
         if (string.IsNullOrEmpty(signerDid))
             throw new ArgumentException("Signer DID cannot be null or empty", nameof(signerDid));
 
-        return await SignInvocationProofAsync(invocation, signerDid, Proof.CapabilityInvocationPurpose);
+        return await SignInvocationProofAsync(invocation, signerDid, Proof.CapabilityInvocationPurpose,
+            createdOverride: createdOverride);
     }
 
     /// <summary>
@@ -135,12 +145,28 @@ public class SigningService : ISigningService
     /// <param name="invocationTarget">The capability's invocation target (bound into the signed payload; informational for revocation).</param>
     /// <param name="reason">Optional human-readable reason, signed and recorded on the revocation.</param>
     /// <param name="metadata">Optional audit metadata, signed and recorded on the revocation.</param>
-    public async Task<Invocation> SignRevocationAsync(
+    public Task<Invocation> SignRevocationAsync(
         string capabilityId,
         string signerDid,
         string invocationTarget,
         string? reason = null,
         IDictionary<string, string>? metadata = null)
+        => SignRevocationAsync(capabilityId, signerDid, invocationTarget, reason, metadata, createdOverride: null);
+
+    /// <summary>
+    /// Determinism overload of
+    /// <see cref="SignRevocationAsync(string, string, string, string?, IDictionary{string, string}?)"/>
+    /// that stamps an explicit proof <c>created</c> instant instead of the current UTC time. Provided for
+    /// deterministic signing (test vectors, freshness tests). Not on <see cref="ISigningService"/>;
+    /// production callers should use the five-argument overload.
+    /// </summary>
+    public async Task<Invocation> SignRevocationAsync(
+        string capabilityId,
+        string signerDid,
+        string invocationTarget,
+        string? reason,
+        IDictionary<string, string>? metadata,
+        DateTime? createdOverride)
     {
         if (string.IsNullOrEmpty(capabilityId))
             throw new ArgumentException("Capability ID cannot be null or empty", nameof(capabilityId));
@@ -158,7 +184,7 @@ public class SigningService : ISigningService
 
         revocation.Proof = await SignInvocationProofAsync(
             revocation, signerDid, Proof.CapabilityRevocationPurpose,
-            BuildRevocationExtensionData(reason, metadata));
+            BuildRevocationExtensionData(reason, metadata), createdOverride);
 
         return revocation;
     }
@@ -173,13 +199,14 @@ public class SigningService : ISigningService
         Invocation invocation,
         string signerDid,
         string proofPurpose,
-        IReadOnlyDictionary<string, JsonElement>? additionalProperties = null)
+        IReadOnlyDictionary<string, JsonElement>? additionalProperties = null,
+        DateTime? createdOverride = null)
     {
         var invocationWithoutProof = ProofSigningPayloadBuilder.CloneInvocationWithoutProof(invocation);
         var suite = await ResolveSuiteForDidAsync(signerDid);
         var canonicalizer = ResolveCanonicalizer(suite);
         var verificationMethod = await _resolver.GetVerificationMethodAsync(signerDid);
-        var created = ZcapTimestamps.Format(DateTime.UtcNow);
+        var created = ZcapTimestamps.Format(createdOverride ?? DateTime.UtcNow);
         var proofType = suite.ProofType;
 
         // COMPLIANCE FIX C-05: Create the invocation proof with required fields.
