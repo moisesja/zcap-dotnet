@@ -1737,6 +1737,57 @@ public class VerificationServiceTests
     }
 
     #endregion
+
+    #region Invocation Target Prefix Matching (Issue #74 — ordinal StartsWith)
+
+    // IsValidInvocationTarget must test the prefix ordinally, consistent with the ordinal Substring
+    // index math that follows it. A culture-sensitive StartsWith treats ignorable Unicode code points
+    // (e.g. U+00AD SOFT HYPHEN) as zero-width, which disagrees with the ordinal length used by
+    // Substring — and, when the capability target is ordinally longer than the invocation target,
+    // drives Substring past the end of the string (ArgumentOutOfRangeException). These exercise the
+    // method directly: the call sites are fail-closed (catch → false), so a black-box test cannot
+    // distinguish the ordinal fix from the buggy culture-sensitive comparison.
+
+    [Theory]
+    [InlineData("https://example.com/resource", "https://example.com/resource")]             // exact match
+    [InlineData("https://example.com/resource/sub", "https://example.com/resource")]         // path suffix
+    [InlineData("https://example.com/resource?q=1", "https://example.com/resource")]         // query suffix
+    [InlineData("https://example.com/resource?a=1&b=2", "https://example.com/resource?a=1")] // extra query param after '?'
+    public void IsValidInvocationTarget_ValidPrefixes_ReturnsTrue(string invocationTarget, string capabilityTarget)
+    {
+        _verificationService.IsValidInvocationTarget(invocationTarget, capabilityTarget)
+            .Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData("https://example.com/resource", "https://other.com/resource")]               // different host
+    [InlineData("https://example.com/resourceX", "https://example.com/resource")]            // suffix lacks a delimiter
+    [InlineData("https://example.com/re\u00ADsource/x", "https://example.com/resource")]     // ignorable char breaks the ordinal prefix
+    public void IsValidInvocationTarget_InvalidPrefixes_ReturnsFalse(string invocationTarget, string capabilityTarget)
+    {
+        _verificationService.IsValidInvocationTarget(invocationTarget, capabilityTarget)
+            .Should().BeFalse();
+    }
+
+    [Fact]
+    public void IsValidInvocationTarget_CapabilityTargetOrdinallyLongerViaIgnorableChar_ReturnsFalseWithoutThrowing()
+    {
+        // The capability target carries a trailing SOFT HYPHEN (U+00AD), making it ordinally LONGER
+        // than the invocation target. The pre-#74 culture-sensitive StartsWith returns true (the soft
+        // hyphen is ignorable), after which Substring(capabilityTarget.Length) runs past the end of the
+        // shorter invocation target and throws ArgumentOutOfRangeException. Ordinal comparison returns
+        // false cleanly — this is the deterministic regression guard for Issue #74.
+        var invocationTarget = "https://example.com/resource";
+        var capabilityTarget = "https://example.com/resource\u00AD";
+
+        var result = true;
+        var act = () => { result = _verificationService.IsValidInvocationTarget(invocationTarget, capabilityTarget); };
+
+        act.Should().NotThrow("ordinal comparison must not index Substring past the end of the shorter target");
+        result.Should().BeFalse();
+    }
+
+    #endregion
 }
 
 /// <summary>
