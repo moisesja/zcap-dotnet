@@ -1,6 +1,8 @@
 using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
+using NetDid.Core.Model;
+using NetDid.Core.Resolution;
 using Xunit;
 using ZcapLd.Core.Cryptography;
 using ZcapLd.Core.Exceptions;
@@ -68,6 +70,70 @@ public class VerificationServiceTests
 
         // Assert
         result.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task VerifyInvocation_WhenResolvedKeyTypeMismatchesSuite_ReturnsFalse()
+    {
+        // Issue #68: the suite is chosen from proof.Type; the resolved key's type must match it.
+        // Here the key bytes are correct (signature would verify), but a resolver reports a
+        // mismatched KeyType — the explicit binding guard must reject it before/independently of
+        // the signature check.
+        var controllerDid = "did:key:z6MkKeyTypeBinding";
+        _didProvider.GenerateAndRegisterKeyPair(controllerDid);
+
+        var root = await _capabilityService.CreateRootCapabilityAsync(
+            controllerDid, "https://example.com/resource", new[] { "read" });
+
+        var invocation = new Invocation
+        {
+            Capability = root.Id,
+            CapabilityAction = "read",
+            InvocationTarget = "https://example.com/resource"
+        };
+        invocation.Proof = await _signingService.SignInvocationAsync(invocation, controllerDid);
+
+        // Verifier whose resolver returns the correct key bytes but a mismatched key type.
+        var mismatchVerifier = new VerificationService(
+            new WrongKeyTypeResolver(_didProvider, "EcdsaSecp256r1VerificationKey2019"),
+            _caveatProcessor);
+
+        (await mismatchVerifier.VerifyInvocationAsync(invocation, root)).Should().BeFalse();
+
+        // Sanity: the same invocation verifies under the honest resolver (so the only failing
+        // factor above is the key-type/suite mismatch).
+        var honestVerifier = new VerificationService(_didProvider, _caveatProcessor);
+        (await honestVerifier.VerifyInvocationAsync(invocation, root)).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task VerifyCapabilityProof_WhenResolvedKeyTypeMismatchesSuite_ReturnsFalse()
+    {
+        // Issue #68 (delegation path): the key-type/suite binding guard lives in BOTH verify paths.
+        // The invocation test above covers VerifyInvocationSignatureAsync; this one covers the copy
+        // in VerifySingleDelegationProofAsync by verifying a delegated capability's delegation proof.
+        var delegatorDid = "did:key:z6MkKeyTypeBindingDelegator";
+        _didProvider.GenerateAndRegisterKeyPair(delegatorDid);
+
+        var root = await _capabilityService.CreateRootCapabilityAsync(
+            delegatorDid, "https://example.com/resource", new[] { "read" });
+
+        // The delegation proof is signed by the delegator (root controller); the grantee need not
+        // have a registered key. Verifying it resolves the delegator's key — which the mismatch
+        // resolver returns with correct bytes but a wrong key type, so the guard must reject it.
+        var delegated = await _capabilityService.DelegateCapabilityAsync(
+            root, "did:key:z6MkKeyTypeBindingGrantee", new[] { "read" }, DateTime.UtcNow.AddDays(30));
+
+        var mismatchVerifier = new VerificationService(
+            new WrongKeyTypeResolver(_didProvider, "EcdsaSecp256r1VerificationKey2019"),
+            _caveatProcessor);
+
+        (await mismatchVerifier.VerifyCapabilityProofAsync(delegated)).Should().BeFalse();
+
+        // Sanity: the same delegated capability verifies under the honest resolver, so the only
+        // failing factor above is the key-type/suite mismatch.
+        var honestVerifier = new VerificationService(_didProvider, _caveatProcessor);
+        (await honestVerifier.VerifyCapabilityProofAsync(delegated)).Should().BeTrue();
     }
 
     [Fact]
@@ -1651,6 +1717,40 @@ internal sealed class ThrowingRevocationService : IRevocationService
 
     public Task<bool> IsRevokedAsync(string capabilityId, CancellationToken cancellationToken = default)
         => throw new InvalidOperationException("simulated revocation-store outage");
+}
+
+/// <summary>
+/// Wraps an inner resolver but overrides the resolved key's type with a deliberately wrong value
+/// (Issue #68 test support) — the key bytes stay correct so only the key-type/suite binding differs.
+/// Also forwards <see cref="IVerificationRelationshipResolver"/> to the inner provider so controller
+/// authorization (verify step 6) PASSES; otherwise the verifier would fall back to a real
+/// <c>did:key</c> relationship resolver that cannot decode the test's synthetic controller, failing on
+/// an unrelated gate and masking the keytype guard this helper exists to exercise.
+/// </summary>
+internal sealed class WrongKeyTypeResolver : IDidResolver, IVerificationRelationshipResolver
+{
+    private readonly IDidResolver _inner;
+    private readonly string _wrongKeyType;
+
+    public WrongKeyTypeResolver(IDidResolver inner, string wrongKeyType)
+    {
+        _inner = inner;
+        _wrongKeyType = wrongKeyType;
+    }
+
+    public async Task<ResolvedKey> ResolvePublicKeyAsync(string didOrVerificationMethod)
+    {
+        var key = await _inner.ResolvePublicKeyAsync(didOrVerificationMethod);
+        return new ResolvedKey(key.PublicKeyBytes, _wrongKeyType);
+    }
+
+    public Task<string> GetVerificationMethodAsync(string did) => _inner.GetVerificationMethodAsync(did);
+
+    public Task<VerificationRelationshipAuthorizationResult> IsAuthorizedForRelationshipAsync(
+        string controllerDid, string verificationMethodDidUrl,
+        VerificationRelationship relationship, CancellationToken ct = default)
+        => ((IVerificationRelationshipResolver)_inner).IsAuthorizedForRelationshipAsync(
+            controllerDid, verificationMethodDidUrl, relationship, ct);
 }
 
 /// <summary>Minimal in-memory <see cref="ILogger{T}"/> that records emitted entries (Issue #64 test support).</summary>

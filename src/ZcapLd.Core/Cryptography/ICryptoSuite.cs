@@ -16,6 +16,13 @@ public interface ICryptoSuite
 
     /// <summary>
     /// The key type string (e.g. "Ed25519VerificationKey2020").
+    /// <para>
+    /// Contract: verification binds the suite to the resolved key by comparing this value against
+    /// <see cref="Models.ResolvedKey.KeyType"/> with an exact ordinal match (Issue #68). An
+    /// <see cref="Services.IDidResolver"/> paired with this suite MUST emit this exact string, not a
+    /// synonym (<c>Multikey</c>, <c>JsonWebKey2020</c>, <c>Ed25519VerificationKey2018</c>); otherwise a
+    /// legitimately matching key is rejected. The in-library resolver/suite pairs already align.
+    /// </para>
     /// </summary>
     string KeyType { get; }
 
