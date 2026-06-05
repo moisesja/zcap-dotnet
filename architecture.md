@@ -33,7 +33,10 @@ Primary assembly: `src/ZcapLd.Core`.
 
 - `ICapabilityService`: create/delegate/validate capabilities
 - `ISigningService`: sign capability and invocation documents
-- `IVerificationService`: verify proof/chain/invocation, resolve keys, revocation API
+- `IVerificationService`: verify proof/chain/invocation, resolve keys, revocation API. Each verify
+  method has a `...DetailedAsync` sibling returning a structured `VerificationResult`
+  (`VerificationOutcome` enum + optional message) so callers can distinguish failure modes
+  programmatically; the `Task<bool>` methods are thin wrappers over `(await ...DetailedAsync(...)).IsValid` (Issue #70)
 - `IDidResolver`: resolve DIDs to public keys (returns `ResolvedKey` with key type); implementations: `DidKeyResolver` (wraps NetDid's `DidKeyMethod`), `CompositeDidResolver`
 - `IDidSigner`: sign data using a DID's private key; no default implementation in core — consumers provide their own
 - `IRootCapabilityResolver`: resolve a root capability by id so the verifier can authorize a spec-exact delegation chain (which references the root by id only — Issue #50); implementations: `InMemoryRootCapabilityResolver` (dev). No default in core — the resource owner resolves roots from its own store. A `VerificationService` also accepts an explicit root on its verify/revoke overloads, and auto-detects an `IDidResolver` that additionally implements this interface.
@@ -132,6 +135,20 @@ Primary assembly: `src/ZcapLd.Core`.
      verification method is in the `capabilityInvocation` relationship (delegations use
      `capabilityDelegation`); honors cross-DID references and per-purpose key separation
    - all caveats across root→leaf chain
+
+### Structured verification results (Issue #70)
+
+Every verify method returns a bare `Task<bool>` **and** has a `...DetailedAsync` sibling returning a
+`VerificationResult` — a `VerificationOutcome` (e.g. `Revoked`, `Expired`, `InvalidSignature`,
+`UnauthorizedController`, `InvalidDelegation`, `AttenuationViolation`, `ChainTooLong`, `CaveatFailed`,
+`Replayed`, `InvalidTarget`, `ActionNotAllowed`, `MalformedCapability`, `CouldNotVerify`) plus an
+optional diagnostic message. This lets a caller tell *why* a capability was denied — e.g. `Revoked`
+vs a broken chain — without re-deriving it. `CouldNotVerify` is the explicit "couldn't check"
+(config/transient/infrastructure fault) outcome, distinct from a capability that is provably invalid
+(the M7 / Issue #64 distinction surfaced at the API). Verification stays **fail-closed**: any
+non-`Valid` outcome denies, and the bool methods return `IsValid`. Denials are now logged on **all**
+paths (a single Debug-severity choke point on the public boundary), not just the exception path —
+attacker-drivable denials log at Debug so a hostile client cannot flood the operator's Warning channel.
 
 ## Capability Chain Semantics
 
