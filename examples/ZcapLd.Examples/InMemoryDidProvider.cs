@@ -13,7 +13,7 @@ namespace ZcapLd.Examples;
 /// purposes. Stores Ed25519 private keys in plaintext memory — NOT for production use.
 ///
 /// In production, implement IDidSigner backed by your secure key management system
-/// (HSM, Azure Key Vault, AWS KMS, Trinsic, etc.) and IDidResolver backed by a
+/// (HSM, Azure Key Vault, AWS KMS, etc.) and IDidResolver backed by a
 /// universal resolver or DID method-specific resolver. A resolver that also implements
 /// IVerificationRelationshipResolver lets the verifier authorize controllers by resolving
 /// their DID document (capabilityInvocation / capabilityDelegation) — Issue #65.

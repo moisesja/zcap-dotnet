@@ -49,6 +49,18 @@ public class DidKeyResolver : IDidResolver, IVerificationRelationshipResolver
     /// <summary>
     /// Resolves a did:key DID or verification method URI to its public key material.
     /// </summary>
+    /// <remarks>
+    /// When the argument carries a <c>#fragment</c>, the verification method whose id equals the
+    /// full URI is returned; an unmatched fragment throws rather than silently substituting the
+    /// primary method (Issue #67). A bare DID returns the primary verification method.
+    /// <para>
+    /// This resolves key material only — it applies no verification-relationship
+    /// (<c>capabilityInvocation</c> / <c>capabilityDelegation</c>) authorization gate. Callers that
+    /// use the returned key to make their own authorization decisions therefore depend on this
+    /// method returning the key for the <em>named</em> method; the ZCAP verifier separately enforces
+    /// the relationship via <see cref="IsAuthorizedForRelationshipAsync"/>.
+    /// </para>
+    /// </remarks>
     public async Task<ResolvedKey> ResolvePublicKeyAsync(string didOrVerificationMethod)
     {
         if (string.IsNullOrEmpty(didOrVerificationMethod))
@@ -60,7 +72,13 @@ public class DidKeyResolver : IDidResolver, IVerificationRelationshipResolver
                 $"DidKeyResolver only handles did:key DIDs, got: {didOrVerificationMethod}");
         }
 
-        var baseDid = didOrVerificationMethod.Split('#')[0];
+        // Parse the fragment boundary once: everything before '#' is the DID we resolve, and the
+        // index marks where the optional verification-method fragment begins. Single source of
+        // truth so the document lookup and the fragment selection below cannot drift apart.
+        var hashIndex = didOrVerificationMethod.IndexOf('#');
+        var baseDid = hashIndex < 0
+            ? didOrVerificationMethod
+            : didOrVerificationMethod[..hashIndex];
 
         try
         {
@@ -72,9 +90,30 @@ public class DidKeyResolver : IDidResolver, IVerificationRelationshipResolver
                     $"Failed to resolve did:key: {didOrVerificationMethod}");
             }
 
-            var vm = result.DidDocument.VerificationMethod?.FirstOrDefault()
-                ?? throw new CapabilityValidationException(
+            var verificationMethods = result.DidDocument.VerificationMethod;
+            if (verificationMethods == null || verificationMethods.Count == 0)
+            {
+                throw new CapabilityValidationException(
                     $"No verification method found in resolved DID document: {didOrVerificationMethod}");
+            }
+
+            // If the caller named a specific verification method by #fragment, honour it: select the
+            // method whose Id equals the full URI — rather than always returning the first method
+            // (Issue #67). An Ed25519 did:key resolves to two methods (the Ed25519 signing key at
+            // index 0 and a derived X25519 key-agreement key at index 1), so FirstOrDefault()
+            // returned the wrong key for a non-index-0 fragment. did:key documents always carry
+            // absolute verification-method ids, so an exact id match is exhaustive; an unmatched
+            // fragment throws (below) rather than silently substituting the first method.
+            var vm = hashIndex < 0
+                ? verificationMethods[0]
+                : verificationMethods.FirstOrDefault(m =>
+                      string.Equals(m.Id, didOrVerificationMethod, StringComparison.Ordinal));
+
+            if (vm == null)
+            {
+                throw new CapabilityValidationException(
+                    $"No verification method matching '{didOrVerificationMethod}' in resolved DID document.");
+            }
 
             if (vm.PublicKeyMultibase == null)
             {
