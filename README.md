@@ -78,15 +78,11 @@ var delegated = await capabilityService.DelegateCapabilityAsync(
         new ExpirationCaveat { Expires = DateTime.UtcNow.AddDays(3) }
     });
 
-var invocation = new Invocation
-{
-    // Per ZCAP-LD v0.3, a delegated DI invocation MUST embed the FULL delegated zcap object, not just
-    // its id (Issue #51). Use InvocationCapability.FromCapability(...) for delegated invocations; a
-    // ROOT invocation references the root by id string instead (Capability = root.Id).
-    Capability = InvocationCapability.FromCapability(delegated),
-    CapabilityAction = "read",
-    InvocationTarget = "https://api.example.com/resources/123"
-};
+// CreateInvocation picks the spec-correct `capability` shape automatically (Issue #51): a root
+// capability is referenced by id string, a delegated capability embeds the full zcap object — so you
+// never have to choose between InvocationCapability.FromId(...) and .FromCapability(...) yourself.
+var invocation = capabilityService.CreateInvocation(
+    delegated, "read", "https://api.example.com/resources/123");
 
 invocation.Proof = await signingService.SignInvocationAsync(invocation, leafDid);
 var isValid = await verificationService.VerifyInvocationAsync(invocation, delegated);

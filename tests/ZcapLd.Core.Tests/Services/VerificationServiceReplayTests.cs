@@ -57,7 +57,6 @@ public class VerificationServiceReplayTests
 
         var invocation = new Invocation
         {
-            // Delegated DI invocation: the capability MUST embed the full delegated zcap (Issue #51).
             Capability = InvocationCapability.FromCapability(delegated),
             CapabilityAction = "read",
             InvocationTarget = "https://example.com/resource"

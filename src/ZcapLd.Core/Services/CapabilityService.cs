@@ -145,6 +145,66 @@ public class CapabilityService : ICapabilityService
         return delegatedCapability;
     }
 
+    /// <inheritdoc />
+    public Invocation CreateInvocation(Capability capability, string capabilityAction, string? invocationTarget = null)
+    {
+        ArgumentNullException.ThrowIfNull(capability);
+        if (string.IsNullOrEmpty(capability.Id))
+        {
+            throw new ArgumentException("Capability must have an id.", nameof(capability));
+        }
+        if (string.IsNullOrEmpty(capabilityAction))
+        {
+            throw new ArgumentException("Capability action cannot be null or empty", nameof(capabilityAction));
+        }
+
+        var target = invocationTarget ?? capability.InvocationTarget;
+        if (string.IsNullOrEmpty(target))
+        {
+            throw new ArgumentException(
+                "Invocation target cannot be null or empty (the capability has none to default to).",
+                nameof(invocationTarget));
+        }
+
+        // Root capability → reference by id string; delegated → embed the full zcap object so the
+        // verifier receives the delegated authority inline (Issue #51). The verifier enforces this
+        // exact root-vs-delegated shape, so picking it here keeps callers spec-correct by construction.
+        var reference = string.IsNullOrEmpty(capability.ParentCapability)
+            ? InvocationCapability.FromId(capability.Id)
+            : InvocationCapability.FromCapability(capability);
+
+        return new Invocation
+        {
+            Capability = reference,
+            CapabilityAction = capabilityAction,
+            InvocationTarget = target
+        };
+    }
+
+    /// <inheritdoc />
+    public Invocation CreateRootInvocation(string rootCapabilityId, string capabilityAction, string invocationTarget)
+    {
+        if (string.IsNullOrEmpty(rootCapabilityId))
+        {
+            throw new ArgumentException("Root capability id cannot be null or empty", nameof(rootCapabilityId));
+        }
+        if (string.IsNullOrEmpty(capabilityAction))
+        {
+            throw new ArgumentException("Capability action cannot be null or empty", nameof(capabilityAction));
+        }
+        if (string.IsNullOrEmpty(invocationTarget))
+        {
+            throw new ArgumentException("Invocation target cannot be null or empty", nameof(invocationTarget));
+        }
+
+        return new Invocation
+        {
+            Capability = InvocationCapability.FromId(rootCapabilityId),
+            CapabilityAction = capabilityAction,
+            InvocationTarget = invocationTarget
+        };
+    }
+
     /// <summary>
     /// Validates capability according to W3C ZCAP-LD specification
     /// </summary>

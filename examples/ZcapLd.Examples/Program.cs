@@ -105,7 +105,6 @@ Console.WriteLine("---------------------------------");
 // Carol invokes the capability to read the document
 var invocation = new Invocation
 {
-    // Delegated DI invocation embeds the full zcap (Issue #51).
     Capability = InvocationCapability.FromCapability(carolCapability),
     CapabilityAction = "read",
     InvocationTarget = "https://storage.example.com/documents/report.pdf"
@@ -193,7 +192,6 @@ foreach (var caveat in caveatCapability.Caveat ?? Array.Empty<Caveat>())
 // Test invocation with caveats
 var caveatInvocation = new Invocation
 {
-    // Delegated DI invocation embeds the full zcap (Issue #51).
     Capability = InvocationCapability.FromCapability(caveatCapability),
     CapabilityAction = "query",
     InvocationTarget = "https://api.example.com/data?filter=active"
@@ -330,7 +328,6 @@ Console.WriteLine($"  Usage limit: 50 views");
 // Employee attempts to read document
 var employeeRead = new Invocation
 {
-    // Delegated DI invocation embeds the full zcap (Issue #51).
     Capability = InvocationCapability.FromCapability(employeeAccess),
     CapabilityAction = "read",
     InvocationTarget = "https://docs.company.com/confidential/q4-financials.pdf"
@@ -417,7 +414,6 @@ var noHandlerVerifier = new VerificationService(didProvider, noHandlerProcessor)
 
 var partnerInvocation = new Invocation
 {
-    // Delegated DI invocation embeds the full zcap (Issue #51).
     Capability = InvocationCapability.FromCapability(partnerCapability),
     CapabilityAction = "read",
     InvocationTarget = "https://api.org.example/v1/data"
@@ -512,7 +508,6 @@ Console.WriteLine($"  Caveat: ContentType must be application/json");
 // Client invokes the capability
 var clientInvocation = new Invocation
 {
-    // Delegated DI invocation embeds the full zcap (Issue #51).
     Capability = InvocationCapability.FromCapability(clientCapability),
     CapabilityAction = "write",
     InvocationTarget = "https://api.example.com/v1/records"
@@ -631,7 +626,6 @@ Console.WriteLine($"RDFC-1.0 Chain Valid: {rdfcChainValid}");
 // --- Invoke and verify using RDFC-1.0 ---
 var rdfcInvocation = new Invocation
 {
-    // Delegated DI invocation embeds the full zcap (Issue #51).
     Capability = InvocationCapability.FromCapability(rdfcDelegated),
     CapabilityAction = "read",
     InvocationTarget = "https://storage.example.com/rdfc-documents"

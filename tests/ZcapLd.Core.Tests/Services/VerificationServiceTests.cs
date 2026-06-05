@@ -935,7 +935,6 @@ public class VerificationServiceTests
 
         var invocation = new Invocation
         {
-            // Delegated DI invocation embeds the full zcap (Issue #51).
             Capability = InvocationCapability.FromCapability(delegatedCapability),
             CapabilityAction = "write", // Not allowed
             InvocationTarget = "https://example.com/resource"
@@ -1148,7 +1147,6 @@ public class VerificationServiceTests
 
         var invocation = new Invocation
         {
-            // Delegated DI invocation embeds the full zcap (Issue #51).
             Capability = InvocationCapability.FromCapability(delegatedCapability),
             CapabilityAction = "read",
             InvocationTarget = "https://example.com/resource"
@@ -1186,7 +1184,6 @@ public class VerificationServiceTests
 
         var invocation = new Invocation
         {
-            // Delegated DI invocation embeds the full zcap (Issue #51).
             Capability = InvocationCapability.FromCapability(delegatedCapability),
             CapabilityAction = "write",
             InvocationTarget = "https://example.com/resource"
@@ -1226,7 +1223,6 @@ public class VerificationServiceTests
 
         var invocation = new Invocation
         {
-            // Delegated DI invocation embeds the full zcap (Issue #51).
             Capability = InvocationCapability.FromCapability(delegatedCapability),
             CapabilityAction = "write",
             InvocationTarget = "https://example.com/resource"
@@ -1355,7 +1351,6 @@ public class VerificationServiceTests
 
         var invocation = new Invocation
         {
-            // Delegated DI invocation embeds the full zcap (Issue #51).
             Capability = InvocationCapability.FromCapability(delegatedCapability),
             CapabilityAction = "read",
             InvocationTarget = delegatedCapability.InvocationTarget

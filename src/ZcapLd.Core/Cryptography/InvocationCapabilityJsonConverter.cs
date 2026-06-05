@@ -10,7 +10,7 @@ namespace ZcapLd.Core.Cryptography;
 /// or the <b>full embedded delegated zcap object</b> (delegated DI invocation, Issue #51) — and
 /// preserves whichever shape it saw.
 ///
-/// The embedded <see cref="Capability"/> is (de)serialized through the supplied <paramref name="options"/>
+/// The embedded <see cref="Capability"/> is (de)serialized through the supplied serializer options
 /// — <see cref="ZcapJsonOptions.Default"/> on the signing/verification paths — so its caveats, proof
 /// set, and <c>capabilityChain</c> round-trip exactly and the delegated object's bytes match between
 /// the signer and any other Data Integrity verifier (the same contract <see cref="ProofSetJsonConverter"/>

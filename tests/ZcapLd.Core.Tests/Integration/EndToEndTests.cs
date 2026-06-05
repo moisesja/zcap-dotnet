@@ -93,7 +93,6 @@ public class EndToEndTests
         // Act - Child invokes the capability
         var invocation = new Invocation
         {
-            // Delegated DI invocation embeds the full zcap (Issue #51).
             Capability = InvocationCapability.FromCapability(delegatedCapability),
             CapabilityAction = "read",
             InvocationTarget = "https://api.example.com/documents/doc1"
@@ -141,7 +140,6 @@ public class EndToEndTests
         // Act - Controller3 invokes
         var invocation = new Invocation
         {
-            // Delegated DI invocation embeds the full zcap (Issue #51).
             Capability = InvocationCapability.FromCapability(level2Capability),
             CapabilityAction = "read",
             InvocationTarget = "https://api.example.com/resources/item1"
@@ -190,7 +188,6 @@ public class EndToEndTests
         // Act - Invoke before expiration
         var invocation = new Invocation
         {
-            // Delegated DI invocation embeds the full zcap (Issue #51).
             Capability = InvocationCapability.FromCapability(delegatedCapability),
             CapabilityAction = "read",
             InvocationTarget = "https://api.example.com/documents/doc1"
@@ -232,7 +229,6 @@ public class EndToEndTests
         // Act - Try to invoke after expiration
         var invocation = new Invocation
         {
-            // Delegated DI invocation embeds the full zcap (Issue #51).
             Capability = InvocationCapability.FromCapability(delegatedCapability),
             CapabilityAction = "read",
             InvocationTarget = "https://api.example.com/documents/doc1"
@@ -278,7 +274,6 @@ public class EndToEndTests
         {
             var invocation = new Invocation
             {
-                // Delegated DI invocation embeds the full zcap (Issue #51).
                 Capability = InvocationCapability.FromCapability(delegatedCapability),
                 CapabilityAction = "read",
                 InvocationTarget = "https://api.example.com/documents/doc1"
@@ -341,7 +336,6 @@ public class EndToEndTests
         // Act - Invoke
         var invocation = new Invocation
         {
-            // Delegated DI invocation embeds the full zcap (Issue #51).
             Capability = InvocationCapability.FromCapability(delegatedCapability),
             CapabilityAction = "read",
             InvocationTarget = "https://api.example.com/documents/doc1"
@@ -387,7 +381,6 @@ public class EndToEndTests
         // Act - Try to invoke with "write" action (not allowed)
         var invocation = new Invocation
         {
-            // Delegated DI invocation embeds the full zcap (Issue #51).
             Capability = InvocationCapability.FromCapability(delegatedCapability),
             CapabilityAction = "write", // Not in allowed actions
             InvocationTarget = "https://api.example.com/documents/doc1"
@@ -424,7 +417,6 @@ public class EndToEndTests
         // Act - Try to invoke with wrong target
         var invocation = new Invocation
         {
-            // Delegated DI invocation embeds the full zcap (Issue #51).
             Capability = InvocationCapability.FromCapability(delegatedCapability),
             CapabilityAction = "read",
             InvocationTarget = "https://api.example.com/documents/folder2/doc1" // Different folder
@@ -461,7 +453,6 @@ public class EndToEndTests
         // Act - Invoke with valid prefix extension
         var invocation = new Invocation
         {
-            // Delegated DI invocation embeds the full zcap (Issue #51).
             Capability = InvocationCapability.FromCapability(delegatedCapability),
             CapabilityAction = "read",
             InvocationTarget = "https://api.example.com/documents/folder1/doc1" // Valid prefix
@@ -607,7 +598,6 @@ public class EndToEndTests
         // Act - Carol tries to read the document
         var carolInvocation = new Invocation
         {
-            // Delegated DI invocation embeds the full zcap (Issue #51).
             Capability = InvocationCapability.FromCapability(carolCapability),
             CapabilityAction = "read",
             InvocationTarget = "https://storage.example.com/documents/alice-report.pdf"
@@ -681,7 +671,6 @@ public class EndToEndTests
         // Act - Customer makes valid query
         var invocation = new Invocation
         {
-            // Delegated DI invocation embeds the full zcap (Issue #51).
             Capability = InvocationCapability.FromCapability(customerCapability),
             CapabilityAction = "query",
             InvocationTarget = "https://api.example.com/v1/data?filter=active"

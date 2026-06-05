@@ -292,7 +292,6 @@ public class NormativeIntegrationComplianceTests
 
         var invocation = new Invocation
         {
-            // Delegated DI invocation embeds the full zcap (Issue #51).
             Capability = InvocationCapability.FromCapability(delegated),
             CapabilityAction = "read",
             InvocationTarget = delegated.InvocationTarget
