@@ -104,7 +104,8 @@ public class RdfcEndToEndTests
         // Invoke and verify
         var invocation = new Invocation
         {
-            Capability = delegated.Id,
+            // Delegated DI invocation embeds the full zcap (Issue #51).
+            Capability = InvocationCapability.FromCapability(delegated),
             CapabilityAction = "read",
             InvocationTarget = "https://storage.example.com/rdfc-documents"
         };
@@ -144,7 +145,8 @@ public class RdfcEndToEndTests
 
         var invocation = new Invocation
         {
-            Capability = level2.Id,
+            // Delegated DI invocation embeds the full zcap (Issue #51).
+            Capability = InvocationCapability.FromCapability(level2),
             CapabilityAction = "read",
             InvocationTarget = "https://api.example.com/resources/item1"
         };

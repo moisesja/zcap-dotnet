@@ -61,7 +61,9 @@ var delegated = await capabilityService.DelegateCapabilityAsync(
 
 var invocation = new Invocation
 {
-    Capability = delegated.Id,
+    // A delegated DI invocation MUST embed the full delegated zcap (Issue #51); a root invocation
+    // would instead reference the root by id string (Capability = root.Id).
+    Capability = InvocationCapability.FromCapability(delegated),
     CapabilityAction = "read",
     InvocationTarget = "https://api.example.com/documents/abc"
 };
