@@ -586,4 +586,138 @@ public class CapabilityServiceTests
         verificationMethod.Should().StartWith(did);
         verificationMethod.Should().Contain("#");
     }
+
+    // ─────────────────── CreateInvocation / CreateRootInvocation (Issue #51 ergonomics) ───────────────────
+
+    private VerificationService CreateVerifier() =>
+        new(_didProvider, new CaveatProcessor(), VerificationService.CreateDefaultSuiteProvider(),
+            new RevocationService(new InMemoryRevocationStore()), new InMemoryNonceStore());
+
+    [Fact]
+    public async Task CreateInvocation_RootCapability_ReferencesByIdString()
+    {
+        var root = await _capabilityService.CreateRootCapabilityAsync(
+            "did:key:z6MkExample", "https://example.com/doc", new[] { "read" });
+
+        var invocation = _capabilityService.CreateInvocation(root, "read");
+
+        invocation.Capability.IsRootReference.Should().BeTrue("a root capability is referenced by id string");
+        invocation.Capability.EmbeddedCapability.Should().BeNull();
+        invocation.Capability.CapabilityId.Should().Be(root.Id);
+        invocation.CapabilityAction.Should().Be("read");
+        invocation.InvocationTarget.Should().Be(root.InvocationTarget, "target defaults to the capability's own");
+        invocation.Proof.Should().BeNull("CreateInvocation returns an unsigned invocation");
+    }
+
+    [Fact]
+    public async Task CreateInvocation_DelegatedCapability_EmbedsFullZcap()
+    {
+        var rootDid = _didProvider.GenerateDidKey();
+        var leafDid = _didProvider.GenerateDidKey();
+        var root = await _capabilityService.CreateRootCapabilityAsync(rootDid, "https://example.com/doc", new[] { "read" });
+        var delegated = await _capabilityService.DelegateCapabilityAsync(
+            root, leafDid, new[] { "read" }, DateTime.UtcNow.AddDays(7));
+
+        var invocation = _capabilityService.CreateInvocation(delegated, "read");
+
+        invocation.Capability.IsRootReference.Should().BeFalse("a delegated capability embeds the full zcap (Issue #51)");
+        invocation.Capability.EmbeddedCapability.Should().NotBeNull();
+        invocation.Capability.EmbeddedCapability!.Id.Should().Be(delegated.Id);
+        invocation.Capability.EmbeddedCapability.ParentCapability.Should().Be(delegated.ParentCapability);
+        invocation.Capability.CapabilityId.Should().Be(delegated.Id);
+    }
+
+    [Fact]
+    public async Task CreateInvocation_ExplicitTarget_OverridesCapabilityTarget()
+    {
+        var root = await _capabilityService.CreateRootCapabilityAsync(
+            "did:key:z6MkExample", "https://example.com/doc", new[] { "read" });
+
+        var invocation = _capabilityService.CreateInvocation(root, "read", "https://example.com/doc/sub");
+
+        invocation.InvocationTarget.Should().Be("https://example.com/doc/sub");
+    }
+
+    [Fact]
+    public void CreateInvocation_NullCapability_Throws()
+    {
+        var act = () => _capabilityService.CreateInvocation(null!, "read");
+        act.Should().Throw<ArgumentNullException>();
+    }
+
+    [Fact]
+    public async Task CreateInvocation_EmptyAction_Throws()
+    {
+        var root = await _capabilityService.CreateRootCapabilityAsync(
+            "did:key:z6MkExample", "https://example.com/doc", new[] { "read" });
+
+        var act = () => _capabilityService.CreateInvocation(root, "");
+        act.Should().Throw<ArgumentException>();
+    }
+
+    [Fact]
+    public void CreateRootInvocation_ReferencesRootByIdString()
+    {
+        var invocation = _capabilityService.CreateRootInvocation(
+            "urn:zcap:root:https%3A%2F%2Fexample.com%2Fdoc", "read", "https://example.com/doc");
+
+        invocation.Capability.IsRootReference.Should().BeTrue();
+        invocation.Capability.CapabilityId.Should().Be("urn:zcap:root:https%3A%2F%2Fexample.com%2Fdoc");
+        invocation.CapabilityAction.Should().Be("read");
+        invocation.InvocationTarget.Should().Be("https://example.com/doc");
+    }
+
+    [Theory]
+    [InlineData("", "read", "https://example.com/doc")]
+    [InlineData("urn:zcap:root:x", "", "https://example.com/doc")]
+    [InlineData("urn:zcap:root:x", "read", "")]
+    public void CreateRootInvocation_EmptyArguments_Throw(string rootId, string action, string target)
+    {
+        var act = () => _capabilityService.CreateRootInvocation(rootId, action, target);
+        act.Should().Throw<ArgumentException>();
+    }
+
+    [Fact]
+    public async Task CreateInvocation_DelegatedOutput_SignsAndVerifies()
+    {
+        // End-to-end insurance that the helper picks the verifier-accepted shape for a delegated zcap.
+        var rootDid = _didProvider.GenerateDidKey();
+        var leafDid = _didProvider.GenerateDidKey();
+        var root = await TestRoots.CreateAndRegisterRootAsync(
+            _capabilityService, _didProvider, rootDid, "https://example.com/doc", new[] { "read" });
+        var delegated = await _capabilityService.DelegateCapabilityAsync(
+            root, leafDid, new[] { "read" }, DateTime.UtcNow.AddDays(7));
+
+        var invocation = _capabilityService.CreateInvocation(delegated, "read");
+        invocation.Proof = await _signingService.SignInvocationAsync(invocation, leafDid);
+
+        (await CreateVerifier().VerifyInvocationAsync(invocation, delegated)).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task CreateInvocation_RootOutput_SignsAndVerifies()
+    {
+        var rootDid = _didProvider.GenerateDidKey();
+        var root = await TestRoots.CreateAndRegisterRootAsync(
+            _capabilityService, _didProvider, rootDid, "https://example.com/doc", new[] { "read" });
+
+        var invocation = _capabilityService.CreateInvocation(root, "read");
+        invocation.Proof = await _signingService.SignInvocationAsync(invocation, rootDid);
+
+        (await CreateVerifier().VerifyInvocationAsync(invocation, root)).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task CreateInvocation_IsAvailableOnTheInterface()
+    {
+        // The helper must be reachable through ICapabilityService (the DI-resolved type), not only
+        // the concrete CapabilityService.
+        ICapabilityService caps = _capabilityService;
+        var root = await caps.CreateRootCapabilityAsync(
+            "did:key:z6MkExample", "https://example.com/doc", new[] { "read" });
+
+        var invocation = caps.CreateInvocation(root, "read");
+
+        invocation.Capability.CapabilityId.Should().Be(root.Id);
+    }
 }

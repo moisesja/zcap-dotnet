@@ -935,7 +935,7 @@ public class VerificationServiceTests
 
         var invocation = new Invocation
         {
-            Capability = delegatedCapability.Id,
+            Capability = InvocationCapability.FromCapability(delegatedCapability),
             CapabilityAction = "write", // Not allowed
             InvocationTarget = "https://example.com/resource"
         };
@@ -1147,7 +1147,7 @@ public class VerificationServiceTests
 
         var invocation = new Invocation
         {
-            Capability = delegatedCapability.Id,
+            Capability = InvocationCapability.FromCapability(delegatedCapability),
             CapabilityAction = "read",
             InvocationTarget = "https://example.com/resource"
         };
@@ -1184,7 +1184,7 @@ public class VerificationServiceTests
 
         var invocation = new Invocation
         {
-            Capability = delegatedCapability.Id,
+            Capability = InvocationCapability.FromCapability(delegatedCapability),
             CapabilityAction = "write",
             InvocationTarget = "https://example.com/resource"
         };
@@ -1223,7 +1223,7 @@ public class VerificationServiceTests
 
         var invocation = new Invocation
         {
-            Capability = delegatedCapability.Id,
+            Capability = InvocationCapability.FromCapability(delegatedCapability),
             CapabilityAction = "write",
             InvocationTarget = "https://example.com/resource"
         };
@@ -1351,7 +1351,7 @@ public class VerificationServiceTests
 
         var invocation = new Invocation
         {
-            Capability = delegatedCapability.Id,
+            Capability = InvocationCapability.FromCapability(delegatedCapability),
             CapabilityAction = "read",
             InvocationTarget = delegatedCapability.InvocationTarget
         };
@@ -1618,7 +1618,7 @@ public class VerificationServiceTests
             "urn:uuid:target-cap", did, "https://example.com/resource");
 
         signed.CapabilityAction.Should().Be(Invocation.RevokeAction);
-        signed.Capability.Should().Be("urn:uuid:target-cap");
+        signed.Capability.CapabilityId.Should().Be("urn:uuid:target-cap");
         signed.Proof.Should().NotBeNull();
         signed.Proof!.ProofPurpose.Should().Be(Proof.CapabilityRevocationPurpose);
         signed.Proof.ProofValue.Should().NotBeNullOrEmpty();

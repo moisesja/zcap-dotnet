@@ -48,6 +48,34 @@ public interface ICapabilityService
         string? signerDid = null);
 
     /// <summary>
+    /// Builds an <b>unsigned</b> <see cref="Invocation"/> for <paramref name="capability"/>, selecting
+    /// the spec-correct <c>capability</c> wire shape automatically (Issue #51): a <b>root</b> capability
+    /// is referenced by its id string, a <b>delegated</b> capability embeds the full zcap object so the
+    /// verifier receives the delegated authority inline. Saves callers from choosing between
+    /// <see cref="InvocationCapability.FromId"/> and <see cref="InvocationCapability.FromCapability"/>.
+    /// Sign the result with <see cref="ISigningService.SignInvocationAsync"/> before presenting it.
+    /// </summary>
+    /// <param name="capability">The capability being invoked (root or delegated).</param>
+    /// <param name="capabilityAction">The action to invoke (e.g. <c>"read"</c>).</param>
+    /// <param name="invocationTarget">Target resource URI; defaults to <paramref name="capability"/>'s
+    /// own <c>invocationTarget</c> when null.</param>
+    /// <returns>An unsigned invocation carrying the spec-correct <c>capability</c> shape.</returns>
+    Invocation CreateInvocation(Capability capability, string capabilityAction, string? invocationTarget = null);
+
+    /// <summary>
+    /// Builds an <b>unsigned</b> root <see cref="Invocation"/> that references the root capability by id
+    /// string — for when only the root id is known (e.g. a resource server holding its root zcap urn but
+    /// not the full object). For a delegated capability, or when you hold the full capability object,
+    /// use <see cref="CreateInvocation"/>. Sign the result with
+    /// <see cref="ISigningService.SignInvocationAsync"/>.
+    /// </summary>
+    /// <param name="rootCapabilityId">The root capability id (e.g. <c>urn:zcap:root:…</c>).</param>
+    /// <param name="capabilityAction">The action to invoke.</param>
+    /// <param name="invocationTarget">Target resource URI.</param>
+    /// <returns>An unsigned root invocation referencing the capability by id string.</returns>
+    Invocation CreateRootInvocation(string rootCapabilityId, string capabilityAction, string invocationTarget);
+
+    /// <summary>
     /// Validates a capability and its chain
     /// </summary>
     /// <param name="capability">The capability to validate</param>

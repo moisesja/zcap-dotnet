@@ -19,6 +19,10 @@ Primary assembly: `src/ZcapLd.Core`.
 - `Capability`: root/delegated capability representation
 - `Proof`: delegation/invocation proof representation
 - `Invocation`: invocation request representation
+- `InvocationCapability`: union of the two spec-defined `capability` wire shapes — a root zcap **id
+  string** or the **full embedded delegated zcap object** — used by both `Invocation.Capability` and
+  the invocation `Proof.Capability`; preserves the wire shape via `InvocationCapabilityJsonConverter`
+  (Issue #51)
 - `Caveat` + derived types:
   - `ExpirationCaveat`
   - `UsageCountCaveat`
@@ -110,11 +114,19 @@ Primary assembly: `src/ZcapLd.Core`.
 
 ### Invocation Flow
 
-1. Controller creates `Invocation` with capability ID, action, and target.
-2. `SigningService.SignInvocationAsync` creates invocation proof.
+1. Controller creates `Invocation` with the invoked capability, action, and target. Per ZCAP-LD v0.3
+   the `capability` shape depends on what is invoked: a **root** invocation carries the root zcap **id
+   string** (`Capability = root.Id`); a **delegated** DI invocation MUST embed the **full delegated
+   zcap object** (`Capability = InvocationCapability.FromCapability(delegated)`) so the verifier has the
+   authority chain without dereferencing it by id (Issue #51).
+2. `SigningService.SignInvocationAsync` creates invocation proof; the `capability` (id string or full
+   embedded object) is part of the signed canonical payload.
 3. `VerificationService.VerifyInvocationAsync` checks:
    - capability chain validity
    - invocation proof purpose and signature
+   - **invocation `capability` shape (strict)**: a root invocation MUST use the root id string, a
+     delegated invocation MUST embed the full zcap whose id matches the verified capability — a
+     delegated invocation supplying only an id string is rejected (Issue #51)
    - action and target constraints
    - controller authorization — resolves the controller's DID document and confirms the
      verification method is in the `capabilityInvocation` relationship (delegations use

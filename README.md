@@ -78,12 +78,11 @@ var delegated = await capabilityService.DelegateCapabilityAsync(
         new ExpirationCaveat { Expires = DateTime.UtcNow.AddDays(3) }
     });
 
-var invocation = new Invocation
-{
-    Capability = delegated.Id,
-    CapabilityAction = "read",
-    InvocationTarget = "https://api.example.com/resources/123"
-};
+// CreateInvocation picks the spec-correct `capability` shape automatically (Issue #51): a root
+// capability is referenced by id string, a delegated capability embeds the full zcap object — so you
+// never have to choose between InvocationCapability.FromId(...) and .FromCapability(...) yourself.
+var invocation = capabilityService.CreateInvocation(
+    delegated, "read", "https://api.example.com/resources/123");
 
 invocation.Proof = await signingService.SignInvocationAsync(invocation, leafDid);
 var isValid = await verificationService.VerifyInvocationAsync(invocation, delegated);

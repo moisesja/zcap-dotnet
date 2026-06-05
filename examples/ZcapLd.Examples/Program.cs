@@ -105,7 +105,7 @@ Console.WriteLine("---------------------------------");
 // Carol invokes the capability to read the document
 var invocation = new Invocation
 {
-    Capability = carolCapability.Id,
+    Capability = InvocationCapability.FromCapability(carolCapability),
     CapabilityAction = "read",
     InvocationTarget = "https://storage.example.com/documents/report.pdf"
 };
@@ -113,7 +113,7 @@ var invocation = new Invocation
 // Sign the invocation
 invocation.Proof = await signingService.SignInvocationAsync(invocation, carolDid);
 
-Console.WriteLine($"Invocation Capability: {invocation.Capability}");
+Console.WriteLine($"Invocation Capability: {invocation.Capability.CapabilityId}");
 Console.WriteLine($"Requested Action: {invocation.CapabilityAction}");
 Console.WriteLine($"Target: {invocation.InvocationTarget}");
 Console.WriteLine($"Proof Type: {invocation.Proof.Type}");
@@ -128,7 +128,7 @@ Console.WriteLine();
 Console.WriteLine("Attempting invalid invocation (write action):");
 var invalidInvocation = new Invocation
 {
-    Capability = carolCapability.Id,
+    Capability = InvocationCapability.FromCapability(carolCapability),
     CapabilityAction = "write", // Carol only has "read" permission
     InvocationTarget = "https://storage.example.com/documents/report.pdf"
 };
@@ -192,7 +192,7 @@ foreach (var caveat in caveatCapability.Caveat ?? Array.Empty<Caveat>())
 // Test invocation with caveats
 var caveatInvocation = new Invocation
 {
-    Capability = caveatCapability.Id,
+    Capability = InvocationCapability.FromCapability(caveatCapability),
     CapabilityAction = "query",
     InvocationTarget = "https://api.example.com/data?filter=active"
 };
@@ -328,7 +328,7 @@ Console.WriteLine($"  Usage limit: 50 views");
 // Employee attempts to read document
 var employeeRead = new Invocation
 {
-    Capability = employeeAccess.Id,
+    Capability = InvocationCapability.FromCapability(employeeAccess),
     CapabilityAction = "read",
     InvocationTarget = "https://docs.company.com/confidential/q4-financials.pdf"
 };
@@ -340,7 +340,7 @@ Console.WriteLine($"\nEmployee reads document: {(employeeCanRead ? "ALLOWED" : "
 // Employee attempts to share document (should fail)
 var employeeShare = new Invocation
 {
-    Capability = employeeAccess.Id,
+    Capability = InvocationCapability.FromCapability(employeeAccess),
     CapabilityAction = "share",
     InvocationTarget = "https://docs.company.com/confidential/q4-financials.pdf"
 };
@@ -414,7 +414,7 @@ var noHandlerVerifier = new VerificationService(didProvider, noHandlerProcessor)
 
 var partnerInvocation = new Invocation
 {
-    Capability = partnerCapability.Id,
+    Capability = InvocationCapability.FromCapability(partnerCapability),
     CapabilityAction = "read",
     InvocationTarget = "https://api.org.example/v1/data"
 };
@@ -432,7 +432,7 @@ var handlerVerifier = new VerificationService(didProvider, handlerProcessor);
 // Re-sign with fresh nonce to avoid replay detection
 var partnerInvocation2 = new Invocation
 {
-    Capability = partnerCapability.Id,
+    Capability = InvocationCapability.FromCapability(partnerCapability),
     CapabilityAction = "read",
     InvocationTarget = "https://api.org.example/v1/data"
 };
@@ -449,7 +449,7 @@ var revokedVerifier = new VerificationService(didProvider, revokedProcessor);
 
 var partnerInvocation3 = new Invocation
 {
-    Capability = partnerCapability.Id,
+    Capability = InvocationCapability.FromCapability(partnerCapability),
     CapabilityAction = "read",
     InvocationTarget = "https://api.org.example/v1/data"
 };
@@ -508,7 +508,7 @@ Console.WriteLine($"  Caveat: ContentType must be application/json");
 // Client invokes the capability
 var clientInvocation = new Invocation
 {
-    Capability = clientCapability.Id,
+    Capability = InvocationCapability.FromCapability(clientCapability),
     CapabilityAction = "write",
     InvocationTarget = "https://api.example.com/v1/records"
 };
@@ -525,7 +525,7 @@ Console.WriteLine($"    Invocation valid: {jsonResult} (expected: True)");
 // Re-sign with fresh nonce, then verify with wrong content type
 var clientInvocation2 = new Invocation
 {
-    Capability = clientCapability.Id,
+    Capability = InvocationCapability.FromCapability(clientCapability),
     CapabilityAction = "write",
     InvocationTarget = "https://api.example.com/v1/records"
 };
@@ -541,7 +541,7 @@ Console.WriteLine($"    Invocation valid: {xmlResult} (expected: False — wrong
 // Re-sign with fresh nonce, then verify without any properties (caveat will reject)
 var clientInvocation3 = new Invocation
 {
-    Capability = clientCapability.Id,
+    Capability = InvocationCapability.FromCapability(clientCapability),
     CapabilityAction = "write",
     InvocationTarget = "https://api.example.com/v1/records"
 };
@@ -626,7 +626,7 @@ Console.WriteLine($"RDFC-1.0 Chain Valid: {rdfcChainValid}");
 // --- Invoke and verify using RDFC-1.0 ---
 var rdfcInvocation = new Invocation
 {
-    Capability = rdfcDelegated.Id,
+    Capability = InvocationCapability.FromCapability(rdfcDelegated),
     CapabilityAction = "read",
     InvocationTarget = "https://storage.example.com/rdfc-documents"
 };

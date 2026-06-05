@@ -57,7 +57,7 @@ public class VerificationServiceReplayTests
 
         var invocation = new Invocation
         {
-            Capability = delegated.Id,
+            Capability = InvocationCapability.FromCapability(delegated),
             CapabilityAction = "read",
             InvocationTarget = "https://example.com/resource"
         };
@@ -114,7 +114,7 @@ public class VerificationServiceReplayTests
 
         var inv1 = new Invocation
         {
-            Capability = delegated.Id,
+            Capability = InvocationCapability.FromCapability(delegated),
             CapabilityAction = "read",
             InvocationTarget = "https://example.com/resource"
         };
@@ -122,7 +122,7 @@ public class VerificationServiceReplayTests
 
         var inv2 = new Invocation
         {
-            Capability = delegated.Id,
+            Capability = InvocationCapability.FromCapability(delegated),
             CapabilityAction = "read",
             InvocationTarget = "https://example.com/resource"
         };

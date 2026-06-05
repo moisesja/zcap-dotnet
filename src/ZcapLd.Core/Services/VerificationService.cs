@@ -482,18 +482,38 @@ public class VerificationService : IVerificationService
             if (invocation.Proof == null || invocation.Proof.ProofPurpose != Proof.CapabilityInvocationPurpose)
                 return false;
 
-            // 2a. Invocation MUST reference the capability being verified
-            if (!string.Equals(invocation.Capability, capability.Id, StringComparison.Ordinal))
+            // 2a. The invocation MUST reference the capability being verified, in the spec-defined
+            // shape (Issue #51): a root invocation carries the root zcap id STRING; a delegated DI
+            // invocation MUST embed the FULL delegated zcap object. Strict spec mode — a delegated
+            // invocation that supplies only an id string is rejected: the verifier requires the
+            // embedded authority rather than dereferencing the delegated zcap by id.
+            var invocationCapability = invocation.Capability;
+            if (!string.Equals(invocationCapability.CapabilityId, capability.Id, StringComparison.Ordinal))
                 return false;
 
-            // 2b. Proof payload fields MUST be semantically consistent with invocation fields.
-            // Proof.Capability is object?: after a JSON round-trip it is a JsonElement, not a
-            // CLR string, so normalize via TryExtractStringValue rather than an `as string` cast
-            // (which would yield null and reject every deserialized invocation — issue #58).
-            var proofCapabilityId = invocation.Proof.Capability is { } proofCapability
-                ? TryExtractStringValue(proofCapability)
-                : null;
-            if (!string.Equals(proofCapabilityId, invocation.Capability, StringComparison.Ordinal) ||
+            if (string.IsNullOrEmpty(capability.ParentCapability))
+            {
+                // Root invocation: capability MUST be the bare root id string.
+                if (!invocationCapability.IsRootReference)
+                    return false;
+            }
+            else
+            {
+                // Delegated DI invocation: capability MUST be the full embedded delegated zcap, whose
+                // id binds it to the capability being verified (checked above via CapabilityId). The
+                // embedded object's own delegation proof/chain is verified by the chain walk in step 1,
+                // which the caller drives from this same delegated zcap.
+                if (invocationCapability.EmbeddedCapability is null)
+                    return false;
+            }
+
+            // 2b. Proof payload fields MUST be semantically consistent with the invocation body: the
+            // proof's signed `capability` MUST reference the same id in the same shape (root id string
+            // vs embedded object) as the invocation, and the action/target MUST match.
+            var proofCapability = invocation.Proof.Capability;
+            if (proofCapability is null ||
+                !string.Equals(proofCapability.CapabilityId, invocationCapability.CapabilityId, StringComparison.Ordinal) ||
+                proofCapability.IsRootReference != invocationCapability.IsRootReference ||
                 !string.Equals(invocation.Proof.CapabilityAction, invocation.CapabilityAction, StringComparison.Ordinal) ||
                 !string.Equals(invocation.Proof.InvocationTarget, invocation.InvocationTarget, StringComparison.Ordinal))
                 return false;
@@ -1313,16 +1333,15 @@ public class VerificationService : IVerificationService
                 return false;
             if (signedRevocation.CapabilityAction != Invocation.RevokeAction)
                 return false;
-            if (!string.Equals(signedRevocation.Capability, capability.Id, StringComparison.Ordinal))
+            // Revocation references the target capability by id (a root-style reference); unlike a
+            // delegated DI invocation it is not required to embed the full zcap (Issue #51 governs the
+            // capabilityInvocation shape, not this control-plane capabilityRevocation action).
+            if (!string.Equals(signedRevocation.Capability.CapabilityId, capability.Id, StringComparison.Ordinal))
                 return false;
 
-            // Proof payload fields MUST be consistent with the invocation body. Proof.Capability is
-            // object?: after a JSON round-trip it is a JsonElement, so normalize via
-            // TryExtractStringValue rather than an `as string` cast (issue #58).
-            var proofCapabilityId = proof.Capability is { } proofCapability
-                ? TryExtractStringValue(proofCapability)
-                : null;
-            if (!string.Equals(proofCapabilityId, signedRevocation.Capability, StringComparison.Ordinal) ||
+            // Proof payload fields MUST be consistent with the invocation body.
+            var proofCapabilityId = proof.Capability?.CapabilityId;
+            if (!string.Equals(proofCapabilityId, signedRevocation.Capability.CapabilityId, StringComparison.Ordinal) ||
                 !string.Equals(proof.CapabilityAction, signedRevocation.CapabilityAction, StringComparison.Ordinal) ||
                 !string.Equals(proof.InvocationTarget, signedRevocation.InvocationTarget, StringComparison.Ordinal))
                 return false;

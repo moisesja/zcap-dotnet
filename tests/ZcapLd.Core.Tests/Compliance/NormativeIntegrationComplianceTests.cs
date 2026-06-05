@@ -292,7 +292,7 @@ public class NormativeIntegrationComplianceTests
 
         var invocation = new Invocation
         {
-            Capability = delegated.Id,
+            Capability = InvocationCapability.FromCapability(delegated),
             CapabilityAction = "read",
             InvocationTarget = delegated.InvocationTarget
         };
