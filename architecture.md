@@ -215,6 +215,16 @@ Library is in-process first. Service methods are interface-driven and can be wra
 
 Implement `IDocumentCanonicalizer` for additional canonicalization methods and register via `DocumentCanonicalizerProvider.Register()` or `AddZcapRdfcCanonicalization()` in ASP.NET DI. Built-in canonicalizers: `JcsDocumentCanonicalizer` (RFC 8785) and `RdfcDocumentCanonicalizer` (W3C RDFC-1.0 via dotNetRdf).
 
+## Dependencies
+
+`ZcapLd.Core` keeps a deliberately small runtime footprint (the library is intended to stay AOT/WASM-friendly per the `wasi-experimental` goal). Direct package references:
+
+- **NetDid.Core** / **NetDid.Method.Key** — W3C-compliant `did:key` creation/resolution, the `IVerificationRelationshipResolver`, and the default crypto provider (Ed25519 via NSec.Cryptography and multibase via NetCid arrive transitively through these).
+- **dotNetRdf.Core** — used only by `RdfcDocumentCanonicalizer` (W3C RDFC-1.0); the default JCS canonicalization path has no RDF dependency.
+- **Microsoft.Extensions.Logging.Abstractions** — added in Issue #64 so `VerificationService` can log the cause when it fails closed. This is the **abstractions** assembly only (it carries no concrete logging implementation): consumers who don't otherwise use `Microsoft.Extensions.*` pull in just the `ILogger` / `NullLogger` types, and the verifier defaults to `NullLogger` (zero output) when no logger is supplied.
+
+`Microsoft.SourceLink.GitHub` is a build-only dependency (`PrivateAssets="All"`) and is not propagated to consumers.
+
 ## Non-Goals and Current Limitations
 
 - dotNetRdf has not passed the W3C RDFC-1.0 conformance test suite (86 test cases); smoke tests verify basic correctness.
