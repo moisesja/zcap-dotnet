@@ -37,6 +37,12 @@ public class VerificationService : IVerificationService
     public static readonly TimeSpan DefaultNonceWindow = TimeSpan.FromMinutes(5);
 
     /// <summary>
+    /// Tolerance for a signed proof's <c>created</c> time being slightly in the future
+    /// (clock skew between signer and verifier) before it is rejected as not-yet-valid. Issue #71.
+    /// </summary>
+    private static readonly TimeSpan FreshnessClockSkew = TimeSpan.FromMinutes(1);
+
+    /// <summary>
     /// Backward-compatible constructor (Ed25519 only). Each instance gets its own process-local
     /// <see cref="InMemoryNonceStore"/>, so replay state is NOT shared across
     /// <see cref="VerificationService"/> instances; in a per-request / multi-instance setup supply a
@@ -576,6 +582,15 @@ public class VerificationService : IVerificationService
                 return VerificationResult.Fail(VerificationOutcome.MalformedCapability,
                     "Invocation proof is missing or does not have the capabilityInvocation proofPurpose.");
 
+            // 2c. Freshness (Issue #71): the signed proof.created must be present and within the
+            // freshness window, bounding replay independently of nonce-store eviction. Runs before the
+            // expensive signature/authorization work. The validated instant is reused for caveat
+            // evaluation in step 7 (InvocationTime), so time-based caveats honour the signed time.
+            var invocationCreatedUtc = GetFreshProofCreatedUtc(invocation.Proof);
+            if (invocationCreatedUtc is null)
+                return VerificationResult.Fail(VerificationOutcome.StaleProof,
+                    "Invocation proof.created is missing, future-dated beyond clock skew, or older than the replay window.");
+
             // 2a. The invocation MUST reference the capability being verified, in the spec-defined
             // shape (Issue #51): a root invocation carries the root zcap id STRING; a delegated DI
             // invocation MUST embed the FULL delegated zcap object. Strict spec mode — a delegated
@@ -645,7 +660,9 @@ public class VerificationService : IVerificationService
             // Reuses the chain built and verified in step 1 (no rebuild).
             var context = new InvocationContext
             {
-                InvocationTime = DateTime.UtcNow,
+                // Use the signed proof.created (validated fresh in step 2c) so time-based caveats
+                // evaluate against the invoker's signed time rather than the verifier's wall clock.
+                InvocationTime = invocationCreatedUtc.Value,
                 RequestedAction = invocation.CapabilityAction,
                 TargetResource = invocation.InvocationTarget
             };
@@ -681,6 +698,29 @@ public class VerificationService : IVerificationService
                 "VerifyInvocationAsync failed closed for invocation {InvocationId}", invocation.Id);
             return VerificationResult.Fail(VerificationOutcome.CouldNotVerify, ex.Message);
         }
+    }
+
+    /// <summary>
+    /// Validates a signed invocation/revocation proof's <c>created</c> freshness (Issue #71): it must be
+    /// present and parseable, not future-dated beyond <see cref="FreshnessClockSkew"/>, and no older than
+    /// <see cref="_nonceWindow"/>. Reusing the nonce window as the staleness bound gives the invariant
+    /// "anything still evictable from the nonce store is already too stale to pass freshness," so replay is
+    /// bounded even after the nonce entry evicts (or when replay protection is the no-op opt-out). Returns
+    /// the parsed UTC instant on success; <c>null</c> means the caller must fail closed.
+    /// </summary>
+    private DateTime? GetFreshProofCreatedUtc(Proof proof)
+    {
+        var createdAt = proof.CreatedAt; // ZcapTimestamps.ParseOrNull(Created); null if missing/unparseable
+        if (createdAt is null)
+            return null;
+
+        var nowUtc = DateTime.UtcNow;
+        if (createdAt.Value > nowUtc + FreshnessClockSkew)
+            return null; // future-dated beyond clock skew
+        if (nowUtc - createdAt.Value > _nonceWindow)
+            return null; // older than the replay window
+
+        return createdAt;
     }
 
     /// <summary>
@@ -1455,6 +1495,10 @@ public class VerificationService : IVerificationService
             var proof = signedRevocation.Proof;
             // Must be a revocation-purpose proof carrying the revoke action, bound to THIS capability.
             if (proof is null || proof.ProofPurpose != Proof.CapabilityRevocationPurpose)
+                return false;
+            // Freshness (Issue #71): same created-window gate as the invocation path, so a captured
+            // signed revocation cannot be replayed after its nonce entry evicts.
+            if (GetFreshProofCreatedUtc(proof) is null)
                 return false;
             if (signedRevocation.CapabilityAction != Invocation.RevokeAction)
                 return false;

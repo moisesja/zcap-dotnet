@@ -57,6 +57,13 @@ public enum VerificationOutcome
     /// <summary>The invocation nonce has already been seen within the replay window — a replay.</summary>
     Replayed,
 
+    /// <summary>
+    /// The invocation/revocation proof's <c>created</c> timestamp failed freshness (Issue #71): it is
+    /// missing/unparseable, in the future beyond the allowed clock skew, or older than the replay
+    /// window. Bounds replay independently of nonce-store eviction.
+    /// </summary>
+    StaleProof,
+
     /// <summary>The requested invocation target is not permitted by the capability's <c>invocationTarget</c>.</summary>
     InvalidTarget,
 
