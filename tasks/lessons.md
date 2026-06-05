@@ -68,3 +68,30 @@
 - **User correction (#71 freshness):** my approved plan listed delegation-proof `created` freshness under "Out of scope / notes" as a passive comment. The user rejected the plan: "Either implement it or create a detailed github issue. We need to keep track or fix. Not just let it linger." **Rule: a gap you discover during a fix has exactly two honest dispositions — fix it now, or file a tracked issue (with enough detail to act on later). A bullet in a plan file is neither; it evaporates when the PR merges.** I filed #99 with the distinct semantics spelled out and referenced it from the PR/CHANGELOG/AGENTS note. Offer the choice (fix-now vs track) via `AskUserQuestion` rather than deciding unilaterally.
 - **Related-but-different ≠ same fix.** Reusing #71's invocation freshness helper for delegation proofs would have been a *bug*: invocations are ephemeral (staleness lower-bound = `now - created > nonceWindow` is correct), but delegation proofs are **durable** (a months-old capability is valid until `expires`) — the same staleness bound would reject every old capability. Surfacing that distinction is what made the "track it" decision correct and gave #99 real content. When tempted to "apply the same check over there," first prove the semantics actually match.
 - **The sibling-refactor trap fired AGAIN (4th data point).** Research ran against local `main` (28a6d2d); `origin/main` had since merged **#98/#70** (structured `VerificationResult`), which rewrote `VerifyInvocationCoreAsync` from `return false` to `return VerificationResult.Fail(outcome, …)`. My plan's `return false` snippets were stale. Caught it by re-reading the target method post-branch (the standing rule held) and adapting: the freshness gate now returns `VerificationResult.Fail(VerificationOutcome.StaleProof, …)` and I added a precise `StaleProof` enum member rather than overloading `Replayed`. **Reinforced rule: fetch FIRST, then research against `origin/main` — or at minimum re-validate every research coordinate against the post-fetch file before editing.** Revocation stayed `bool` (control-plane), so its gate is a plain `return false`; match each path's existing return convention.
+
+## 2026-06-05 (issue #74) — Ablation can give a FALSE PASS through a stale linked DLL
+- **Issue #74 (no correction — self-caught):** proving the new regression guard by ablation (revert the
+  fix, expect the test to fail) initially showed the test **still passing** on the reverted code. The
+  ablation lesson from earlier today said "watch it go red" — it stayed green, and I almost trusted it.
+- **Mechanism — `--no-build` + rebuilding only the library links a stale dependency copy.** I edited
+  `VerificationService` back to culture-sensitive, ran `dotnet build src/ZcapLd.Core/...` (library only),
+  then `dotnet test --no-build`. The test project's `bin/.../ZcapLd.Core.dll` is a **copy** made at the
+  test project's last build (which had the fix); `--no-build` skips the copy, so the test ran against the
+  **stale fixed** Core, not my reverted source. False green. Same family as the standing "`--no-build`
+  runs the STALE binary" note, but a sharper form: it's the **transitively-referenced** DLL that's stale,
+  even though I *did* rebuild (just the wrong project).
+- **Rule — for ablation, rebuild the TEST project (or omit `--no-build` entirely) so it re-copies the
+  reverted dependency.** Verify the source is actually reverted in the binary under test before believing
+  a PASS/FAIL. When a deny/throw test refuses to go red under ablation, suspect a stale linked artifact
+  **before** concluding the test is wrong — confirm with an out-of-band probe.
+- **Probe the runtime claim out-of-band when a test's premise is platform-dependent.** Culture-sensitive
+  ignorable-char behavior is ICU/locale-specific, so I wrote a throwaway `dotnet run app.cs` (file-based
+  app) asserting `cap.StartsWith(cap + "­")` is culture=`true`/ordinal=`false` and that the culture
+  path's `Substring` throws. That confirmed the divergence is real on this platform **independently** of
+  the xUnit harness — which is what exposed the stale-DLL false green as a harness artifact, not a real
+  "bug doesn't reproduce here."
+- **Fail-closed callers make black-box tests blind — test the unit.** Both `IsValidInvocationTarget`
+  callers catch → `false`, so the bug (throw) and the fix (clean `false`) are indistinguishable through
+  the public bool API. Promoting the helper `private`→`internal` (repo already had
+  `InternalsVisibleTo`) to assert "returns false WITHOUT throwing" is what gives the guard teeth. When a
+  bug's only observable difference is swallowed by a catch, push the assertion below the catch.

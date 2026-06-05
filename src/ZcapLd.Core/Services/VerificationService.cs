@@ -1198,7 +1198,9 @@ public class VerificationService : IVerificationService
     /// Per spec: suffix MUST start with slash or question mark if no query exists,
     /// or ampersand when the capability target already contains a query.
     /// </summary>
-    private bool IsValidInvocationTarget(string invocationTarget, string capabilityTarget)
+    /// <remarks>Internal (not private) so the ordinal prefix matching can be unit-tested
+    /// directly; the fail-closed call sites make a black-box test indistinguishable (Issue #74).</remarks>
+    internal bool IsValidInvocationTarget(string invocationTarget, string capabilityTarget)
     {
         if (string.IsNullOrEmpty(invocationTarget) || string.IsNullOrEmpty(capabilityTarget))
             return false;
@@ -1207,8 +1209,12 @@ public class VerificationService : IVerificationService
         if (invocationTarget == capabilityTarget)
             return true;
 
-        // Check if invocationTarget is a valid prefix extension
-        if (invocationTarget.StartsWith(capabilityTarget))
+        // Check if invocationTarget is a valid prefix extension.
+        // Ordinal comparison keeps this consistent with the ordinal Substring index math
+        // below (and the ordinal `==`/char checks around it); a culture-sensitive overload
+        // can treat ignorable Unicode code points as zero-width, disagreeing on length and
+        // throwing ArgumentOutOfRangeException in the subsequent Substring (Issue #74).
+        if (invocationTarget.StartsWith(capabilityTarget, StringComparison.Ordinal))
         {
             var suffix = invocationTarget.Substring(capabilityTarget.Length);
 
