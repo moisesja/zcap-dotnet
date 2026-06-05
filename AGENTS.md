@@ -135,6 +135,7 @@ dotnet run --project examples/ZcapLd.Examples                          # Run con
 
 - Use subagents liberally to keep main context window clean
 - Offload research, exploration, and parallel analysis to subagents
+- Always use adverserial agents to attempt to exploit the code that is being generated. The adverserial agents must report in detail about any findings
 - For complex problems, throw more compute at it via subagents
 - One task per subagent for focused execution
 
