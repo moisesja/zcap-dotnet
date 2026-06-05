@@ -40,6 +40,18 @@ public class ControllerDocumentAuthorizationTests
         _capabilityService = new CapabilityService(_signingService);
     }
 
+    // Creates a root and registers it with the in-memory resolver so the verifier (which auto-detects
+    // _didProvider as an IRootCapabilityResolver) can resolve the root that spec-exact chains reference
+    // by id only (Issue #50).
+    private async Task<Capability> CreateAndRegisterRootAsync(
+        ControllerSet controller,
+        string invocationTarget,
+        string[]? allowedActions = null,
+        DateTime? expires = null,
+        Caveat[]? caveats = null)
+        => _didProvider.RegisterRoot(
+            await _capabilityService.CreateRootCapabilityAsync(controller, invocationTarget, allowedActions, expires, caveats));
+
     private VerificationService BuildVerifier(
         IVerificationRelationshipResolver relationshipResolver,
         ILogger<VerificationService>? logger = null) =>
@@ -72,7 +84,7 @@ public class ControllerDocumentAuthorizationTests
     public async Task RootInvocation_ResolverAuthorizesForInvocation_Succeeds()
     {
         var alice = _didProvider.GenerateDidKey();
-        var root = await _capabilityService.CreateRootCapabilityAsync(alice, Target, new[] { "read" });
+        var root = await CreateAndRegisterRootAsync(alice, Target, new[] { "read" });
         var resolver = new RecordingRelationshipResolver((_, _, _) => AuthorizationDecision.Authorized);
         var verifier = BuildVerifier(resolver);
 
@@ -91,7 +103,7 @@ public class ControllerDocumentAuthorizationTests
     public async Task RootInvocation_ResolverDenies_Fails()
     {
         var alice = _didProvider.GenerateDidKey();
-        var root = await _capabilityService.CreateRootCapabilityAsync(alice, Target, new[] { "read" });
+        var root = await CreateAndRegisterRootAsync(alice, Target, new[] { "read" });
         var verifier = BuildVerifier(new RecordingRelationshipResolver((_, _, _) => AuthorizationDecision.NotAuthorized));
 
         var invocation = await SignedInvocationAsync(root, alice, "read");
@@ -106,7 +118,7 @@ public class ControllerDocumentAuthorizationTests
         // controller is the genuine infrastructure/transient case: it fails closed AND logs at Warning
         // so an operator sees it (Issue #64). The Debug (attacker-drivable) case is covered separately.
         var alice = _didProvider.GenerateDidKey();
-        var root = await _capabilityService.CreateRootCapabilityAsync(alice, Target, new[] { "read" });
+        var root = await CreateAndRegisterRootAsync(alice, Target, new[] { "read" });
         var logger = new CapturingLogger<VerificationService>();
         var verifier = BuildVerifier(
             new RecordingRelationshipResolver(
@@ -128,7 +140,7 @@ public class ControllerDocumentAuthorizationTests
     {
         var alice = _didProvider.GenerateDidKey();
         var bob = _didProvider.GenerateDidKey();
-        var root = await _capabilityService.CreateRootCapabilityAsync(new[] { alice, bob }, Target, new[] { "read" });
+        var root = await CreateAndRegisterRootAsync(new[] { alice, bob }, Target, new[] { "read" });
 
         // Only the SECOND controller authorizes; OR-semantics must still succeed.
         var resolver = new RecordingRelationshipResolver((controller, _, _) =>
@@ -146,7 +158,7 @@ public class ControllerDocumentAuthorizationTests
     {
         var alice = _didProvider.GenerateDidKey();
         var carol = _didProvider.GenerateDidKey();
-        var root = await _capabilityService.CreateRootCapabilityAsync(alice, Target, new[] { "read" });
+        var root = await CreateAndRegisterRootAsync(alice, Target, new[] { "read" });
         var delegated = await _capabilityService.DelegateCapabilityAsync(
             root, carol, new[] { "read" }, expires: DateTime.UtcNow.AddDays(1), signerDid: alice);
 
@@ -181,7 +193,7 @@ public class ControllerDocumentAuthorizationTests
         var verifier = BuildVerifier(new DefaultVerificationRelationshipResolver(
             new StaticDidDocumentResolver((controller, controllerDoc))));
 
-        var root = await _capabilityService.CreateRootCapabilityAsync(controller, Target, new[] { "read" });
+        var root = await CreateAndRegisterRootAsync(controller, Target, new[] { "read" });
         var invocation = await SignedInvocationAsync(root, alice, "read");
 
         (await verifier.VerifyInvocationAsync(invocation, root)).Should().BeTrue(
@@ -207,7 +219,7 @@ public class ControllerDocumentAuthorizationTests
         var verifier = BuildVerifier(new DefaultVerificationRelationshipResolver(
             new StaticDidDocumentResolver((controller, controllerDoc))));
 
-        var root = await _capabilityService.CreateRootCapabilityAsync(controller, Target, new[] { "read" });
+        var root = await CreateAndRegisterRootAsync(controller, Target, new[] { "read" });
         var invocation = await SignedInvocationAsync(root, alice, "read");
 
         (await verifier.VerifyInvocationAsync(invocation, root)).Should().BeFalse(
@@ -224,7 +236,7 @@ public class ControllerDocumentAuthorizationTests
         // CreateDefaultRelationshipResolver() (a did:key DidKeyMethod). A real did:key controller must
         // authorize end-to-end through it — confirming did:key lists its key under capabilityInvocation.
         var alice = _didProvider.GenerateDidKey();
-        var root = await _capabilityService.CreateRootCapabilityAsync(alice, Target, new[] { "read" });
+        var root = await CreateAndRegisterRootAsync(alice, Target, new[] { "read" });
 
         // KeyOnlyDidResolver resolves keys (for the signature) but does not implement
         // IVerificationRelationshipResolver, so the built-in did:key default handles authorization.
@@ -256,7 +268,7 @@ public class ControllerDocumentAuthorizationTests
         var verifier = BuildVerifier(
             new DefaultVerificationRelationshipResolver(new StaticDidDocumentResolver()), logger);
 
-        var root = await _capabilityService.CreateRootCapabilityAsync(controller, Target, new[] { "read" });
+        var root = await CreateAndRegisterRootAsync(controller, Target, new[] { "read" });
         var invocation = await SignedInvocationAsync(root, alice, "read");
 
         (await verifier.VerifyInvocationAsync(invocation, root)).Should().BeFalse("controller is unresolvable");

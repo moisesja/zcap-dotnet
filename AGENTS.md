@@ -41,13 +41,14 @@ zcap-dotnet/
 │   │   │                               #   RevocationRecord, RevocationRequest
 │   │   ├── Services/                   # ICapabilityService, ISigningService, IVerificationService,
 │   │   │                               #   ICaveatProcessor, IDidResolver, IDidSigner, IRevocationService,
-│   │   │                               #   IRevocationStore, INonceStore, IValidWhileTrueHandler + implementations
+│   │   │                               #   IRevocationStore, INonceStore, IValidWhileTrueHandler,
+│   │   │                               #   IRootCapabilityResolver (+ InMemoryRootCapabilityResolver) + implementations
 │   │   └── Exceptions/                 # ZcapLdExceptions
 │   └── ZcapLd.AspNetCore/             # ASP.NET adapter (NuGet package)
 │       ├── DependencyInjection/        # AddZcapServices(), AddZcapDidSigner<T>(), AddZcapRevocationSupport(),
 │       │                               #   AddZcapReplayProtection(), AddZcapCryptoSuite<T>(),
 │       │                               #   AddZcapDidResolver<T>(), AddZcapValidWhileTrueSupport(),
-│       │                               #   AddZcapCaveatType<T>()
+│       │                               #   AddZcapCaveatType<T>(), AddZcapRootCapabilityResolver<T>()
 │       ├── Endpoints/                  # MapZcapRevocationEndpoints()
 │       ├── Services/                   # HttpValidWhileTrueHandler
 │       └── Contracts/                  # RevokeCapabilityHttpRequest, RevocationStatusHttpResponse
@@ -90,12 +91,14 @@ dotnet run --project examples/ZcapLd.Examples                          # Run con
 - **DID packages**: [NetDid.Core](https://www.nuget.org/packages/NetDid.Core) + [NetDid.Method.Key](https://www.nuget.org/packages/NetDid.Method.Key) for W3C-compliant did:key creation/resolution; multibase via [NetCid](https://www.nuget.org/packages/NetCid)
 - **Signing**: `SigningService` delegates to `IDidSigner`; resolves verification methods via `IDidResolver` and context URLs via `ICryptoSuiteProvider`
 - **Verification**: `VerificationService` dispatches to correct `ICryptoSuite` by proof type; enforces chain validity, attenuation, caveats, revocation, and replay protection
+- **Spec-exact `capabilityChain` (#50)**: root referenced by id only (never embedded); first-level chain is exactly `[rootId]`; deeper chains are `[rootId, …ancestorIds, {immediateParent}]`. The verifier rejects non-spec shapes (embedded root, duplicate ids, parent both id+embedded, wrong/missing embedded parent)
+- **Root resolution (#50)**: spec-exact chains reference the root by id, so the verifier obtains it via an explicit-root verify/revoke overload, else an `IRootCapabilityResolver` (`InMemoryRootCapabilityResolver` for dev; an `IDidResolver` that also implements it is auto-detected), else fails closed. **Breaking (3.0.0)**: wire format no longer embeds the root, so pre-3.0.0 capabilities must be re-delegated
 - **Revocation**: `IRevocationService` / `IRevocationStore` abstractions; `InMemoryRevocationStore` for dev; ASP.NET endpoints via `ZcapLd.AspNetCore`
 - **Replay protection**: `INonceStore` interface; `InMemoryNonceStore` (default), `NullNonceStore` (opt-out)
 - **Canonicalization**: `IDocumentCanonicalizer` interface with `JcsDocumentCanonicalizer` (RFC 8785) and `RdfcDocumentCanonicalizer` (W3C RDFC-1.0 via dotNetRdf); suite-specific via `ICryptoSuite.CanonicalizationMethod`
 - **ValidWhileTrue**: `ValidWhileTrueCaveat` model + `IValidWhileTrueHandler` interface in Core; `HttpValidWhileTrueHandler` in AspNetCore; `AddZcapValidWhileTrueSupport()` for DI; fail-closed when no handler configured
 - **Caveat polymorphic serialization**: `CaveatTypeRegistry.Default` (in-library types pre-registered) + `CaveatJsonConverter` wired into `ZcapJsonOptions.Default` — single source of truth for sign-time + verifier-time JSON. Custom caveats must call `CaveatTypeRegistry.Default.Register<T>(disc)` (or `AddZcapCaveatType<T>(disc)`) before any signing/verification call, otherwise cross-language wire bodies fail to deserialize.
-- **ASP.NET integration**: `AddZcapServices()` registers all core services; `AddZcapDidSigner<T>()` for signer; `AddZcapRevocationSupport()` and `MapZcapRevocationEndpoints()` for revocation; `AddZcapValidWhileTrueSupport()` for remote revocation checking; `AddZcapCaveatType<T>(disc)` for third-party caveats; `AddZcapRdfcCanonicalization()` to enable RDFC-1.0
+- **ASP.NET integration**: `AddZcapServices()` registers all core services; `AddZcapDidSigner<T>()` for signer; `AddZcapRootCapabilityResolver<T>()` for root resolution (delegated verify/revoke); `AddZcapRevocationSupport()` and `MapZcapRevocationEndpoints()` for revocation; `AddZcapValidWhileTrueSupport()` for remote revocation checking; `AddZcapCaveatType<T>(disc)` for third-party caveats; `AddZcapRdfcCanonicalization()` to enable RDFC-1.0
 
 ## Workflow Orchestration
 

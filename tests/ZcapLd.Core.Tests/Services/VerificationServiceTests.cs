@@ -29,13 +29,25 @@ public class VerificationServiceTests
         _capabilityService = new CapabilityService(_signingService);
     }
 
+    // Creates a root capability and registers it with the in-memory resolver so the verifier (which
+    // auto-detects _didProvider as an IRootCapabilityResolver) can resolve the root that spec-exact
+    // chains reference by id only — first-level chains are [rootId] with the root never embedded (Issue #50).
+    private async Task<Capability> CreateAndRegisterRootAsync(
+        ControllerSet controller,
+        string invocationTarget,
+        string[]? allowedActions = null,
+        DateTime? expires = null,
+        Caveat[]? caveats = null)
+        => _didProvider.RegisterRoot(
+            await _capabilityService.CreateRootCapabilityAsync(controller, invocationTarget, allowedActions, expires, caveats));
+
     #region Capability Proof Verification Tests
 
     [Fact]
     public async Task VerifyCapabilityProof_RootCapability_ShouldReturnTrue()
     {
         // Arrange
-        var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
+        var rootCapability = await CreateAndRegisterRootAsync(
             "did:key:z6MkRoot",
             "https://example.com/resource",
             new[] { "read" });
@@ -54,7 +66,7 @@ public class VerificationServiceTests
         var parentDid = "did:key:z6MkParent";
         _didProvider.GenerateAndRegisterKeyPair(parentDid);
 
-        var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
+        var rootCapability = await CreateAndRegisterRootAsync(
             parentDid,
             "https://example.com/resource",
             new[] { "read", "write" });
@@ -82,7 +94,7 @@ public class VerificationServiceTests
         var controllerDid = "did:key:z6MkKeyTypeBinding";
         _didProvider.GenerateAndRegisterKeyPair(controllerDid);
 
-        var root = await _capabilityService.CreateRootCapabilityAsync(
+        var root = await CreateAndRegisterRootAsync(
             controllerDid, "https://example.com/resource", new[] { "read" });
 
         var invocation = new Invocation
@@ -115,7 +127,7 @@ public class VerificationServiceTests
         var delegatorDid = "did:key:z6MkKeyTypeBindingDelegator";
         _didProvider.GenerateAndRegisterKeyPair(delegatorDid);
 
-        var root = await _capabilityService.CreateRootCapabilityAsync(
+        var root = await CreateAndRegisterRootAsync(
             delegatorDid, "https://example.com/resource", new[] { "read" });
 
         // The delegation proof is signed by the delegator (root controller); the grantee need not
@@ -244,7 +256,7 @@ public class VerificationServiceTests
 
         var rootDid = "did:key:z6MkWarnBranchRoot";
         _didProvider.GenerateAndRegisterKeyPair(rootDid);
-        var root = await _capabilityService.CreateRootCapabilityAsync(
+        var root = await CreateAndRegisterRootAsync(
             rootDid, "https://example.com/resource", new[] { "read" });
 
         // The chain builds fine; the per-link revocation check then hits the throwing store, so the
@@ -278,7 +290,7 @@ public class VerificationServiceTests
 
         var controllerDid = "did:key:z6MkEmptyProofValue";
         _didProvider.GenerateAndRegisterKeyPair(controllerDid);
-        var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
+        var rootCapability = await CreateAndRegisterRootAsync(
             controllerDid, "https://example.com/resource", new[] { "read" });
 
         var invocation = new Invocation
@@ -315,7 +327,7 @@ public class VerificationServiceTests
         _didProvider.GenerateAndRegisterKeyPair(midDid);
         _didProvider.GenerateAndRegisterKeyPair(leafDid);
 
-        var root = await _capabilityService.CreateRootCapabilityAsync(
+        var root = await CreateAndRegisterRootAsync(
             rootDid, "https://example.com/resource", new[] { "read", "write" });
         var mid = await _capabilityService.DelegateCapabilityAsync(
             root, midDid, new[] { "read" }, DateTime.UtcNow.AddDays(20));
@@ -349,7 +361,7 @@ public class VerificationServiceTests
         _didProvider.GenerateAndRegisterKeyPair(midDid);
         _didProvider.GenerateAndRegisterKeyPair(leafDid);
 
-        var root = await _capabilityService.CreateRootCapabilityAsync(
+        var root = await CreateAndRegisterRootAsync(
             rootDid, "https://example.com/resource", new[] { "read", "write" });
         var mid = await _capabilityService.DelegateCapabilityAsync(
             root, midDid, new[] { "read" }, DateTime.UtcNow.AddDays(20));
@@ -384,7 +396,7 @@ public class VerificationServiceTests
         _didProvider.GenerateAndRegisterKeyPair(bDid);
         _didProvider.GenerateAndRegisterKeyPair(leafDid);
 
-        var root = await _capabilityService.CreateRootCapabilityAsync(
+        var root = await CreateAndRegisterRootAsync(
             rootDid, "https://example.com/resource", new[] { "read", "write" });
         var a = await _capabilityService.DelegateCapabilityAsync(
             root, aDid, new[] { "read" }, DateTime.UtcNow.AddDays(30));
@@ -410,7 +422,7 @@ public class VerificationServiceTests
         var parentDid = "did:key:z6MkParent";
         _didProvider.GenerateAndRegisterKeyPair(parentDid);
 
-        var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
+        var rootCapability = await CreateAndRegisterRootAsync(
             parentDid,
             "https://example.com/resource",
             new[] { "read", "write" });
@@ -438,7 +450,7 @@ public class VerificationServiceTests
     public async Task VerifyCapabilityProof_RootWithProof_ShouldReturnFalse()
     {
         // Arrange - Create a malformed root capability with a proof
-        var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
+        var rootCapability = await CreateAndRegisterRootAsync(
             "did:key:z6MkRoot",
             "https://example.com/resource",
             new[] { "read" });
@@ -486,7 +498,7 @@ public class VerificationServiceTests
         var parentDid = "did:key:z6MkParent";
         _didProvider.GenerateAndRegisterKeyPair(parentDid);
 
-        var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
+        var rootCapability = await CreateAndRegisterRootAsync(
             parentDid,
             "https://example.com/resource",
             new[] { "read" });
@@ -516,7 +528,7 @@ public class VerificationServiceTests
         _didProvider.GenerateAndRegisterKeyPair(parentDid);
         _didProvider.GenerateAndRegisterKeyPair(attackerDid);
 
-        var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
+        var rootCapability = await CreateAndRegisterRootAsync(
             parentDid,
             "https://example.com/resource",
             new[] { "read", "write" });
@@ -543,7 +555,7 @@ public class VerificationServiceTests
         var parentDid = "did:key:z6MkParent";
         _didProvider.GenerateAndRegisterKeyPair(parentDid);
 
-        var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
+        var rootCapability = await CreateAndRegisterRootAsync(
             parentDid,
             "https://example.com/resource",
             new[] { "read", "write" });
@@ -574,7 +586,7 @@ public class VerificationServiceTests
         var parentDid = "did:key:z6MkParent";
         _didProvider.GenerateAndRegisterKeyPair(parentDid);
 
-        var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
+        var rootCapability = await CreateAndRegisterRootAsync(
             parentDid,
             "https://example.com/resource",
             new[] { "read", "write" });
@@ -593,15 +605,18 @@ public class VerificationServiceTests
     }
 
     [Fact]
-    public async Task VerifyCapabilityChain_SelfSignedDelegationWithoutEmbeddedParent_ShouldReturnFalse()
+    public async Task VerifyCapabilityChain_FirstLevelDelegationNotSignedByRootController_ShouldReturnFalse()
     {
-        // Arrange
+        // Arrange. A first-level delegation's spec-exact chain is [rootId] (root by id only, no embedded
+        // object) — so the verifier resolves the root and authorizes the delegation against the ROOT's
+        // controller. Here the child self-signs its own delegation from a root it does not control, so
+        // authorization MUST fail even though the chain shape is now valid (Issue #50).
         var rootDid = "did:key:z6MkRoot";
         var childDid = "did:key:z6MkChild";
         _didProvider.GenerateAndRegisterKeyPair(rootDid);
         _didProvider.GenerateAndRegisterKeyPair(childDid);
 
-        var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
+        var rootCapability = await CreateAndRegisterRootAsync(
             rootDid,
             "https://example.com/resource",
             new[] { "read", "write" });
@@ -618,7 +633,7 @@ public class VerificationServiceTests
             Expires = ZcapTimestamps.Format(DateTime.UtcNow.AddDays(5))
         };
 
-        // Malicious chain omits the embedded immediate parent object.
+        // Spec-exact first-level chain, but self-signed by the child rather than the root's controller.
         delegatedCapability.Proof = await _signingService.SignCapabilityAsync(
             delegatedCapability,
             childDid,
@@ -628,7 +643,7 @@ public class VerificationServiceTests
         // Act
         var result = await _verificationService.VerifyCapabilityChainAsync(delegatedCapability);
 
-        // Assert
+        // Assert — rejected: the first delegation is not authorized by the root's controller.
         result.Should().BeFalse();
     }
 
@@ -645,7 +660,7 @@ public class VerificationServiceTests
         _didProvider.GenerateAndRegisterKeyPair(controller3);
 
         // Create root
-        var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
+        var rootCapability = await CreateAndRegisterRootAsync(
             controller1,
             "https://example.com/resource",
             new[] { "read", "write", "delete" });
@@ -683,7 +698,7 @@ public class VerificationServiceTests
             _didProvider.GenerateAndRegisterKeyPair(did);
         }
 
-        var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
+        var rootCapability = await CreateAndRegisterRootAsync(
             controllers[0],
             "https://example.com/resource",
             new[] { "read" });
@@ -712,7 +727,7 @@ public class VerificationServiceTests
         var parentDid = "did:key:z6MkParent";
         _didProvider.GenerateAndRegisterKeyPair(parentDid);
 
-        var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
+        var rootCapability = await CreateAndRegisterRootAsync(
             parentDid,
             "https://example.com/resource",
             new[] { "read" });
@@ -742,7 +757,7 @@ public class VerificationServiceTests
         var parentDid = "did:key:z6MkParent";
         _didProvider.GenerateAndRegisterKeyPair(parentDid);
 
-        var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
+        var rootCapability = await CreateAndRegisterRootAsync(
             parentDid,
             "https://example.com/resource",
             new[] { "read", "write", "delete" });
@@ -768,7 +783,7 @@ public class VerificationServiceTests
         var parentDid = "did:key:z6MkParent";
         _didProvider.GenerateAndRegisterKeyPair(parentDid);
 
-        var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
+        var rootCapability = await CreateAndRegisterRootAsync(
             parentDid,
             "https://example.com/resource",
             new[] { "read" });
@@ -800,7 +815,7 @@ public class VerificationServiceTests
         var controllerDid = "did:key:z6MkController";
         _didProvider.GenerateAndRegisterKeyPair(controllerDid);
 
-        var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
+        var rootCapability = await CreateAndRegisterRootAsync(
             controllerDid,
             "https://example.com/resource",
             new[] { "read", "write" });
@@ -832,7 +847,7 @@ public class VerificationServiceTests
         var controllerDid = "did:key:z6MkRoundTripController";
         _didProvider.GenerateAndRegisterKeyPair(controllerDid);
 
-        var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
+        var rootCapability = await CreateAndRegisterRootAsync(
             controllerDid,
             "https://example.com/resource",
             new[] { "read", "write" });
@@ -869,7 +884,7 @@ public class VerificationServiceTests
         _didProvider.GenerateAndRegisterKeyPair(rootControllerDid);
         _didProvider.GenerateAndRegisterKeyPair(delegatedControllerDid);
 
-        var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
+        var rootCapability = await CreateAndRegisterRootAsync(
             rootControllerDid,
             "https://example.com/resource",
             new[] { "read", "write" });
@@ -903,7 +918,7 @@ public class VerificationServiceTests
         var controllerDid = "did:key:z6MkController";
         _didProvider.GenerateAndRegisterKeyPair(controllerDid);
 
-        var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
+        var rootCapability = await CreateAndRegisterRootAsync(
             controllerDid,
             "https://example.com/resource",
             new[] { "read", "write" });
@@ -931,7 +946,7 @@ public class VerificationServiceTests
         var controllerDid = "did:key:z6MkController";
         _didProvider.GenerateAndRegisterKeyPair(controllerDid);
 
-        var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
+        var rootCapability = await CreateAndRegisterRootAsync(
             controllerDid,
             "https://example.com/resource",
             new[] { "read" });
@@ -959,7 +974,7 @@ public class VerificationServiceTests
         var controllerDid = "did:key:z6MkController";
         _didProvider.GenerateAndRegisterKeyPair(controllerDid);
 
-        var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
+        var rootCapability = await CreateAndRegisterRootAsync(
             controllerDid,
             "https://example.com/resource",
             new[] { "read" });
@@ -988,7 +1003,7 @@ public class VerificationServiceTests
         var controllerDid = "did:key:z6MkController";
         _didProvider.GenerateAndRegisterKeyPair(controllerDid);
 
-        var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
+        var rootCapability = await CreateAndRegisterRootAsync(
             controllerDid,
             "https://example.com/resource",
             new[] { "read" });
@@ -1015,7 +1030,7 @@ public class VerificationServiceTests
         var controllerDid = "did:key:z6MkController";
         _didProvider.GenerateAndRegisterKeyPair(controllerDid);
 
-        var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
+        var rootCapability = await CreateAndRegisterRootAsync(
             controllerDid,
             "https://example.com/resource",
             new[] { "read" });
@@ -1044,7 +1059,7 @@ public class VerificationServiceTests
         var controllerDid = "did:key:z6MkController";
         _didProvider.GenerateAndRegisterKeyPair(controllerDid);
 
-        var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
+        var rootCapability = await CreateAndRegisterRootAsync(
             controllerDid,
             "https://example.com/resource",
             new[] { "read" });
@@ -1080,7 +1095,7 @@ public class VerificationServiceTests
             Expires = DateTime.UtcNow.AddDays(-1) // Expired
         };
 
-        var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
+        var rootCapability = await CreateAndRegisterRootAsync(
             rootControllerDid,
             "https://example.com/resource",
             new[] { "read" });
@@ -1117,7 +1132,7 @@ public class VerificationServiceTests
 
         var caveat = new ContentTypeCaveat { RequiredContentType = "application/json" };
 
-        var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
+        var rootCapability = await CreateAndRegisterRootAsync(
             controllerDid,
             "https://example.com/resource",
             new[] { "write" });
@@ -1156,7 +1171,7 @@ public class VerificationServiceTests
 
         var caveat = new ContentTypeCaveat { RequiredContentType = "application/json" };
 
-        var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
+        var rootCapability = await CreateAndRegisterRootAsync(
             controllerDid,
             "https://example.com/resource",
             new[] { "write" });
@@ -1193,7 +1208,7 @@ public class VerificationServiceTests
         var controllerDid = "did:key:z6MkController";
         _didProvider.GenerateAndRegisterKeyPair(controllerDid);
 
-        var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
+        var rootCapability = await CreateAndRegisterRootAsync(
             controllerDid,
             "https://example.com/resource",
             new[] { "read" });
@@ -1220,7 +1235,7 @@ public class VerificationServiceTests
         var controllerDid = "did:key:z6MkController";
         _didProvider.GenerateAndRegisterKeyPair(controllerDid);
 
-        var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
+        var rootCapability = await CreateAndRegisterRootAsync(
             controllerDid,
             "https://example.com/resource",
             new[] { "read" });
@@ -1254,7 +1269,7 @@ public class VerificationServiceTests
         _didProvider.GenerateAndRegisterKeyPair(rootControllerDid);
         _didProvider.GenerateAndRegisterKeyPair(delegatedControllerDid);
 
-        var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
+        var rootCapability = await CreateAndRegisterRootAsync(
             rootControllerDid,
             "https://example.com/resource",
             new[] { "read", "write" });
@@ -1285,7 +1300,7 @@ public class VerificationServiceTests
         _didProvider.GenerateAndRegisterKeyPair(rootControllerDid);
         _didProvider.GenerateAndRegisterKeyPair(delegatedControllerDid);
 
-        var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
+        var rootCapability = await CreateAndRegisterRootAsync(
             rootControllerDid,
             "https://example.com/resource",
             new[] { "read", "write" });
@@ -1326,7 +1341,7 @@ public class VerificationServiceTests
         _didProvider.GenerateAndRegisterKeyPair(rootControllerDid);
         _didProvider.GenerateAndRegisterKeyPair(delegatedControllerDid);
 
-        var root = await _capabilityService.CreateRootCapabilityAsync(
+        var root = await CreateAndRegisterRootAsync(
             rootControllerDid, "https://example.com/resource", new[] { "read", "write" });
         var delegated = await _capabilityService.DelegateCapabilityAsync(
             root, delegatedControllerDid, new[] { "read" }, DateTime.UtcNow.AddDays(5));
@@ -1649,7 +1664,7 @@ public class VerificationServiceTests
     public async Task VerifyInvocation_WithNullInvocation_ShouldThrow()
     {
         // Arrange
-        var capability = await _capabilityService.CreateRootCapabilityAsync(
+        var capability = await CreateAndRegisterRootAsync(
             "did:key:z6MkTest",
             "https://example.com/resource",
             new[] { "read" });

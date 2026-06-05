@@ -40,7 +40,7 @@ using ZcapLd.Core.Services;
 
 // Wire up services — in production, replace InMemoryDidProvider with your
 // IDidSigner (HSM/Key Vault) and IDidResolver implementations.
-var didProvider = new InMemoryDidProvider(); // test helper: IDidSigner + IDidResolver
+var didProvider = new InMemoryDidProvider(); // test helper: IDidSigner + IDidResolver + IRootCapabilityResolver
 
 var signingService = new SigningService(didProvider, didProvider);
 var capabilityService = new CapabilityService(signingService);
@@ -60,6 +60,12 @@ var root = await capabilityService.CreateRootCapabilityAsync(
     rootDid,
     "https://api.example.com/resources",
     new[] { "read", "write" });
+
+// A spec-exact delegation chain references the root by id only (never embedded), so the verifier
+// resolves it via an IRootCapabilityResolver. The test provider implements one — register the root
+// so first-level (and deeper) verification can authorize against it. Alternatively, pass the root
+// explicitly: verificationService.VerifyInvocationAsync(invocation, delegated, root, null).
+didProvider.RegisterRoot(root);
 
 // Delegated capability (restrictions live here)
 var delegated = await capabilityService.DelegateCapabilityAsync(
@@ -115,6 +121,37 @@ var delegatedByBob = await capabilityService.DelegateCapabilityAsync(
     DateTime.UtcNow.AddDays(7),
     signerDid: "did:key:zBob");                 // must be one of `shared`'s controllers
 ```
+
+## Delegation Chains & Root Resolution
+
+The delegation proof's `capabilityChain` follows the W3C ZCAP-LD shape **exactly** (Issue #50): the
+root is referenced **by id only** (never embedded), every ancestor is referenced by id, and **only the
+immediate parent** delegated zcap is fully embedded — as the last entry. So:
+
+| Delegation level | `capabilityChain` |
+| --- | --- |
+| First (from root) | `["urn:zcap:root:…"]` |
+| Second | `["urn:zcap:root:…", { …parent embedded… }]` |
+| Third | `["urn:zcap:root:…", "urn:uuid:first…", { …parent embedded… }]` |
+
+Because the root is by-reference, the verifier needs a way to obtain it to authorize the first
+delegation. Provide it one of two ways:
+
+- **Resolver** — implement `IRootCapabilityResolver` (the resource owner resolves roots from its own
+  store) and pass it to `VerificationService` (or register it in DI with
+  `AddZcapRootCapabilityResolver<T>()`). An `IDidResolver` that *also* implements
+  `IRootCapabilityResolver` is auto-detected. `InMemoryRootCapabilityResolver` is provided for dev.
+- **Explicit root** — call the overloads that take the root directly:
+  `VerifyCapabilityChainAsync(cap, root)`, `VerifyInvocationAsync(invocation, cap, root, props)`,
+  `VerifyCapabilityProofAsync(cap, root)`, `RevokeCapabilityAsync(cap, signedRevocation, root)`.
+
+When neither is available the verifier **fails closed**. The verifier also rejects non-spec chains
+(an embedded root, duplicated ids, a parent referenced both by id and embedded, a wrong/missing
+embedded parent).
+
+> **Breaking change (3.0.0):** the `capabilityChain` wire format changed (it no longer embeds the
+> root), so capabilities signed by earlier versions do not verify and must be re-delegated; and
+> verifying a delegated capability now requires a resolver or an explicit root as described above.
 
 ## Revocation Extensibility
 

@@ -18,11 +18,12 @@ namespace ZcapLd.Examples;
 /// IVerificationRelationshipResolver lets the verifier authorize controllers by resolving
 /// their DID document (capabilityInvocation / capabilityDelegation) — Issue #65.
 /// </summary>
-public class InMemoryDidProvider : IDidSigner, IDidResolver, IVerificationRelationshipResolver
+public class InMemoryDidProvider : IDidSigner, IDidResolver, IVerificationRelationshipResolver, IRootCapabilityResolver
 {
     private static readonly DefaultCryptoProvider Crypto = new();
     private static readonly DefaultKeyGenerator KeyGen = new();
     private readonly ConcurrentDictionary<string, byte[]> _keyStore = new();
+    private readonly ConcurrentDictionary<string, Capability> _rootStore = new(StringComparer.Ordinal);
     private readonly DidKeyResolver _didKeyResolver = new();
 
     public Task<SignatureResult> SignAsync(string did, byte[] data)
@@ -75,5 +76,27 @@ public class InMemoryDidProvider : IDidSigner, IDidResolver, IVerificationRelati
         // Notice that this is unsecured. Make sure to use a secure key management solution in production.
         var kp = KeyGen.Generate(KeyType.Ed25519);
         _keyStore[did] = kp.PrivateKey;
+    }
+
+    /// <summary>
+    /// Registers a root capability so the verifier — which auto-detects this provider as an
+    /// <see cref="IRootCapabilityResolver"/> — can resolve the root a spec-exact delegation chain
+    /// references by id only (Issue #50). Returns the same capability for fluent use. A real verifier
+    /// would resolve roots from its own root-capability store.
+    /// </summary>
+    public Capability RegisterRoot(Capability root)
+    {
+        if (root is not null && !string.IsNullOrEmpty(root.Id))
+            _rootStore[root.Id] = root;
+        return root!;
+    }
+
+    /// <inheritdoc />
+    public Task<Capability?> ResolveRootAsync(string rootCapabilityId)
+    {
+        if (string.IsNullOrEmpty(rootCapabilityId))
+            return Task.FromResult<Capability?>(null);
+
+        return Task.FromResult(_rootStore.TryGetValue(rootCapabilityId, out var root) ? root : null);
     }
 }

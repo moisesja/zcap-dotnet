@@ -21,6 +21,18 @@ public class VerificationServiceReplayTests
         _capabilityService = new CapabilityService(_signingService);
     }
 
+    // Creates a root and registers it with the in-memory resolver so the verifier (which auto-detects
+    // _didProvider as an IRootCapabilityResolver) can resolve the root that spec-exact chains reference
+    // by id only (Issue #50).
+    private async Task<Capability> CreateAndRegisterRootAsync(
+        ControllerSet controller,
+        string invocationTarget,
+        string[]? allowedActions = null,
+        DateTime? expires = null,
+        Caveat[]? caveats = null)
+        => _didProvider.RegisterRoot(
+            await _capabilityService.CreateRootCapabilityAsync(controller, invocationTarget, allowedActions, expires, caveats));
+
     private VerificationService CreateVerificationService(INonceStore nonceStore)
     {
         return new VerificationService(
@@ -37,7 +49,7 @@ public class VerificationServiceReplayTests
         _didProvider.GenerateAndRegisterKeyPair(rootDid);
         _didProvider.GenerateAndRegisterKeyPair(leafDid);
 
-        var root = await _capabilityService.CreateRootCapabilityAsync(
+        var root = await CreateAndRegisterRootAsync(
             rootDid, "https://example.com/resource", new[] { "read" });
 
         var delegated = await _capabilityService.DelegateCapabilityAsync(
@@ -95,7 +107,7 @@ public class VerificationServiceReplayTests
         _didProvider.GenerateAndRegisterKeyPair(rootDid);
         _didProvider.GenerateAndRegisterKeyPair(leafDid);
 
-        var root = await _capabilityService.CreateRootCapabilityAsync(
+        var root = await CreateAndRegisterRootAsync(
             rootDid, "https://example.com/resource", new[] { "read" });
         var delegated = await _capabilityService.DelegateCapabilityAsync(
             root, leafDid, new[] { "read" }, DateTime.UtcNow.AddDays(7));

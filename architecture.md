@@ -32,6 +32,7 @@ Primary assembly: `src/ZcapLd.Core`.
 - `IVerificationService`: verify proof/chain/invocation, resolve keys, revocation API
 - `IDidResolver`: resolve DIDs to public keys (returns `ResolvedKey` with key type); implementations: `DidKeyResolver` (wraps NetDid's `DidKeyMethod`), `CompositeDidResolver`
 - `IDidSigner`: sign data using a DID's private key; no default implementation in core — consumers provide their own
+- `IRootCapabilityResolver`: resolve a root capability by id so the verifier can authorize a spec-exact delegation chain (which references the root by id only — Issue #50); implementations: `InMemoryRootCapabilityResolver` (dev). No default in core — the resource owner resolves roots from its own store. A `VerificationService` also accepts an explicit root on its verify/revoke overloads, and auto-detects an `IDidResolver` that additionally implements this interface.
 - `ICaveatProcessor`: caveat merge/compatibility/evaluation
 - `INonceStore`: pluggable persistence contract for invocation nonce tracking (replay protection); implementations: `InMemoryNonceStore`, `NullNonceStore` (no-op)
 - `IRevocationStore`: pluggable persistence contract for revocation records
@@ -52,7 +53,11 @@ Primary assembly: `src/ZcapLd.Core`.
   - Resolves per-suite JSON-LD context URLs via `ICryptoSuiteProvider`
 - `VerificationService`
   - Verifies delegation proofs using `ICryptoSuiteProvider` to dispatch to the correct algorithm
-  - Verifies capability chains
+  - Verifies capability chains, strictly validating the spec-exact `capabilityChain` shape and rejecting
+    non-spec forms (embedded root, duplicated ids, parent referenced both by id and embedded, wrong/missing
+    embedded parent) — Issue #50
+  - Obtains the root (referenced by id only) via an explicit-root overload, else an
+    `IRootCapabilityResolver`, else fails closed
   - Verifies invocation proof + action/target + caveats
   - Enforces invocation replay protection via `INonceStore`
   - Resolves public keys via `IDidResolver` and revocation checks
@@ -118,10 +123,18 @@ Primary assembly: `src/ZcapLd.Core`.
 
 ## Capability Chain Semantics
 
-- Root capability is the trust anchor (`proof == null`).
-- First-level delegation chain can contain only the root capability ID.
-- Deeper delegations carry root ID first and embed immediate parent capability object last.
-- Verification traverses chain root→leaf and enforces attenuation at each hop.
+- Root capability is the trust anchor (`proof == null`), referenced in `capabilityChain` **by id only**
+  and never embedded.
+- First-level delegation chain is **exactly** `[rootId]`.
+- Deeper delegations carry the root id first, then each ancestor **by id**, and embed **only** the
+  immediate parent capability object as the last entry (e.g. `[rootId, firstId, {parent}]`).
+- Generation (`CapabilityService.BuildCapabilityChain`) emits this minimal shape; verification
+  (`VerificationService`) strictly validates it and **rejects** non-spec forms — an embedded root,
+  duplicated ids, a parent referenced both by id and embedded, or a wrong/missing embedded parent
+  (Issue #50).
+- Because the root is by-reference, verification obtains it via an explicit-root overload or an
+  `IRootCapabilityResolver` (else fails closed), then traverses the chain root→leaf and enforces
+  attenuation, expiry, caveats, and revocation at each hop.
 
 ## Key Management Model
 

@@ -26,7 +26,7 @@ Console.WriteLine("--------------------------------------");
 var aliceDid = "did:key:z6MkAlice";
 didProvider.GenerateAndRegisterKeyPair(aliceDid);
 
-var rootCapability = await capabilityService.CreateRootCapabilityAsync(
+var rootCapability = await CreateAndRegisterRoot(
     controller: aliceDid,
 
     // The invocation target is the resource or API endpoint the capability grants access to.
@@ -148,7 +148,7 @@ var davidDid = "did:key:z6MkDavid";
 didProvider.GenerateAndRegisterKeyPair(davidDid);
 
 // Root first, then delegate with expiration and usage count caveats
-var caveatRoot = await capabilityService.CreateRootCapabilityAsync(
+var caveatRoot = await CreateAndRegisterRoot(
     controller: davidDid,
     invocationTarget: "https://api.example.com/data",
     allowedActions: new[] { "query", "read" }
@@ -214,7 +214,7 @@ didProvider.GenerateAndRegisterKeyPair(eveDid);
 didProvider.GenerateAndRegisterKeyPair(restrictedDid);
 
 // Create root, then delegated parent with broad permissions
-var attenuationRoot = await capabilityService.CreateRootCapabilityAsync(
+var attenuationRoot = await CreateAndRegisterRoot(
     controller: eveDid,
     invocationTarget: "https://api.example.com/resources",
     allowedActions: new[] { "read", "write", "delete", "admin" }
@@ -274,7 +274,7 @@ didProvider.GenerateAndRegisterKeyPair(managerDid);
 didProvider.GenerateAndRegisterKeyPair(employeeDid);
 
 // Admin creates root capability for sensitive document
-var sensitiveDoc = await capabilityService.CreateRootCapabilityAsync(
+var sensitiveDoc = await CreateAndRegisterRoot(
     controller: companyAdminDid,
     invocationTarget: "https://docs.company.com/confidential/q4-financials.pdf",
     allowedActions: new[] { "read", "write", "share", "delete" }
@@ -374,7 +374,7 @@ didProvider.GenerateAndRegisterKeyPair(orgDid);
 didProvider.GenerateAndRegisterKeyPair(partnerDid);
 
 // The organization creates a root capability for an API resource
-var apiRoot = await capabilityService.CreateRootCapabilityAsync(
+var apiRoot = await CreateAndRegisterRoot(
     controller: orgDid,
     invocationTarget: "https://api.org.example/v1/data",
     allowedActions: new[] { "read", "write" }
@@ -483,7 +483,7 @@ didProvider.GenerateAndRegisterKeyPair(apiOwnerDid);
 didProvider.GenerateAndRegisterKeyPair(clientDid);
 
 // Create root capability for an API that only accepts JSON payloads
-var jsonApiRoot = await capabilityService.CreateRootCapabilityAsync(
+var jsonApiRoot = await CreateAndRegisterRoot(
     controller: apiOwnerDid,
     invocationTarget: "https://api.example.com/v1/records",
     allowedActions: new[] { "read", "write" }
@@ -602,11 +602,11 @@ rdfcDidProvider.GenerateAndRegisterKeyPair(rdfcDelegateDid);
 
 var rdfcCapabilityService = new CapabilityService(rdfcSigningService);
 
-var rdfcRoot = await rdfcCapabilityService.CreateRootCapabilityAsync(
+var rdfcRoot = rdfcDidProvider.RegisterRoot(await rdfcCapabilityService.CreateRootCapabilityAsync(
     controller: rdfcOwnerDid,
     invocationTarget: "https://storage.example.com/rdfc-documents",
     allowedActions: new[] { "read", "write" }
-);
+));
 
 var rdfcDelegated = await rdfcCapabilityService.DelegateCapabilityAsync(
     parentCapability: rdfcRoot,
@@ -663,7 +663,7 @@ Console.WriteLine("------------------------------------------");
 // --- Single controller (serializes as a bare JSON string) ---
 var soloDid = "did:key:z6MkSolo";
 didProvider.GenerateAndRegisterKeyPair(soloDid);
-var singleControllerCap = await capabilityService.CreateRootCapabilityAsync(
+var singleControllerCap = await CreateAndRegisterRoot(
     controller: soloDid,                              // one DID (string)
     invocationTarget: "https://api.example.com/team/reports",
     allowedActions: new[] { "read" });
@@ -680,7 +680,7 @@ var alphaDid = "did:key:z6MkAlpha";
 var betaDid = "did:key:z6MkBeta";
 didProvider.GenerateAndRegisterKeyPair(alphaDid);
 didProvider.GenerateAndRegisterKeyPair(betaDid);
-var multiControllerCap = await capabilityService.CreateRootCapabilityAsync(
+var multiControllerCap = await CreateAndRegisterRoot(
     controller: new[] { alphaDid, betaDid },          // several DIDs (string[]) — any one is authorized
     invocationTarget: "https://api.example.com/team/reports",
     allowedActions: new[] { "read" });
@@ -734,3 +734,16 @@ Console.WriteLine();
 Console.WriteLine("===========================================");
 Console.WriteLine("All examples completed successfully!");
 Console.WriteLine("===========================================");
+
+// Creates a root capability and registers it with the demo provider so the verifier — which
+// auto-detects the provider as an IRootCapabilityResolver — can resolve the root that a spec-exact
+// delegation chain references by id only (Issue #50). In production, the resource owner resolves
+// roots from its own store; here an in-memory provider stands in.
+async Task<Capability> CreateAndRegisterRoot(
+    ControllerSet controller,
+    string invocationTarget,
+    string[]? allowedActions = null,
+    DateTime? expires = null,
+    Caveat[]? caveats = null)
+    => didProvider.RegisterRoot(
+        await capabilityService.CreateRootCapabilityAsync(controller, invocationTarget, allowedActions, expires, caveats));

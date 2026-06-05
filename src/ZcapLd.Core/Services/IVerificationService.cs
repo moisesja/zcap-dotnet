@@ -15,6 +15,18 @@ public interface IVerificationService
     Task<bool> VerifyCapabilityProofAsync(Capability capability);
 
     /// <summary>
+    /// Verifies a capability's cryptographic proof, supplying the root capability explicitly. A
+    /// spec-exact delegation chain references the root by id only, so verifying a delegated capability
+    /// needs the root to authorize the first delegation. Use this overload when the root is known to
+    /// the caller; otherwise configure an <see cref="IRootCapabilityResolver"/> and use
+    /// <see cref="VerifyCapabilityProofAsync(Capability)"/>.
+    /// </summary>
+    /// <param name="capability">The capability to verify</param>
+    /// <param name="rootCapability">The root capability the chain references by id</param>
+    /// <returns>True if the proof is valid</returns>
+    Task<bool> VerifyCapabilityProofAsync(Capability capability, Capability rootCapability);
+
+    /// <summary>
     /// Verifies an invocation request
     /// </summary>
     /// <param name="invocation">The invocation to verify</param>
@@ -34,11 +46,34 @@ public interface IVerificationService
     Task<bool> VerifyInvocationAsync(Invocation invocation, Capability capability, Dictionary<string, object>? contextProperties);
 
     /// <summary>
+    /// Verifies an invocation request, supplying the root capability explicitly (see
+    /// <see cref="VerifyCapabilityProofAsync(Capability, Capability)"/> for why the root is needed).
+    /// Pass <paramref name="contextProperties"/> as <see langword="null"/> when none are required; the
+    /// root is a four-argument overload so a bare <c>null</c> third argument stays unambiguous against
+    /// <see cref="VerifyInvocationAsync(Invocation, Capability, Dictionary{string, object})"/>.
+    /// </summary>
+    /// <param name="invocation">The invocation to verify</param>
+    /// <param name="capability">The capability being invoked</param>
+    /// <param name="rootCapability">The root capability the chain references by id</param>
+    /// <param name="contextProperties">Application-specific key/value pairs to inject into the invocation context</param>
+    /// <returns>True if the invocation is valid</returns>
+    Task<bool> VerifyInvocationAsync(Invocation invocation, Capability capability, Capability rootCapability, Dictionary<string, object>? contextProperties);
+
+    /// <summary>
     /// Verifies a capability delegation chain
     /// </summary>
     /// <param name="capability">The capability with delegation chain</param>
     /// <returns>True if the chain is valid</returns>
     Task<bool> VerifyCapabilityChainAsync(Capability capability);
+
+    /// <summary>
+    /// Verifies a capability delegation chain, supplying the root capability explicitly (see
+    /// <see cref="VerifyCapabilityProofAsync(Capability, Capability)"/> for why the root is needed).
+    /// </summary>
+    /// <param name="capability">The capability with delegation chain</param>
+    /// <param name="rootCapability">The root capability the chain references by id</param>
+    /// <returns>True if the chain is valid</returns>
+    Task<bool> VerifyCapabilityChainAsync(Capability capability, Capability rootCapability);
 
     /// <summary>
     /// Resolves a DID to its public key for verification
@@ -71,6 +106,19 @@ public interface IVerificationService
     /// <param name="signedRevocation">The signed revocation request (from <see cref="ISigningService.SignRevocationAsync"/>).</param>
     /// <returns>True if authenticated, authorized, fresh, and recorded; otherwise false.</returns>
     Task<bool> RevokeCapabilityAsync(Capability capability, Invocation signedRevocation);
+
+    /// <summary>
+    /// Revokes a capability from a signed revocation request, supplying the root capability explicitly.
+    /// Revocation authorization verifies the full delegation chain, which references the root by id
+    /// only; supply the root here when no <see cref="IRootCapabilityResolver"/> is configured
+    /// (otherwise revoking a first-level delegated capability fails closed). Same semantics as
+    /// <see cref="RevokeCapabilityAsync(Capability, Invocation)"/> otherwise.
+    /// </summary>
+    /// <param name="capability">The capability to revoke, with its full delegation chain (for authorization).</param>
+    /// <param name="signedRevocation">The signed revocation request (from <see cref="ISigningService.SignRevocationAsync"/>).</param>
+    /// <param name="rootCapability">The root capability the chain references by id</param>
+    /// <returns>True if authenticated, authorized, fresh, and recorded; otherwise false.</returns>
+    Task<bool> RevokeCapabilityAsync(Capability capability, Invocation signedRevocation, Capability rootCapability);
 
     /// <summary>
     /// Checks if a capability has been revoked

@@ -302,16 +302,20 @@ public class CapabilityServiceTests
         secondDelegation.Should().NotBeNull();
         secondDelegation.Proof.Should().NotBeNull();
 
-        // Chain should be: [rootId, firstDelegationId]
-        // Per spec: root ID, intermediate IDs, parent object
-        secondDelegation.Proof!.Primary.CapabilityChain.Should().NotBeEmpty();
-        secondDelegation.Proof.Primary.CapabilityChain!.Length.Should().BeGreaterThanOrEqualTo(2);
+        // Spec-exact second-level chain (Issue #50): [rootId, {firstDelegation embedded}]. The root and
+        // any ancestors are referenced by id only; ONLY the immediate parent is embedded, as the last entry.
+        var chain = secondDelegation.Proof!.Primary.CapabilityChain!;
+        chain.Length.Should().Be(2);
 
-        // First element should be root ID
-        secondDelegation.Proof.Primary.CapabilityChain![0].Should().Be(rootCapability.Id);
+        // First entry: the root, by id string only — never embedded.
+        chain[0].Should().BeOfType<string>().Which.Should().Be(rootCapability.Id);
 
-        // Should contain first delegation's ID
-        secondDelegation.Proof.Primary.CapabilityChain.Should().Contain(firstDelegation.Id);
+        // Last entry: the immediate parent (firstDelegation), fully embedded as a Capability object.
+        chain[^1].Should().BeOfType<Capability>().Which.Id.Should().Be(firstDelegation.Id);
+
+        // The immediate parent MUST NOT also appear as a bare id string, and the root MUST NOT be embedded.
+        chain.Should().NotContain(firstDelegation.Id);
+        chain.OfType<Capability>().Should().NotContain(c => c.Id == rootCapability.Id);
     }
 
     [Fact]

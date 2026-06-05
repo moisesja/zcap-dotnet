@@ -30,6 +30,18 @@ public class MultiControllerAuthorizationTests
         _capabilityService = new CapabilityService(_signingService);
     }
 
+    // Creates a root and registers it with the in-memory resolver so the verifier (which auto-detects
+    // _didProvider as an IRootCapabilityResolver) can resolve the root that spec-exact chains reference
+    // by id only (Issue #50).
+    private async Task<Capability> CreateAndRegisterRootAsync(
+        ControllerSet controller,
+        string invocationTarget,
+        string[]? allowedActions = null,
+        DateTime? expires = null,
+        Caveat[]? caveats = null)
+        => _didProvider.RegisterRoot(
+            await _capabilityService.CreateRootCapabilityAsync(controller, invocationTarget, allowedActions, expires, caveats));
+
     // ─── Root invocation authorization ─────────────────────────────────
 
     [Theory]
@@ -41,7 +53,7 @@ public class MultiControllerAuthorizationTests
         var bob = _didProvider.GenerateDidKey();
         var signer = signerIndex == 0 ? alice : bob;
 
-        var root = await _capabilityService.CreateRootCapabilityAsync(
+        var root = await CreateAndRegisterRootAsync(
             new[] { alice, bob },
             Target,
             new[] { "read" });
@@ -72,7 +84,7 @@ public class MultiControllerAuthorizationTests
         var alice = _didProvider.GenerateDidKey();
         var bob = _didProvider.GenerateDidKey();
 
-        var root = await _capabilityService.CreateRootCapabilityAsync(
+        var root = await CreateAndRegisterRootAsync(
             new[] { alice, bob }, Target, new[] { "read" });
 
         // Round-trip through JSON: the array controller must survive intact, not throw.
@@ -100,7 +112,7 @@ public class MultiControllerAuthorizationTests
         var bob = _didProvider.GenerateDidKey();
         var mallory = _didProvider.GenerateDidKey(); // a real, resolvable key — but not a controller
 
-        var root = await _capabilityService.CreateRootCapabilityAsync(
+        var root = await CreateAndRegisterRootAsync(
             new[] { alice, bob },
             Target,
             new[] { "read" });
@@ -131,7 +143,7 @@ public class MultiControllerAuthorizationTests
         var carol = _didProvider.GenerateDidKey();
         var signer = signerIndex == 0 ? alice : bob;
 
-        var root = await _capabilityService.CreateRootCapabilityAsync(
+        var root = await CreateAndRegisterRootAsync(
             new[] { alice, bob },
             Target,
             new[] { "read" });
@@ -158,7 +170,7 @@ public class MultiControllerAuthorizationTests
         var carol = _didProvider.GenerateDidKey();
         var mallory = _didProvider.GenerateDidKey();
 
-        var root = await _capabilityService.CreateRootCapabilityAsync(
+        var root = await CreateAndRegisterRootAsync(
             new[] { alice, bob },
             Target,
             new[] { "read" });
@@ -184,7 +196,7 @@ public class MultiControllerAuthorizationTests
         var carol = _didProvider.GenerateDidKey();
         var mallory = _didProvider.GenerateDidKey();
 
-        var root = await _capabilityService.CreateRootCapabilityAsync(
+        var root = await CreateAndRegisterRootAsync(
             new[] { alice, bob },
             Target,
             new[] { "read" });
@@ -200,11 +212,12 @@ public class MultiControllerAuthorizationTests
             Expires = ZcapTimestamps.Format(DateTime.UtcNow.AddDays(1)),
             ParentCapability = root.Id
         };
-        // Root parent chain: [rootId, rootObject].
-        var chain = new object[] { root.Id, root };
+        // Spec-exact first-level chain: the root is referenced by id only, never embedded (Issue #50).
+        var chain = new object[] { root.Id };
         delegated.Proof = await _signingService.SignCapabilityAsync(
             delegated, mallory, "capabilityDelegation", chain);
 
+        // Mallory is not a controller of the root, so authorization fails (the chain shape is valid).
         var proofValid = await _verificationService.VerifyCapabilityProofAsync(delegated);
 
         proofValid.Should().BeFalse();
