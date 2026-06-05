@@ -17,8 +17,12 @@ public interface ICapabilityService
     /// <c>allowedAction</c> per W3C ZCAP-LD (it represents complete authority over the resource),
     /// so the implementation discards this. The interface previously declared it required, forcing
     /// callers to pass a throwaway array; the signature now matches the implementation (Issue #66).</param>
-    /// <param name="expires">Optional expiration time</param>
-    /// <param name="caveats">Optional caveats to apply</param>
+    /// <param name="expires">Ignored for root capabilities — a root carries no <c>expires</c> per
+    /// W3C ZCAP-LD (it is unbounded; <c>ValidateCapabilityAsync</c> actively rejects a root that
+    /// carries one). Supplying it has no effect; it is not honored (Issue #72).</param>
+    /// <param name="caveats">Ignored for root capabilities — a root carries no <c>caveat</c> per
+    /// W3C ZCAP-LD. Supplying caveats has no effect; apply restrictions on a delegated capability
+    /// instead (Issue #72).</param>
     /// <returns>The created capability</returns>
     Task<Capability> CreateRootCapabilityAsync(
         ControllerSet controller,
