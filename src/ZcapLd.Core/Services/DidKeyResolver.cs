@@ -50,10 +50,9 @@ public class DidKeyResolver : IDidResolver, IVerificationRelationshipResolver
     /// Resolves a did:key DID or verification method URI to its public key material.
     /// </summary>
     /// <remarks>
-    /// When the argument carries a <c>#fragment</c>, the verification method named by the fragment
-    /// is returned (exact full-URI match first, then a fragment-only match); an unmatched fragment
-    /// throws rather than silently substituting the primary method (Issue #67). A bare DID returns
-    /// the primary verification method.
+    /// When the argument carries a <c>#fragment</c>, the verification method whose id equals the
+    /// full URI is returned; an unmatched fragment throws rather than silently substituting the
+    /// primary method (Issue #67). A bare DID returns the primary verification method.
     /// <para>
     /// This resolves key material only — it applies no verification-relationship
     /// (<c>capabilityInvocation</c> / <c>capabilityDelegation</c>) authorization gate. Callers that
@@ -92,25 +91,23 @@ public class DidKeyResolver : IDidResolver, IVerificationRelationshipResolver
             }
 
             var verificationMethods = result.DidDocument.VerificationMethod;
-            if (verificationMethods == null || !verificationMethods.Any())
+            if (verificationMethods == null || verificationMethods.Count == 0)
             {
                 throw new CapabilityValidationException(
                     $"No verification method found in resolved DID document: {didOrVerificationMethod}");
             }
 
-            // If the caller named a specific verification method by #fragment, honour it: select
-            // the method whose Id equals the full URI, then fall back to a fragment match — rather
-            // than always returning the first method (Issue #67). An Ed25519 did:key resolves to
-            // two methods (the Ed25519 signing key at index 0 and a derived X25519 key-agreement
-            // key at index 1), so FirstOrDefault() returned the wrong key for a non-index-0
-            // fragment. Throw if the named fragment matches no method, rather than silently
-            // substituting the first.
+            // If the caller named a specific verification method by #fragment, honour it: select the
+            // method whose Id equals the full URI — rather than always returning the first method
+            // (Issue #67). An Ed25519 did:key resolves to two methods (the Ed25519 signing key at
+            // index 0 and a derived X25519 key-agreement key at index 1), so FirstOrDefault()
+            // returned the wrong key for a non-index-0 fragment. did:key documents always carry
+            // absolute verification-method ids, so an exact id match is exhaustive; an unmatched
+            // fragment throws (below) rather than silently substituting the first method.
             var vm = hashIndex < 0
-                ? verificationMethods.First()
+                ? verificationMethods[0]
                 : verificationMethods.FirstOrDefault(m =>
-                      string.Equals(m.Id, didOrVerificationMethod, StringComparison.Ordinal))
-                  ?? verificationMethods.FirstOrDefault(m =>
-                      string.Equals(FragmentOf(m.Id), didOrVerificationMethod[(hashIndex + 1)..], StringComparison.Ordinal));
+                      string.Equals(m.Id, didOrVerificationMethod, StringComparison.Ordinal));
 
             if (vm == null)
             {
@@ -158,21 +155,6 @@ public class DidKeyResolver : IDidResolver, IVerificationRelationshipResolver
 
         var keyId = did["did:key:".Length..];
         return Task.FromResult($"{did}#{keyId}");
-    }
-
-    /// <summary>
-    /// Returns the fragment of a verification method id (the part after '#'), or the id
-    /// unchanged when it has no fragment. Null-safe.
-    /// </summary>
-    private static string FragmentOf(string? id)
-    {
-        if (string.IsNullOrEmpty(id))
-        {
-            return string.Empty;
-        }
-
-        var i = id.IndexOf('#');
-        return i < 0 ? id : id[(i + 1)..];
     }
 
     /// <summary>
