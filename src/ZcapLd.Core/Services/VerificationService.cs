@@ -29,6 +29,7 @@ public class VerificationService : IVerificationService
     private readonly ILogger _logger;
     private readonly IVerificationRelationshipResolver _relationshipResolver;
     private readonly IRootCapabilityResolver? _rootResolver;
+    private readonly VerificationPolicy _policy;
     private const int MaxChainLength = 10; // Per spec: SHOULD limit to 10
     private const string RootIdPrefix = "urn:zcap:root:";
 
@@ -142,6 +143,9 @@ public class VerificationService : IVerificationService
     /// up to that far in the future before rejecting it (Issue #71); defaults to
     /// <see cref="DefaultFreshnessClockSkew"/> (1 minute). The staleness bound is the nonce window, not
     /// this value.
+    /// The optional <paramref name="policy"/> enables opt-in verifier-side SHOULD checks (Issue #73) —
+    /// currently the 3-month delegated-expiration ceiling, off by default; defaults to
+    /// <see cref="VerificationPolicy.Default"/> (nothing enforced).
     /// </summary>
     public VerificationService(
         IDidResolver didResolver,
@@ -154,7 +158,8 @@ public class VerificationService : IVerificationService
         ILogger<VerificationService>? logger = null,
         IVerificationRelationshipResolver? relationshipResolver = null,
         IRootCapabilityResolver? rootResolver = null,
-        TimeSpan? freshnessClockSkew = null)
+        TimeSpan? freshnessClockSkew = null,
+        VerificationPolicy? policy = null)
     {
         _didResolver = didResolver ?? throw new ArgumentNullException(nameof(didResolver));
         _caveatProcessor = caveatProcessor ?? throw new ArgumentNullException(nameof(caveatProcessor));
@@ -175,6 +180,7 @@ public class VerificationService : IVerificationService
         // default — delegated verification then requires an explicit root via the overloads, otherwise
         // it fails closed.
         _rootResolver = rootResolver ?? didResolver as IRootCapabilityResolver;
+        _policy = policy ?? VerificationPolicy.Default;
     }
 
     internal static ICryptoSuiteProvider CreateDefaultSuiteProvider()
@@ -847,8 +853,17 @@ public class VerificationService : IVerificationService
     /// Fully fail-closed — any unexpected failure yields <c>false</c>. Callers that have already
     /// built the chain (e.g. <see cref="IsRevokerAuthorizedAsync"/>, <see cref="VerifyInvocationAsync(Invocation, Capability)"/>)
     /// pass it here to avoid a redundant rebuild.
+    /// <para>
+    /// <paramref name="applyExpirationCeiling"/> gates the opt-in verifier-side 3-month delegated
+    /// expiration ceiling (Issue #73). Default <see langword="true"/> for the invocation and
+    /// chain-verification paths; the revocation-authorization path passes <see langword="false"/> so a
+    /// long-lived delegation can always be revoked (the ceiling is a SHOULD on accepting/invoking a
+    /// zcap, never a reason to refuse removing one). It is a no-op unless
+    /// <see cref="VerificationPolicy.EnforceMaxDelegationExpiration"/> is also enabled.
+    /// </para>
     /// </summary>
-    private async Task<VerificationResult> VerifyBuiltChainAsync(List<Capability> chain)
+    private async Task<VerificationResult> VerifyBuiltChainAsync(
+        List<Capability> chain, bool applyExpirationCeiling = true)
     {
         try
         {
@@ -868,6 +883,14 @@ public class VerificationService : IVerificationService
                         $"Capability '{chainCapability.Id}' in the chain has been revoked.");
                 }
             }
+
+            // Snapshot the opt-in expiration ceiling once for the whole chain (Issue #73; PR #102
+            // review): every delegated link is compared against the same instant rather than re-reading
+            // the clock per link, and AddMonths is never evaluated when the policy is off (or on the
+            // revocation path). Null means "do not apply the ceiling".
+            DateTime? expirationCeilingCutoff = (applyExpirationCeiling && _policy.EnforceMaxDelegationExpiration)
+                ? DateTime.UtcNow.AddMonths(_policy.MaxDelegationExpirationMonths)
+                : null;
 
             // 3. Verify each link in the chain
             for (int i = 1; i < chain.Count; i++)
@@ -894,6 +917,34 @@ public class VerificationService : IVerificationService
                 if (childExpiresAt.HasValue && childExpiresAt.Value < DateTime.UtcNow)
                     return VerificationResult.Fail(VerificationOutcome.Expired,
                         $"Capability '{child.Id}' in the chain has expired.");
+
+                // Verifier-side SHOULD (opt-in): bound each delegated link's expiration to
+                // MaxDelegationExpirationMonths in the future, measured at verification time (Issue #73).
+                // This is the spec-correct home for the 3-month ceiling — the create-time hard throw was
+                // removed in #61. Off by default (it is a SHOULD and can reject legitimately long-lived
+                // delegations); skipped entirely on the revocation-authorization path so a long-lived
+                // delegation remains revocable (cutoff is null then). Applied to EVERY delegated link
+                // (chain[1..], i.e. the invoked leaf and every intermediate), not just the invoked leaf:
+                // the verifier stores each link's revocation until that link expires, so the
+                // storage-burden bound the SHOULD exists for must hold for the whole chain — and under
+                // attenuation (child expires ≤ parent) the ancestors are the longest-lived links.
+                if (expirationCeilingCutoff is { } ceiling)
+                {
+                    // A delegated zcap with no `expires` is effectively unbounded — strictly worse for
+                    // the storage burden this ceiling caps (and the spec independently MUSTs that
+                    // delegated zcaps carry an expiration). Treat "missing" as "infinitely far out" and
+                    // reject it under this policy, otherwise the trivial bypass (omit `expires`) defeats
+                    // the feature for an operator who enabled it expecting a bound.
+                    if (!childExpiresAt.HasValue)
+                        return VerificationResult.Fail(VerificationOutcome.ExpirationTooFarInFuture,
+                            $"Delegated capability '{child.Id}' has no expiration; the verifier's policy " +
+                            $"requires it to expire within {_policy.MaxDelegationExpirationMonths} month(s).");
+
+                    if (childExpiresAt.Value > ceiling)
+                        return VerificationResult.Fail(VerificationOutcome.ExpirationTooFarInFuture,
+                            $"Capability '{child.Id}' expires more than {_policy.MaxDelegationExpirationMonths} " +
+                            "month(s) in the future, exceeding the verifier's policy ceiling.");
+                }
 
                 // Verify caveats are compatible
                 if (!await _caveatProcessor.ValidateCaveatCompatibilityAsync(parent.Caveat, child.Caveat))
@@ -1587,7 +1638,10 @@ public class VerificationService : IVerificationService
             // this built chain instead of rebuilding it — see VerifyCapabilityChainAsync.)
             var chain = await BuildCapabilityChainAsync(capability, explicitRoot);
 
-            if (!(await VerifyBuiltChainAsync(chain)).IsValid)
+            // Do NOT apply the opt-in 3-month expiration ceiling here (Issue #73): revocation must stay
+            // possible for a long-lived delegation — refusing to authorize its removal would be exactly
+            // backwards. The ceiling is a SHOULD on accepting/invoking a zcap, not on revoking one.
+            if (!(await VerifyBuiltChainAsync(chain, applyExpirationCeiling: false)).IsValid)
                 return false;
 
             // Document-based authorization (Issue #65): the revoker is authorized when ANY link in

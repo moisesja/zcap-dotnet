@@ -48,6 +48,14 @@ public enum VerificationOutcome
     /// <summary>The capability (or a link in its chain) is past its <c>expires</c> timestamp.</summary>
     Expired,
 
+    /// <summary>
+    /// A delegated capability's <c>expires</c> is further in the future than the verifier's configured
+    /// ceiling allows (the opt-in W3C ZCAP-LD 3-month SHOULD). Only produced when
+    /// <see cref="Services.VerificationPolicy.EnforceMaxDelegationExpiration"/> is enabled (Issue #73);
+    /// distinct from <see cref="Expired"/>, which is the past-expiry MUST.
+    /// </summary>
+    ExpirationTooFarInFuture,
+
     /// <summary>The capability, or one of its ancestors in the chain, has been revoked.</summary>
     Revoked,
 

@@ -2,6 +2,7 @@ using System.Reflection;
 using FluentAssertions;
 using Xunit;
 using ZcapLd.Core.Models;
+using ZcapLd.Core.Services;
 
 namespace ZcapLd.Core.Tests.Compliance;
 
@@ -378,4 +379,51 @@ public class NormativeIntegrationComplianceTests
         delegated.ExpiresAt!.Value.Should().BeCloseTo(
             DateTime.UtcNow.AddMonths(6), TimeSpan.FromSeconds(5));
     }
+
+    [Fact(DisplayName = "SHOULD-04 Verifier SHOULD reject delegated expirations beyond 3 months when policy enabled")]
+    public async Task Should04_Verifier_RejectsExpirationBeyondThreeMonths_WhenPolicyEnabled()
+    {
+        // Issue #73: the W3C 3-month expiration ceiling is a verifier-side SHOULD measured at
+        // verification time, behind an opt-in policy flag. Off by default (no behavior change); when
+        // enabled, the verifier rejects a delegated zcap whose expiration is more than three months out.
+        var fixture = new ComplianceTestFixture();
+        var parentDid = fixture.RegisterControllerDid();
+        var childDid = fixture.RegisterControllerDid();
+
+        var root = await fixture.CapabilityService.CreateRootCapabilityAsync(
+            parentDid, "https://example.com/resources", new[] { "read" });
+        var delegated = await fixture.CapabilityService.DelegateCapabilityAsync(
+            root, childDid, new[] { "read" }, DateTime.UtcNow.AddMonths(6));
+
+        // Default verifier (policy off): the long-lived delegation still verifies.
+        (await fixture.VerificationService.VerifyCapabilityChainDetailedAsync(delegated, root))
+            .IsValid.Should().BeTrue("the ceiling is a SHOULD and is off by default");
+
+        // Policy-enabled verifier: the same delegation is rejected, with the specific structured
+        // outcome (Issue #70 channel) rather than a generic failure.
+        var strictVerifier = BuildVerifier(fixture,
+            new VerificationPolicy { EnforceMaxDelegationExpiration = true });
+
+        var strictResult = await strictVerifier.VerifyCapabilityChainDetailedAsync(delegated, root);
+        strictResult.IsValid.Should().BeFalse(
+            "with the policy enabled, an expiration more than 3 months out is rejected");
+        strictResult.Outcome.Should().Be(VerificationOutcome.ExpirationTooFarInFuture);
+
+        // A delegation inside the ceiling (1 month) still verifies under the strict policy — the check
+        // rejects only the over-long expiration, not every delegated zcap.
+        var shortDelegated = await fixture.CapabilityService.DelegateCapabilityAsync(
+            root, childDid, new[] { "read" }, DateTime.UtcNow.AddMonths(1));
+        (await strictVerifier.VerifyCapabilityChainDetailedAsync(shortDelegated, root))
+            .IsValid.Should().BeTrue("an expiration within the 3-month ceiling is permitted");
+    }
+
+    private static VerificationService BuildVerifier(ComplianceTestFixture fixture, VerificationPolicy policy)
+        => new(
+            fixture.DidProvider,
+            fixture.CaveatProcessor,
+            VerificationService.CreateDefaultSuiteProvider(),
+            new RevocationService(new InMemoryRevocationStore()),
+            new InMemoryNonceStore(),
+            SigningService.CreateDefaultCanonicalizerProvider(),
+            policy: policy);
 }

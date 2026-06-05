@@ -71,6 +71,11 @@ Primary assembly: `src/ZcapLd.Core`.
   - Authorizes the proof's verification method against the controller's DID document via
     `IVerificationRelationshipResolver` (`capabilityInvocation` for invocations,
     `capabilityDelegation` for delegations) — Issue #65
+  - Applies an optional, opt-in `VerificationPolicy` (off by default): when
+    `EnforceMaxDelegationExpiration` is set, rejects a delegated zcap whose `expires` is more than
+    `MaxDelegationExpirationMonths` (default 3) in the future, measured at verification time — the
+    W3C verifier-side SHOULD (Issue #73). Enforced on the invocation/chain paths only; the
+    revocation-authorization path bypasses it so a long-lived delegation stays revocable
 - `RevocationService`
   - Persists revocation records via `IRevocationStore`
   - Applies retention/expiry behavior for revocation lookups
@@ -125,7 +130,8 @@ Primary assembly: `src/ZcapLd.Core`.
 2. `SigningService.SignInvocationAsync` creates invocation proof; the `capability` (id string or full
    embedded object) is part of the signed canonical payload.
 3. `VerificationService.VerifyInvocationAsync` checks:
-   - capability chain validity
+   - capability chain validity (including the opt-in 3-month delegated-expiration ceiling when
+     `VerificationPolicy.EnforceMaxDelegationExpiration` is enabled — Issue #73)
    - invocation proof purpose and signature
    - **invocation `capability` shape (strict)**: a root invocation MUST use the root id string, a
      delegated invocation MUST embed the full zcap whose id matches the verified capability — a
