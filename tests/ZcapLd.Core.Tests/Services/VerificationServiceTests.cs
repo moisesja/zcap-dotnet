@@ -315,6 +315,44 @@ public class VerificationServiceTests
     }
 
     [Fact]
+    public async Task VerifyCapabilityProof_OverbroadChild_ShouldReturnFalse()
+    {
+        // Issue #69: a re-signed child that EXPANDS authority beyond its parent must be rejected by
+        // the single-proof check too (it was previously accepted, while VerifyCapabilityChainAsync
+        // correctly rejected it). Build root → mid(["read"]) → a leaf claiming ["read","write"],
+        // validly signed by mid's controller — the only invalid factor is attenuation.
+        var rootDid = "did:key:z6MkAttenRoot";
+        var midDid = "did:key:z6MkAttenMid";
+        var leafDid = "did:key:z6MkAttenLeaf";
+        _didProvider.GenerateAndRegisterKeyPair(rootDid);
+        _didProvider.GenerateAndRegisterKeyPair(midDid);
+        _didProvider.GenerateAndRegisterKeyPair(leafDid);
+
+        var root = await _capabilityService.CreateRootCapabilityAsync(
+            rootDid, "https://example.com/resource", new[] { "read", "write" });
+        var mid = await _capabilityService.DelegateCapabilityAsync(
+            root, midDid, new[] { "read" }, DateTime.UtcNow.AddDays(20));
+
+        // Hand-craft a child that expands ["read"] → ["read","write"]; everything else attenuates.
+        var overbroad = new Capability
+        {
+            Context = mid.Context,
+            Id = $"urn:uuid:{Guid.NewGuid()}",
+            Controller = leafDid,
+            InvocationTarget = mid.InvocationTarget,
+            AllowedAction = new[] { "read", "write" },
+            Expires = mid.Expires,
+            ParentCapability = mid.Id
+        };
+        overbroad.Proof = await _signingService.SignCapabilityAsync(
+            overbroad, midDid, "capabilityDelegation", new object[] { root.Id, mid });
+
+        // The single-link proof check must reject the over-broad child (attenuation), matching the chain check.
+        (await _verificationService.VerifyCapabilityProofAsync(overbroad)).Should().BeFalse();
+        (await _verificationService.VerifyCapabilityChainAsync(overbroad)).Should().BeFalse();
+    }
+
+    [Fact]
     public async Task VerifyCapabilityProof_WithRevokedImmediateParent_ShouldReturnFalse()
     {
         // Issue #63: VerifyCapabilityProofAsync previously checked only the leaf's revocation,

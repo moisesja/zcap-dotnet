@@ -403,6 +403,20 @@ public class VerificationService : IVerificationService
                 return false;
             }
 
+            // The standalone proof check must also reject a child broader than its parent
+            // (attenuation) or already expired; otherwise a re-signed child that expands authority
+            // beyond its parent can pass VerifyCapabilityProofAsync while VerifyCapabilityChainAsync
+            // correctly rejects it (Issue #69). Skipped when no parent context is available.
+            if (parentCapability != null && !ValidateAttenuation(capability, parentCapability))
+            {
+                return false;
+            }
+
+            if (capability.ExpiresAt is { } childExpiresAt && childExpiresAt < DateTime.UtcNow)
+            {
+                return false;
+            }
+
             return true;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
