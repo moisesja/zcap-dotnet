@@ -37,10 +37,21 @@ public sealed record VerificationPolicy
 
     /// <summary>
     /// The maximum number of months in the future a delegated zcap's <c>expires</c> may be when
-    /// <see cref="EnforceMaxDelegationExpiration"/> is enabled. Defaults to <c>3</c> per the spec.
-    /// Should be a positive value (a value ≤ 0 rejects every future-dated delegation).
+    /// <see cref="EnforceMaxDelegationExpiration"/> is enabled. Defaults to <c>3</c> per the spec. Must
+    /// be at least <c>1</c>: a value of <c>0</c> or less would silently reject every future-dated
+    /// delegation, so it is rejected at construction with <see cref="ArgumentOutOfRangeException"/>
+    /// rather than left as a silent foot-gun (PR #102 review).
     /// </summary>
-    public int MaxDelegationExpirationMonths { get; init; } = 3;
+    public int MaxDelegationExpirationMonths
+    {
+        get => _maxDelegationExpirationMonths;
+        init => _maxDelegationExpirationMonths = value >= 1
+            ? value
+            : throw new ArgumentOutOfRangeException(nameof(MaxDelegationExpirationMonths), value,
+                "MaxDelegationExpirationMonths must be at least 1.");
+    }
+
+    private readonly int _maxDelegationExpirationMonths = 3;
 
     /// <summary>The default policy: no opt-in SHOULD checks enforced.</summary>
     public static VerificationPolicy Default { get; } = new();

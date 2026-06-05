@@ -884,6 +884,14 @@ public class VerificationService : IVerificationService
                 }
             }
 
+            // Snapshot the opt-in expiration ceiling once for the whole chain (Issue #73; PR #102
+            // review): every delegated link is compared against the same instant rather than re-reading
+            // the clock per link, and AddMonths is never evaluated when the policy is off (or on the
+            // revocation path). Null means "do not apply the ceiling".
+            DateTime? expirationCeilingCutoff = (applyExpirationCeiling && _policy.EnforceMaxDelegationExpiration)
+                ? DateTime.UtcNow.AddMonths(_policy.MaxDelegationExpirationMonths)
+                : null;
+
             // 3. Verify each link in the chain
             for (int i = 1; i < chain.Count; i++)
             {
@@ -915,12 +923,12 @@ public class VerificationService : IVerificationService
                 // This is the spec-correct home for the 3-month ceiling — the create-time hard throw was
                 // removed in #61. Off by default (it is a SHOULD and can reject legitimately long-lived
                 // delegations); skipped entirely on the revocation-authorization path so a long-lived
-                // delegation remains revocable (applyExpirationCeiling). Applied to EVERY delegated link
+                // delegation remains revocable (cutoff is null then). Applied to EVERY delegated link
                 // (chain[1..], i.e. the invoked leaf and every intermediate), not just the invoked leaf:
                 // the verifier stores each link's revocation until that link expires, so the
                 // storage-burden bound the SHOULD exists for must hold for the whole chain — and under
                 // attenuation (child expires ≤ parent) the ancestors are the longest-lived links.
-                if (applyExpirationCeiling && _policy.EnforceMaxDelegationExpiration)
+                if (expirationCeilingCutoff is { } ceiling)
                 {
                     // A delegated zcap with no `expires` is effectively unbounded — strictly worse for
                     // the storage burden this ceiling caps (and the spec independently MUSTs that
@@ -932,7 +940,7 @@ public class VerificationService : IVerificationService
                             $"Delegated capability '{child.Id}' has no expiration; the verifier's policy " +
                             $"requires it to expire within {_policy.MaxDelegationExpirationMonths} month(s).");
 
-                    if (childExpiresAt.Value > DateTime.UtcNow.AddMonths(_policy.MaxDelegationExpirationMonths))
+                    if (childExpiresAt.Value > ceiling)
                         return VerificationResult.Fail(VerificationOutcome.ExpirationTooFarInFuture,
                             $"Capability '{child.Id}' expires more than {_policy.MaxDelegationExpirationMonths} " +
                             "month(s) in the future, exceeding the verifier's policy ceiling.");

@@ -181,4 +181,24 @@ public class VerificationServicePolicyTests
         (await CreateVerifier().VerifyCapabilityChainDetailedAsync(delegated, root)).IsValid
             .Should().BeTrue("the default verifier does not enforce the ceiling");
     }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public void Policy_MaxDelegationExpirationMonthsBelowOne_Throws(int months)
+    {
+        // A misconfigured value ≤ 0 would silently reject every future-dated delegation. Fail fast at
+        // construction with a clear error instead (PR #102 review).
+        var act = () => new VerificationPolicy { MaxDelegationExpirationMonths = months };
+
+        act.Should().Throw<ArgumentOutOfRangeException>()
+            .WithParameterName("MaxDelegationExpirationMonths");
+    }
+
+    [Fact]
+    public void Policy_MaxDelegationExpirationMonthsOfOne_IsAccepted()
+    {
+        var policy = new VerificationPolicy { MaxDelegationExpirationMonths = 1 };
+        policy.MaxDelegationExpirationMonths.Should().Be(1);
+    }
 }
