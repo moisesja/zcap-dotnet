@@ -28,23 +28,25 @@ public class VerificationServiceFreshnessTests
         _capabilityService = new CapabilityService(_signingService);
     }
 
-    private VerificationService CreateVerificationService(INonceStore nonceStore)
+    private VerificationService CreateVerificationService(INonceStore nonceStore, TimeSpan? freshnessClockSkew = null)
         => new(
             _didProvider, _caveatProcessor,
             VerificationService.CreateDefaultSuiteProvider(),
             new RevocationService(new InMemoryRevocationStore()),
-            nonceStore);
+            nonceStore, nonceWindow: null, freshnessClockSkew: freshnessClockSkew);
 
     // Builds a root + delegated capability and signs a delegated DI invocation whose proof carries the
-    // supplied created instant (null => stamp current UTC time). Returns the invocation and the delegated
-    // capability it is verified against.
-    private async Task<(Invocation invocation, Capability capability)> CreateSignedInvocationAsync(DateTime? createdOverride)
+    // supplied created instant (null => stamp current UTC time). The target is parameterized so a single
+    // test can register more than one root without an id collision (root id derives from the target).
+    // Returns the invocation and the delegated capability it is verified against.
+    private async Task<(Invocation invocation, Capability capability)> CreateSignedInvocationAsync(
+        DateTime? createdOverride, string target = Target)
     {
         var rootDid = _didProvider.GenerateDidKey();
         var leafDid = _didProvider.GenerateDidKey();
 
         var root = await TestRoots.CreateAndRegisterRootAsync(
-            _capabilityService, _didProvider, rootDid, Target, new[] { "read" });
+            _capabilityService, _didProvider, rootDid, target, new[] { "read" });
         var delegated = await _capabilityService.DelegateCapabilityAsync(
             root, leafDid, new[] { "read" }, DateTime.UtcNow.AddDays(7));
 
@@ -52,7 +54,7 @@ public class VerificationServiceFreshnessTests
         {
             Capability = InvocationCapability.FromCapability(delegated),
             CapabilityAction = "read",
-            InvocationTarget = Target
+            InvocationTarget = target
         };
         invocation.Proof = await _signingService.SignInvocationAsync(invocation, leafDid, createdOverride);
         return (invocation, delegated);
@@ -108,6 +110,24 @@ public class VerificationServiceFreshnessTests
 
         result.Outcome.Should().Be(VerificationOutcome.Valid,
             "a slightly-future proof within the clock-skew tolerance must still verify");
+    }
+
+    [Fact]
+    public async Task VerifyInvocation_FutureProof_HonorsConfiguredClockSkew()
+    {
+        // 90 seconds in the future: beyond the default 1-minute skew, but within a configured 2-minute one.
+        // Distinct targets keep the two roots from colliding (a root id derives from its invocationTarget).
+        var created = DateTime.UtcNow.AddSeconds(90);
+
+        var defaultVerifier = CreateVerificationService(new InMemoryNonceStore());
+        var (inv1, cap1) = await CreateSignedInvocationAsync(created, "https://example.com/resource-a");
+        (await defaultVerifier.VerifyInvocationDetailedAsync(inv1, cap1)).Outcome
+            .Should().Be(VerificationOutcome.StaleProof, "the default 1-minute skew rejects a +90s proof");
+
+        var widerVerifier = CreateVerificationService(new InMemoryNonceStore(), TimeSpan.FromMinutes(2));
+        var (inv2, cap2) = await CreateSignedInvocationAsync(created, "https://example.com/resource-b");
+        (await widerVerifier.VerifyInvocationDetailedAsync(inv2, cap2)).Outcome
+            .Should().Be(VerificationOutcome.Valid, "a configured 2-minute clock-skew tolerance accepts a +90s proof");
     }
 
     [Fact]
