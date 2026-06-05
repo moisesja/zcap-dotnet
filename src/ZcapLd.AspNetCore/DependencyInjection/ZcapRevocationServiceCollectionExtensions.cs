@@ -88,6 +88,10 @@ public static class ZcapRevocationServiceCollectionExtensions
         // referenced by id only in a spec-exact delegation chain; register one via
         // AddZcapRootCapabilityResolver to verify/revoke delegated capabilities without passing the
         // root explicitly on every call (e.g. the revocation endpoint).
+        // The optional VerificationPolicy (Issue #73) enables opt-in verifier-side SHOULD checks (the
+        // 3-month delegated-expiration ceiling); register one (services.AddSingleton(new
+        // VerificationPolicy { EnforceMaxDelegationExpiration = true }) before AddZcapServices) to turn
+        // it on, otherwise VerificationPolicy.Default applies and nothing extra is enforced.
         services.TryAddSingleton<IVerificationService>(sp =>
             new VerificationService(
                 sp.GetRequiredService<IDidResolver>(),
@@ -98,7 +102,8 @@ public static class ZcapRevocationServiceCollectionExtensions
                 sp.GetRequiredService<IDocumentCanonicalizerProvider>(),
                 logger: sp.GetService<ILogger<VerificationService>>(),
                 relationshipResolver: sp.GetService<IVerificationRelationshipResolver>(),
-                rootResolver: sp.GetService<IRootCapabilityResolver>()));
+                rootResolver: sp.GetService<IRootCapabilityResolver>(),
+                policy: sp.GetService<VerificationPolicy>()));
 
         return services;
     }

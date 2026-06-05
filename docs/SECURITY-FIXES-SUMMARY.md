@@ -439,7 +439,7 @@ All 7 previously failing tests have been resolved through subsequent work:
 - **MUST-03**: Root capability field handling updated
 - **MUST-18**: Local chain verification edge case fixed
 - **MUST-21**: Revocation system fully implemented (`IRevocationService` / `IRevocationStore`)
-- **SHOULD-04**: 3-month expiration limit enforced in `CapabilityService`
+- **SHOULD-04**: 3-month expiration ceiling enforced verifier-side at verification time, opt-in via `VerificationPolicy.EnforceMaxDelegationExpiration` (off by default — it is a SHOULD); the earlier create-time hard throw was removed in #61 and relocated here (#73)
 - **SHOULD-05**: Read/write action validation implemented
 - **SHOULD-07**: Revocation endpoints available via `ZcapLd.AspNetCore`
 - **Chain length test**: Test expectation corrected

@@ -837,7 +837,7 @@ Based on the specification, a compliant implementation MUST:
 - [ ] Store revoked zcap IDs until expiration
 - [ ] Implement revocation endpoint (SHOULD)
 - [ ] No network requests during chain verification (except revocation check)
-- [ ] Enforce 3-month maximum expiration (SHOULD)
+- [x] Enforce 3-month maximum expiration (SHOULD) — verifier-side, opt-in via `VerificationPolicy.EnforceMaxDelegationExpiration` (off by default), measured at verification time on the invocation/chain paths (Issue #73)
 - [ ] Limit chain length to 10 (SHOULD)
 
 ### JSON-LD/Canonicalization
