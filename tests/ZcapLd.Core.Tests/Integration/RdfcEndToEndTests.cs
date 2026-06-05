@@ -44,13 +44,25 @@ public class RdfcEndToEndTests
         _capabilityService = new CapabilityService(_signingService);
     }
 
+    // Creates a root and registers it with the in-memory resolver so the verifier (which auto-detects
+    // _didProvider as an IRootCapabilityResolver) can resolve the root that spec-exact chains reference
+    // by id only (Issue #50).
+    private Task<Capability> CreateAndRegisterRootAsync(
+        ControllerSet controller,
+        string invocationTarget,
+        string[]? allowedActions = null,
+        DateTime? expires = null,
+        Caveat[]? caveats = null)
+        => TestRoots.CreateAndRegisterRootAsync(
+            _capabilityService, _didProvider, controller, invocationTarget, allowedActions, expires, caveats);
+
     [Fact]
     public async Task CreateRootAndInvoke_WithRdfc_ShouldSucceed()
     {
         var controllerDid = "did:key:z6MkRdfcController";
         _didProvider.GenerateAndRegisterKeyPair(controllerDid);
 
-        var root = await _capabilityService.CreateRootCapabilityAsync(
+        var root = await CreateAndRegisterRootAsync(
             controllerDid,
             "https://api.example.com/documents",
             new[] { "read", "write" });
@@ -75,7 +87,7 @@ public class RdfcEndToEndTests
         _didProvider.GenerateAndRegisterKeyPair(ownerDid);
         _didProvider.GenerateAndRegisterKeyPair(delegateDid);
 
-        var root = await _capabilityService.CreateRootCapabilityAsync(
+        var root = await CreateAndRegisterRootAsync(
             ownerDid,
             "https://storage.example.com/rdfc-documents",
             new[] { "read", "write" });
@@ -112,7 +124,7 @@ public class RdfcEndToEndTests
         _didProvider.GenerateAndRegisterKeyPair(controller2);
         _didProvider.GenerateAndRegisterKeyPair(controller3);
 
-        var root = await _capabilityService.CreateRootCapabilityAsync(
+        var root = await CreateAndRegisterRootAsync(
             controller1,
             "https://api.example.com/resources",
             new[] { "read", "write", "delete" });
@@ -149,7 +161,7 @@ public class RdfcEndToEndTests
         var childDid = "did:key:z6MkRdfcChild";
         _didProvider.GenerateAndRegisterKeyPair(ownerDid);
 
-        var root = await _capabilityService.CreateRootCapabilityAsync(
+        var root = await CreateAndRegisterRootAsync(
             ownerDid,
             "https://api.example.com/documents",
             new[] { "read" });

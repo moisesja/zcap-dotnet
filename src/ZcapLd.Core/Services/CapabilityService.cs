@@ -311,90 +311,57 @@ public class CapabilityService : ICapabilityService
     }
 
     /// <summary>
-    /// Builds the capability chain for a delegation proof
-    /// COMPLIANCE FIX C-03: Per W3C ZCAP-LD spec section 3.3:
-    /// - First element: root capability ID (string)
-    /// - Middle elements: intermediate capability IDs (strings)
-    /// - Last element: immediate parent capability (FULL OBJECT with proof)
+    /// Builds the <c>capabilityChain</c> for a delegation proof in the exact shape W3C ZCAP-LD
+    /// requires (Issue #50): the root is referenced by ID only (never embedded), every other
+    /// ancestor is referenced by ID, and ONLY the immediate parent delegated zcap is fully embedded
+    /// — as the last entry. So a first-level delegation (parent is the root) yields <c>[rootId]</c>;
+    /// deeper delegations yield <c>[rootId, ...ancestorIds, {immediateParent}]</c>. Because the chain
+    /// is part of the signed/canonicalized proof, this minimal shape is what strict cross-language
+    /// verifiers expect.
     /// </summary>
     private object[] BuildCapabilityChain(Capability parentCapability)
     {
-        var chain = new List<object>();
-
-        // A delegated parent may carry several proofs; its delegation chain lives on a
-        // capabilityDelegation proof. If the parent has one with a chain, it's not the root.
-        // (All capabilityDelegation proofs in a set are assumed to describe the same chain.)
+        // A delegated parent carries its delegation chain on a capabilityDelegation proof; a root has
+        // no such proof. When the parent is the root, the chain is just the root id — the root is
+        // referenced by ID only and is NEVER embedded.
         var parentChainProof = parentCapability.Proof?.FirstDelegationProofWithChain();
-        if (parentChainProof?.CapabilityChain != null && parentChainProof.CapabilityChain.Length > 0)
+        if (parentChainProof?.CapabilityChain is not { Length: > 0 } parentChain)
         {
-            // Parent is delegated
-            // Its chain structure: [rootId, ...intermediateIds, grandparentObject]
-
-            // Extract all ancestor IDs from parent's chain (root + intermediates), de-duplicated.
-            // Our own chains emit the embedded ancestor's id as BOTH a preceding string AND the
-            // embedded object, so without dedup a directly-root-delegated parent produced a repeated
-            // id (e.g. [rootId, rootId, ...]) — Issue #5. A HashSet preserves first-occurrence order
-            // while still keeping an embedded ancestor's id when a spec-compliant foreign chain omits
-            // the redundant string form. Null/empty ids are skipped (never valid chain entries).
-            var stringIds = new List<string>();
-            var seenIds = new HashSet<string>(StringComparer.Ordinal);
-
-            void AddAncestorId(string? id)
-            {
-                if (!string.IsNullOrEmpty(id) && seenIds.Add(id))
-                {
-                    stringIds.Add(id);
-                }
-            }
-
-            for (int i = 0; i < parentChainProof.CapabilityChain.Length; i++)
-            {
-                var element = parentChainProof.CapabilityChain[i];
-                if (element is string strId)
-                {
-                    AddAncestorId(strId);
-                }
-                else if (element is System.Text.Json.JsonElement jsonEl && jsonEl.ValueKind == JsonValueKind.String)
-                {
-                    AddAncestorId(jsonEl.GetString());
-                }
-                else
-                {
-                    // This is an embedded ancestor object (grandparent from our perspective).
-                    // Extract its ID; the HashSet drops it when it already appeared as a string.
-                    if (element is Capability cap)
-                    {
-                        AddAncestorId(cap.Id);
-                    }
-                    else if (element is System.Text.Json.JsonElement jsonObj && jsonObj.ValueKind == JsonValueKind.Object)
-                    {
-                        if (jsonObj.TryGetProperty("id", out var idProp))
-                        {
-                            AddAncestorId(idProp.GetString());
-                        }
-                    }
-                }
-            }
-
-            // Add all IDs (root + intermediates from parent's chain)
-            chain.AddRange(stringIds);
-
-            // Add parent's ID as intermediate
-            chain.Add(parentCapability.Id);
-
-            // CRITICAL: Add parent as full embedded object (last element)
-            chain.Add(parentCapability);
-        }
-        else
-        {
-            // Parent is a root capability
-            // Chain should be: [rootId, rootObject]
-            chain.Add(parentCapability.Id);
-            chain.Add(parentCapability);
+            return new object[] { parentCapability.Id };
         }
 
+        // The parent is itself delegated. Its own chain is [rootId, ...ancestorIds, {grandparent}].
+        // Re-reference every entry by ID (the embedded grandparent collapses to its id string), then
+        // append the parent as the single embedded object — i.e. the parent's chain with its trailing
+        // embedded ancestor demoted to an id and the new immediate parent embedded in its place.
+        var chain = new List<object>(parentChain.Length + 1);
+        foreach (var entry in parentChain)
+        {
+            chain.Add(ExtractEntryId(entry));
+        }
+        chain.Add(parentCapability);
         return chain.ToArray();
     }
+
+    /// <summary>
+    /// Extracts the capability id from a <c>capabilityChain</c> entry, handling every form an entry
+    /// can take: a CLR <see cref="string"/>, an embedded <see cref="Capability"/>, or a
+    /// <see cref="JsonElement"/> string/object (after a JSON round-trip of a wire-received parent).
+    /// Throws when no id can be read — a chain entry without an id is never valid.
+    /// </summary>
+    private static string ExtractEntryId(object entry) => entry switch
+    {
+        string s when s.Length > 0 => s,
+        Capability cap when !string.IsNullOrEmpty(cap.Id) => cap.Id,
+        JsonElement je when je.ValueKind == JsonValueKind.String &&
+                            je.GetString() is { Length: > 0 } js => js,
+        JsonElement je when je.ValueKind == JsonValueKind.Object &&
+                            je.TryGetProperty("id", out var idProp) &&
+                            idProp.ValueKind == JsonValueKind.String &&
+                            idProp.GetString() is { Length: > 0 } objId => objId,
+        _ => throw new InvalidOperationException(
+            "capabilityChain entry has no readable id; cannot build a spec-exact delegation chain."),
+    };
 
     /// <summary>
     /// Checks if Context is a string value, handling both native string

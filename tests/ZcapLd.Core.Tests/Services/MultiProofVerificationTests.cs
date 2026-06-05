@@ -30,6 +30,18 @@ public class MultiProofVerificationTests
         _capabilityService = new CapabilityService(_signingService);
     }
 
+    // Creates a root and registers it with the in-memory resolver so the verifier (which auto-detects
+    // _didProvider as an IRootCapabilityResolver) can resolve the root that spec-exact chains reference
+    // by id only (Issue #50).
+    private Task<Capability> CreateAndRegisterRootAsync(
+        ControllerSet controller,
+        string invocationTarget,
+        string[]? allowedActions = null,
+        DateTime? expires = null,
+        Caveat[]? caveats = null)
+        => TestRoots.CreateAndRegisterRootAsync(
+            _capabilityService, _didProvider, controller, invocationTarget, allowedActions, expires, caveats);
+
     private static Proof NonDelegationProof(string verificationMethod) => new()
     {
         Type = "Ed25519Signature2020",
@@ -43,7 +55,7 @@ public class MultiProofVerificationTests
     {
         var alice = _didProvider.GenerateDidKey();
         var bob = _didProvider.GenerateDidKey();
-        var root = await _capabilityService.CreateRootCapabilityAsync(alice, Target, new[] { "read" });
+        var root = await CreateAndRegisterRootAsync(alice, Target, new[] { "read" });
         var delegated = await _capabilityService.DelegateCapabilityAsync(
             root, bob, new[] { "read" }, expires: DateTime.UtcNow.AddDays(1));
         return (root, delegated, delegated.Proof!.Primary, alice);
@@ -109,9 +121,10 @@ public class MultiProofVerificationTests
         var (root, delegated, _, _) = await BuildDelegationAsync();
         var mallory = _didProvider.GenerateDidKey(); // resolvable key, but not a controller of root
 
-        // A cryptographically valid delegation proof — but signed by a non-controller.
+        // A cryptographically valid delegation proof with a spec-exact first-level chain — but signed
+        // by a non-controller, so authorization (not chain shape) is the reason it must fail.
         var malloryProof = await _signingService.SignCapabilityAsync(
-            delegated, mallory, "capabilityDelegation", new object[] { root.Id, root });
+            delegated, mallory, "capabilityDelegation", new object[] { root.Id });
 
         delegated.Proof = ProofSet.FromValues(new[] { malloryProof });
 

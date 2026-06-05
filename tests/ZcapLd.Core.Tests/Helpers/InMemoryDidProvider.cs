@@ -9,14 +9,19 @@ using ZcapLd.Core.Services;
 namespace ZcapLd.Core.Tests.Helpers;
 
 /// <summary>
-/// Test-only IDidSigner + IDidResolver (+ IVerificationRelationshipResolver) backed by in-memory
-/// Ed25519 keys. NOT for production use — private keys are stored in plaintext memory.
+/// Test-only IDidSigner + IDidResolver (+ IVerificationRelationshipResolver + IRootCapabilityResolver)
+/// backed by in-memory Ed25519 keys. NOT for production use — private keys are stored in plaintext
+/// memory. Because <see cref="VerificationService"/> auto-detects an <see cref="IDidResolver"/> that
+/// also implements <see cref="IRootCapabilityResolver"/>, registering a root via
+/// <see cref="RegisterRoot"/> makes the verifier resolve spec-exact (root-by-id) chains without
+/// passing the root on each call.
 /// </summary>
-public class InMemoryDidProvider : IDidSigner, IDidResolver, IVerificationRelationshipResolver
+public class InMemoryDidProvider : IDidSigner, IDidResolver, IVerificationRelationshipResolver, IRootCapabilityResolver
 {
     private static readonly DefaultCryptoProvider Crypto = new();
     private static readonly DefaultKeyGenerator KeyGen = new();
     private readonly ConcurrentDictionary<string, byte[]> _keyStore = new();
+    private readonly ConcurrentDictionary<string, Capability> _rootStore = new(StringComparer.Ordinal);
     private readonly DidKeyResolver _didKeyResolver = new();
 
     // --- IDidSigner ---
@@ -87,7 +92,34 @@ public class InMemoryDidProvider : IDidSigner, IDidResolver, IVerificationRelati
             : VerificationRelationshipAuthorizationResult.NotAuthorized());
     }
 
+    // --- IRootCapabilityResolver ---
+
+    /// <summary>
+    /// Resolves a root capability previously registered via <see cref="RegisterRoot"/>. Returns null
+    /// for an unknown id so the verifier fails closed, exactly as a production resolver would.
+    /// </summary>
+    public Task<Capability?> ResolveRootAsync(string rootCapabilityId)
+    {
+        if (string.IsNullOrEmpty(rootCapabilityId))
+            return Task.FromResult<Capability?>(null);
+
+        return Task.FromResult(_rootStore.TryGetValue(rootCapabilityId, out var root) ? root : null);
+    }
+
     // --- Convenience methods ---
+
+    /// <summary>
+    /// Registers a root capability so the verifier (which auto-detects this provider as an
+    /// <see cref="IRootCapabilityResolver"/>) can resolve the root a spec-exact chain references by id.
+    /// Returns the same capability for fluent use: <c>var root = provider.RegisterRoot(await create...)</c>.
+    /// </summary>
+    public Capability RegisterRoot(Capability root)
+    {
+        ArgumentNullException.ThrowIfNull(root);
+        if (!string.IsNullOrEmpty(root.Id))
+            _rootStore[root.Id] = root;
+        return root;
+    }
 
     public void RegisterKey(string did, byte[] privateKey)
     {

@@ -27,6 +27,18 @@ public class EndToEndTests
         _capabilityService = new CapabilityService(_signingService);
     }
 
+    // Creates a root and registers it with the in-memory resolver so the verifier (which auto-detects
+    // _didProvider as an IRootCapabilityResolver) can resolve the root that spec-exact chains reference
+    // by id only (Issue #50).
+    private Task<Capability> CreateAndRegisterRootAsync(
+        ControllerSet controller,
+        string invocationTarget,
+        string[]? allowedActions = null,
+        DateTime? expires = null,
+        Caveat[]? caveats = null)
+        => TestRoots.CreateAndRegisterRootAsync(
+            _capabilityService, _didProvider, controller, invocationTarget, allowedActions, expires, caveats);
+
     #region Complete Workflow Tests
 
     [Fact]
@@ -36,7 +48,7 @@ public class EndToEndTests
         var controllerDid = "did:key:z6MkController";
         _didProvider.GenerateAndRegisterKeyPair(controllerDid);
 
-        var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
+        var rootCapability = await CreateAndRegisterRootAsync(
             controllerDid,
             "https://api.example.com/documents",
             new[] { "read", "write" });
@@ -63,7 +75,7 @@ public class EndToEndTests
         var rootController = "did:key:z6MkRootController";
         _didProvider.GenerateAndRegisterKeyPair(rootController);
 
-        var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
+        var rootCapability = await CreateAndRegisterRootAsync(
             rootController,
             "https://api.example.com/documents",
             new[] { "read", "write", "delete" });
@@ -106,7 +118,7 @@ public class EndToEndTests
         _didProvider.GenerateAndRegisterKeyPair(controller3);
 
         // Root capability
-        var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
+        var rootCapability = await CreateAndRegisterRootAsync(
             controller1,
             "https://api.example.com/resources",
             new[] { "read", "write", "delete", "admin" });
@@ -161,7 +173,7 @@ public class EndToEndTests
             Expires = DateTime.UtcNow.AddHours(1) // Expires in 1 hour
         };
 
-        var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
+        var rootCapability = await CreateAndRegisterRootAsync(
             rootControllerDid,
             "https://api.example.com/documents",
             new[] { "read", "write" });
@@ -202,7 +214,7 @@ public class EndToEndTests
             Expires = DateTime.UtcNow.AddHours(-1) // Already expired
         };
 
-        var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
+        var rootCapability = await CreateAndRegisterRootAsync(
             rootControllerDid,
             "https://api.example.com/documents",
             new[] { "read", "write" });
@@ -244,7 +256,7 @@ public class EndToEndTests
             CurrentUses = 0
         };
 
-        var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
+        var rootCapability = await CreateAndRegisterRootAsync(
             rootControllerDid,
             "https://api.example.com/documents",
             new[] { "read", "write" });
@@ -295,7 +307,7 @@ public class EndToEndTests
         _didProvider.GenerateAndRegisterKeyPair(controller2);
 
         // Root without caveats; add caveat on first delegation.
-        var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
+        var rootCapability = await CreateAndRegisterRootAsync(
             controller1,
             "https://api.example.com/documents",
             new[] { "read", "write" });
@@ -355,7 +367,7 @@ public class EndToEndTests
         _didProvider.GenerateAndRegisterKeyPair(rootController);
         _didProvider.GenerateAndRegisterKeyPair(childController);
 
-        var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
+        var rootCapability = await CreateAndRegisterRootAsync(
             rootController,
             "https://api.example.com/documents",
             new[] { "read", "write", "delete" });
@@ -391,7 +403,7 @@ public class EndToEndTests
         _didProvider.GenerateAndRegisterKeyPair(rootController);
         _didProvider.GenerateAndRegisterKeyPair(childController);
 
-        var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
+        var rootCapability = await CreateAndRegisterRootAsync(
             rootController,
             "https://api.example.com/documents/folder1",
             new[] { "read" });
@@ -427,7 +439,7 @@ public class EndToEndTests
         _didProvider.GenerateAndRegisterKeyPair(rootController);
         _didProvider.GenerateAndRegisterKeyPair(childController);
 
-        var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
+        var rootCapability = await CreateAndRegisterRootAsync(
             rootController,
             "https://api.example.com/documents",
             new[] { "read" });
@@ -467,7 +479,7 @@ public class EndToEndTests
         _didProvider.GenerateAndRegisterKeyPair(authorizedController);
         _didProvider.GenerateAndRegisterKeyPair(unauthorizedController);
 
-        var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
+        var rootCapability = await CreateAndRegisterRootAsync(
             authorizedController,
             "https://api.example.com/documents",
             new[] { "read" });
@@ -497,7 +509,7 @@ public class EndToEndTests
 
         var childDid = "did:key:z6MkChild";
 
-        var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
+        var rootCapability = await CreateAndRegisterRootAsync(
             controllerDid,
             "https://api.example.com/documents",
             new[] { "read" });
@@ -527,7 +539,7 @@ public class EndToEndTests
 
         var childDid = "did:key:z6MkChild";
 
-        var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
+        var rootCapability = await CreateAndRegisterRootAsync(
             controllerDid,
             "https://api.example.com/documents",
             new[] { "read" });
@@ -564,7 +576,7 @@ public class EndToEndTests
         _didProvider.GenerateAndRegisterKeyPair(carol);
 
         // Alice creates root capability for her document
-        var aliceCapability = await _capabilityService.CreateRootCapabilityAsync(
+        var aliceCapability = await CreateAndRegisterRootAsync(
             alice,
             "https://storage.example.com/documents/alice-report.pdf",
             new[] { "read", "write", "share" });
@@ -639,7 +651,7 @@ public class EndToEndTests
         _didProvider.GenerateAndRegisterKeyPair(customer);
 
         // API provider creates root capability
-        var apiCapability = await _capabilityService.CreateRootCapabilityAsync(
+        var apiCapability = await CreateAndRegisterRootAsync(
             apiProvider,
             "https://api.example.com/v1/data",
             new[] { "query", "download" });

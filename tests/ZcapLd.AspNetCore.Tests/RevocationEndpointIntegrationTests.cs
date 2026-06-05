@@ -30,12 +30,21 @@ public sealed class RevocationEndpointIntegrationTests : IClassFixture<Revocatio
     /// <summary>Boots the demo host but swaps the SQLite store for an in-memory one (no DB file).</summary>
     public sealed class RevocationApiFactory : WebApplicationFactory<Program>
     {
+        /// <summary>
+        /// Server-side root resolver: a spec-exact delegation chain references the root by id only, so
+        /// the verifier must resolve it to authorize a delegated revocation (Issue #50). Tests register
+        /// the root they create here before posting. Shared across the class (tests run sequentially).
+        /// </summary>
+        public InMemoryRootCapabilityResolver RootResolver { get; } = new();
+
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
             builder.ConfigureServices(services =>
             {
                 services.RemoveAll<IRevocationStore>();
                 services.AddSingleton<IRevocationStore, InMemoryRevocationStore>();
+                services.RemoveAll<IRootCapabilityResolver>();
+                services.AddSingleton<IRootCapabilityResolver>(RootResolver);
             });
         }
     }
@@ -64,6 +73,7 @@ public sealed class RevocationEndpointIntegrationTests : IClassFixture<Revocatio
 
         var root = await client.Capabilities.CreateRootCapabilityAsync(
             rootDid, "https://example.com/resource", new[] { "read", "write" });
+        _factory.RootResolver.Register(root); // server resolves the root a spec-exact chain references by id
         var delegated = await client.Capabilities.DelegateCapabilityAsync(
             root, childDid, new[] { "read" }, DateTime.UtcNow.AddDays(5));
 
@@ -158,6 +168,7 @@ public sealed class RevocationEndpointIntegrationTests : IClassFixture<Revocatio
 
         var root = await client.Capabilities.CreateRootCapabilityAsync(
             rootDid, "https://example.com/resource", new[] { "read", "write" });
+        _factory.RootResolver.Register(root); // server resolves the root a spec-exact chain references by id
         var delegated = await client.Capabilities.DelegateCapabilityAsync(
             root, childDid, new[] { "read" }, DateTime.UtcNow.AddDays(5),
             caveats: new Caveat[] { new ExpirationCaveat { Expires = DateTime.UtcNow.AddDays(3) } });
@@ -180,6 +191,7 @@ public sealed class RevocationEndpointIntegrationTests : IClassFixture<Revocatio
 
         var root = await client.Capabilities.CreateRootCapabilityAsync(
             rootDid, "https://example.com/resource", new[] { "read", "write" });
+        _factory.RootResolver.Register(root); // server resolves the root a spec-exact chain references by id
         var delegated = await client.Capabilities.DelegateCapabilityAsync(
             root, childDid, new[] { "read" }, DateTime.UtcNow.AddDays(5));
 

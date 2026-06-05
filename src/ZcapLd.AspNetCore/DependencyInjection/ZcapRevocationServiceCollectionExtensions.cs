@@ -84,6 +84,10 @@ public static class ZcapRevocationServiceCollectionExtensions
         // (Issue #65) performs controller authorization by resolving the controller's DID document;
         // when a consumer has registered one (e.g. a multi-method resolver from NetDid's AddNetDid)
         // it is used, otherwise VerificationService falls back to its built-in did:key default.
+        // The optional IRootCapabilityResolver (Issue #50) lets the verifier obtain a root capability
+        // referenced by id only in a spec-exact delegation chain; register one via
+        // AddZcapRootCapabilityResolver to verify/revoke delegated capabilities without passing the
+        // root explicitly on every call (e.g. the revocation endpoint).
         services.TryAddSingleton<IVerificationService>(sp =>
             new VerificationService(
                 sp.GetRequiredService<IDidResolver>(),
@@ -93,8 +97,40 @@ public static class ZcapRevocationServiceCollectionExtensions
                 sp.GetRequiredService<INonceStore>(),
                 sp.GetRequiredService<IDocumentCanonicalizerProvider>(),
                 logger: sp.GetService<ILogger<VerificationService>>(),
-                relationshipResolver: sp.GetService<IVerificationRelationshipResolver>()));
+                relationshipResolver: sp.GetService<IVerificationRelationshipResolver>(),
+                rootResolver: sp.GetService<IRootCapabilityResolver>()));
 
+        return services;
+    }
+
+    /// <summary>
+    /// Registers an <see cref="IRootCapabilityResolver"/> so the verifier can obtain a root
+    /// capability that a spec-exact delegation chain references by id only (Issue #50). Required for
+    /// verifying or revoking delegated capabilities through the DI-wired
+    /// <see cref="IVerificationService"/> without supplying the root on each call. Register before
+    /// <see cref="AddZcapServices"/> resolves the provider, or before the
+    /// <see cref="IVerificationService"/> singleton is first resolved.
+    /// </summary>
+    public static IServiceCollection AddZcapRootCapabilityResolver<TResolver>(this IServiceCollection services)
+        where TResolver : class, IRootCapabilityResolver
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        services.Replace(ServiceDescriptor.Singleton<IRootCapabilityResolver, TResolver>());
+        return services;
+    }
+
+    /// <summary>
+    /// Registers an <see cref="IRootCapabilityResolver"/> using a factory (Issue #50).
+    /// </summary>
+    public static IServiceCollection AddZcapRootCapabilityResolver(
+        this IServiceCollection services,
+        Func<IServiceProvider, IRootCapabilityResolver> resolverFactory)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(resolverFactory);
+
+        services.Replace(ServiceDescriptor.Singleton(resolverFactory));
         return services;
     }
 

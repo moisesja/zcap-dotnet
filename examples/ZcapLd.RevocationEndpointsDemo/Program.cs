@@ -1,6 +1,7 @@
 using ZcapLd.AspNetCore.DependencyInjection;
 using ZcapLd.AspNetCore.Endpoints;
 using ZcapLd.AspNetCore.Services;
+using ZcapLd.Core.Services;
 using ZcapLd.RevocationEndpointsDemo;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -22,6 +23,12 @@ builder.Services.AddZcapServices();
 // Override the revocation store with the SQLite-backed implementation (Replace-based, so it must
 // run after AddZcapServices, which registers the in-memory store via TryAdd).
 builder.Services.AddZcapRevocationSupport(_ => new SqliteRevocationStore(connectionString));
+
+// A spec-exact delegation chain references the root by id only (Issue #50), so authorizing a
+// *delegated* revocation requires resolving that root. A real resource server resolves roots from its
+// own store; this demo registers an in-memory resolver — register the roots you intend to accept
+// delegated revocations against (e.g. at startup) so the POST endpoint can authorize them.
+builder.Services.AddZcapRootCapabilityResolver<InMemoryRootCapabilityResolver>();
 
 // Enable ValidWhileTrue caveat support.
 // This registers HttpValidWhileTrueHandler, which GETs the caveat URI during

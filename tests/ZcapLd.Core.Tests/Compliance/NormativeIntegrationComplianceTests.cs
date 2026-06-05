@@ -15,10 +15,12 @@ public class NormativeIntegrationComplianceTests
         var childDid = fixture.RegisterControllerDid();
         var attackerDid = fixture.RegisterControllerDid();
 
-        var root = await fixture.CapabilityService.CreateRootCapabilityAsync(
+        // Register the root so the verifier can resolve it (spec-exact first-level chain is [rootId]),
+        // isolating the property under test: the signature, not the chain shape, is unauthorized.
+        var root = fixture.DidProvider.RegisterRoot(await fixture.CapabilityService.CreateRootCapabilityAsync(
             parentDid,
             "https://example.com/resources",
-            new[] { "read", "write" });
+            new[] { "read", "write" }));
 
         var delegated = new Capability
         {
@@ -35,11 +37,12 @@ public class NormativeIntegrationComplianceTests
             Expires = ZcapTimestamps.Format(DateTime.UtcNow.AddDays(5))
         };
 
+        // Spec-exact first-level chain, but signed by an attacker who is not the root's controller.
         delegated.Proof = await fixture.SigningService.SignCapabilityAsync(
             delegated,
             attackerDid,
             "capabilityDelegation",
-            new object[] { root.Id, root });
+            new object[] { root.Id });
 
         var result = await fixture.VerificationService.VerifyCapabilityProofAsync(delegated);
         result.Should().BeFalse("MUST-09 requires delegation signatures to be authorized by the parent controller.");
@@ -206,7 +209,7 @@ public class NormativeIntegrationComplianceTests
             level1,
             rootDid,
             "capabilityDelegation",
-            new object[] { root.Id, root });
+            new object[] { root.Id }); // spec-exact first-level chain: root by id only, never embedded
 
         var level2 = new Capability
         {
@@ -228,7 +231,9 @@ public class NormativeIntegrationComplianceTests
             "capabilityDelegation",
             new object[] { root.Id, level1 });
 
-        var isValid = await fixture.VerificationService.VerifyCapabilityChainAsync(level2);
+        // The root is supplied in-process (explicit-root overload) — verification dereferences NOTHING
+        // over the network or a database; the root a spec-exact chain references by id is provided locally.
+        var isValid = await fixture.VerificationService.VerifyCapabilityChainAsync(level2, root);
         isValid.Should().BeTrue("MUST-18 requires local chain verification without network dereferencing.");
     }
 
