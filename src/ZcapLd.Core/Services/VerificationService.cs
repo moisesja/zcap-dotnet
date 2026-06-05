@@ -338,12 +338,9 @@ public class VerificationService : IVerificationService
                 return false;
             }
 
-            // Bind the suite (chosen from the proof's type) to the resolved key's type. The proof
-            // type is part of the signed payload, so tampering breaks the signature, and key
-            // importers reject cross-curve bytes — but this explicit guard self-documents the
-            // invariant and future-proofs against custom resolvers/suites that might erode it
-            // (Issue #68).
-            if (!string.Equals(suite.KeyType, resolvedKey.KeyType, StringComparison.Ordinal))
+            // Bind the suite (chosen from the proof's type) to the resolved key's type (Issue #68);
+            // see KeyTypeMatches for the rationale and the resolver↔suite vocabulary contract.
+            if (!KeyTypeMatches(suite, resolvedKey))
             {
                 return false;
             }
@@ -514,8 +511,9 @@ public class VerificationService : IVerificationService
             ?? throw new CapabilityValidationException(
                 $"Unsupported proof type: {proof.Type}");
 
-        // Bind the suite (chosen from the proof's type) to the resolved key's type (Issue #68).
-        if (!string.Equals(suite.KeyType, resolvedKey.KeyType, StringComparison.Ordinal))
+        // Bind the suite (chosen from the proof's type) to the resolved key's type (Issue #68);
+        // see KeyTypeMatches for the rationale and the resolver↔suite vocabulary contract.
+        if (!KeyTypeMatches(suite, resolvedKey))
             return false;
 
         var canonicalizer = ResolveCanonicalizer(suite);
@@ -528,6 +526,25 @@ public class VerificationService : IVerificationService
 
         return suite.Verify(canonicalBytes, signatureBytes, resolvedKey.PublicKeyBytes);
     }
+
+    /// <summary>
+    /// Binds the crypto suite (selected from the attacker-controlled <c>proof.Type</c>) to the key the
+    /// DID actually resolves to: the suite's <see cref="ICryptoSuite.KeyType"/> must equal the
+    /// <see cref="ResolvedKey.KeyType"/> exactly (Issue #68). The proof type is part of the signed
+    /// payload, so tampering already breaks the signature, and key importers reject cross-curve bytes —
+    /// but this explicit, fail-closed guard self-documents the invariant and future-proofs against
+    /// custom resolvers/suites that might erode those downstream protections.
+    /// <para>
+    /// This couples two vocabularies by design: an <see cref="IDidResolver"/> MUST emit the exact
+    /// <see cref="ResolvedKey.KeyType"/> string the matching <see cref="ICryptoSuite"/> uses
+    /// (e.g. <c>Ed25519VerificationKey2020</c>), not a synonym (<c>Multikey</c>, <c>JsonWebKey2020</c>,
+    /// <c>Ed25519VerificationKey2018</c>). The in-library pairs already align —
+    /// <c>DidKeyResolver.MapKeyType</c> ↔ <c>CryptoSuite.Ed25519/P256().KeyType</c> — and the contract
+    /// is documented on both members. The single source of truth for the two verify paths.
+    /// </para>
+    /// </summary>
+    private static bool KeyTypeMatches(ICryptoSuite suite, ResolvedKey resolvedKey) =>
+        string.Equals(suite.KeyType, resolvedKey.KeyType, StringComparison.Ordinal);
 
     /// <summary>
     /// Verifies a capability delegation chain
