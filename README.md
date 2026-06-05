@@ -86,6 +86,17 @@ var invocation = capabilityService.CreateInvocation(
 
 invocation.Proof = await signingService.SignInvocationAsync(invocation, leafDid);
 var isValid = await verificationService.VerifyInvocationAsync(invocation, delegated);
+
+// Need to know WHY verification failed? Every verify method has a `...DetailedAsync` sibling that
+// returns a structured VerificationResult (outcome enum + message) instead of a bare bool (Issue #70):
+var result = await verificationService.VerifyInvocationDetailedAsync(invocation, delegated);
+if (!result.IsValid)
+{
+    // result.Outcome is e.g. Revoked, Expired, InvalidSignature, UnauthorizedController, Replayed,
+    // CaveatFailed, ActionNotAllowed, InvalidTarget, ChainTooLong, … or CouldNotVerify (a config/
+    // transient fault rather than an invalid capability). The bool method above == result.IsValid.
+    Console.WriteLine($"Denied: {result.Outcome} — {result.Message}");
+}
 ```
 
 ### Single vs Multiple Controllers

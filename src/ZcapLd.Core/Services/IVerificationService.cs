@@ -36,6 +36,26 @@ public interface IVerificationService
     Task<bool> VerifyCapabilityProofAsync(Capability capability, Capability rootCapability);
 
     /// <summary>
+    /// Structured-result sibling of <see cref="VerifyCapabilityProofAsync(Capability)"/>: returns a
+    /// <see cref="VerificationResult"/> whose <see cref="VerificationResult.Outcome"/> names the specific
+    /// failure (e.g. <see cref="VerificationOutcome.Revoked"/>, <see cref="VerificationOutcome.InvalidSignature"/>)
+    /// instead of a bare <c>false</c> (Issue #70). Fail-closed semantics are identical; the bool overload
+    /// returns this result's <see cref="VerificationResult.IsValid"/>.
+    /// </summary>
+    /// <param name="capability">The capability whose delegation proof to verify</param>
+    /// <returns>A <see cref="VerificationResult"/> describing the outcome.</returns>
+    Task<VerificationResult> VerifyCapabilityProofDetailedAsync(Capability capability);
+
+    /// <summary>
+    /// Structured-result sibling of <see cref="VerifyCapabilityProofAsync(Capability, Capability)"/>
+    /// (explicit root). See <see cref="VerifyCapabilityProofDetailedAsync(Capability)"/>.
+    /// </summary>
+    /// <param name="capability">The capability to verify</param>
+    /// <param name="rootCapability">The root capability the chain references by id</param>
+    /// <returns>A <see cref="VerificationResult"/> describing the outcome.</returns>
+    Task<VerificationResult> VerifyCapabilityProofDetailedAsync(Capability capability, Capability rootCapability);
+
+    /// <summary>
     /// Verifies an invocation request
     /// </summary>
     /// <param name="invocation">The invocation to verify</param>
@@ -69,6 +89,47 @@ public interface IVerificationService
     Task<bool> VerifyInvocationAsync(Invocation invocation, Capability capability, Capability rootCapability, Dictionary<string, object>? contextProperties);
 
     /// <summary>
+    /// Structured-result sibling of <see cref="VerifyInvocationAsync(Invocation, Capability)"/>: returns a
+    /// <see cref="VerificationResult"/> naming the specific failure (e.g.
+    /// <see cref="VerificationOutcome.Replayed"/>, <see cref="VerificationOutcome.ActionNotAllowed"/>,
+    /// <see cref="VerificationOutcome.UnauthorizedController"/>) instead of a bare <c>false</c> (Issue #70).
+    /// </summary>
+    /// <param name="invocation">The invocation to verify</param>
+    /// <param name="capability">The capability being invoked</param>
+    /// <returns>A <see cref="VerificationResult"/> describing the outcome.</returns>
+    Task<VerificationResult> VerifyInvocationDetailedAsync(Invocation invocation, Capability capability);
+
+    /// <summary>
+    /// Structured-result sibling of
+    /// <see cref="VerifyInvocationAsync(Invocation, Capability, Dictionary{string, object})"/>
+    /// (with application context properties). See <see cref="VerifyInvocationDetailedAsync(Invocation, Capability)"/>.
+    /// </summary>
+    /// <param name="invocation">The invocation to verify</param>
+    /// <param name="capability">The capability being invoked</param>
+    /// <param name="contextProperties">Application-specific key/value pairs to inject into the invocation context</param>
+    /// <returns>A <see cref="VerificationResult"/> describing the outcome.</returns>
+    Task<VerificationResult> VerifyInvocationDetailedAsync(
+        Invocation invocation,
+        Capability capability,
+        Dictionary<string, object>? contextProperties);
+
+    /// <summary>
+    /// Structured-result sibling of
+    /// <see cref="VerifyInvocationAsync(Invocation, Capability, Capability, Dictionary{string, object})"/>
+    /// (explicit root + context). See <see cref="VerifyInvocationDetailedAsync(Invocation, Capability)"/>.
+    /// </summary>
+    /// <param name="invocation">The invocation to verify</param>
+    /// <param name="capability">The capability being invoked</param>
+    /// <param name="rootCapability">The root capability the chain references by id</param>
+    /// <param name="contextProperties">Application-specific key/value pairs to inject into the invocation context</param>
+    /// <returns>A <see cref="VerificationResult"/> describing the outcome.</returns>
+    Task<VerificationResult> VerifyInvocationDetailedAsync(
+        Invocation invocation,
+        Capability capability,
+        Capability rootCapability,
+        Dictionary<string, object>? contextProperties);
+
+    /// <summary>
     /// Verifies a capability delegation chain
     /// </summary>
     /// <param name="capability">The capability with delegation chain</param>
@@ -83,6 +144,27 @@ public interface IVerificationService
     /// <param name="rootCapability">The root capability the chain references by id</param>
     /// <returns>True if the chain is valid</returns>
     Task<bool> VerifyCapabilityChainAsync(Capability capability, Capability rootCapability);
+
+    /// <summary>
+    /// Structured-result sibling of <see cref="VerifyCapabilityChainAsync(Capability)"/>: returns a
+    /// <see cref="VerificationResult"/> naming the specific failure (e.g.
+    /// <see cref="VerificationOutcome.ChainTooLong"/>, <see cref="VerificationOutcome.Revoked"/>,
+    /// <see cref="VerificationOutcome.AttenuationViolation"/>) instead of a bare <c>false</c> (Issue #70).
+    /// This is the overload a downstream consumer needs to tell <see cref="VerificationOutcome.Revoked"/>
+    /// from a broken chain without reconstructing chain ids itself.
+    /// </summary>
+    /// <param name="capability">The capability with delegation chain</param>
+    /// <returns>A <see cref="VerificationResult"/> describing the outcome.</returns>
+    Task<VerificationResult> VerifyCapabilityChainDetailedAsync(Capability capability);
+
+    /// <summary>
+    /// Structured-result sibling of <see cref="VerifyCapabilityChainAsync(Capability, Capability)"/>
+    /// (explicit root). See <see cref="VerifyCapabilityChainDetailedAsync(Capability)"/>.
+    /// </summary>
+    /// <param name="capability">The capability with delegation chain</param>
+    /// <param name="rootCapability">The root capability the chain references by id</param>
+    /// <returns>A <see cref="VerificationResult"/> describing the outcome.</returns>
+    Task<VerificationResult> VerifyCapabilityChainDetailedAsync(Capability capability, Capability rootCapability);
 
     /// <summary>
     /// Resolves a DID to its public key for verification
