@@ -35,7 +35,10 @@ public class VerificationService : IVerificationService
     public static readonly TimeSpan DefaultNonceWindow = TimeSpan.FromMinutes(5);
 
     /// <summary>
-    /// Backward-compatible constructor (Ed25519 only).
+    /// Backward-compatible constructor (Ed25519 only). Each instance gets its own process-local
+    /// <see cref="InMemoryNonceStore"/>, so replay state is NOT shared across
+    /// <see cref="VerificationService"/> instances; in a per-request / multi-instance setup supply a
+    /// shared <see cref="INonceStore"/> via the full constructor (Issue #62; PR #88 review).
     /// </summary>
     public VerificationService(IDidResolver didResolver, ICaveatProcessor caveatProcessor)
         : this(didResolver, caveatProcessor, CreateDefaultSuiteProvider(),
@@ -44,7 +47,10 @@ public class VerificationService : IVerificationService
     }
 
     /// <summary>
-    /// Backward-compatible constructor with custom revocation service (Ed25519 only).
+    /// Backward-compatible constructor with custom revocation service (Ed25519 only). Each instance
+    /// gets its own process-local <see cref="InMemoryNonceStore"/>, so replay state is NOT shared
+    /// across <see cref="VerificationService"/> instances; in a per-request / multi-instance setup
+    /// supply a shared <see cref="INonceStore"/> via the full constructor (Issue #62; PR #88 review).
     /// </summary>
     public VerificationService(
         IDidResolver didResolver,
@@ -55,7 +61,10 @@ public class VerificationService : IVerificationService
     }
 
     /// <summary>
-    /// Constructor with explicit crypto suite provider.
+    /// Constructor with explicit crypto suite provider. Each instance gets its own process-local
+    /// <see cref="InMemoryNonceStore"/>, so replay state is NOT shared across
+    /// <see cref="VerificationService"/> instances; in a per-request / multi-instance setup supply a
+    /// shared <see cref="INonceStore"/> via the full constructor (Issue #62; PR #88 review).
     /// </summary>
     public VerificationService(
         IDidResolver didResolver,
