@@ -33,14 +33,14 @@ public class MultiControllerAuthorizationTests
     // Creates a root and registers it with the in-memory resolver so the verifier (which auto-detects
     // _didProvider as an IRootCapabilityResolver) can resolve the root that spec-exact chains reference
     // by id only (Issue #50).
-    private async Task<Capability> CreateAndRegisterRootAsync(
+    private Task<Capability> CreateAndRegisterRootAsync(
         ControllerSet controller,
         string invocationTarget,
         string[]? allowedActions = null,
         DateTime? expires = null,
         Caveat[]? caveats = null)
-        => _didProvider.RegisterRoot(
-            await _capabilityService.CreateRootCapabilityAsync(controller, invocationTarget, allowedActions, expires, caveats));
+        => TestRoots.CreateAndRegisterRootAsync(
+            _capabilityService, _didProvider, controller, invocationTarget, allowedActions, expires, caveats);
 
     // ─── Root invocation authorization ─────────────────────────────────
 

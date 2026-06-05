@@ -37,8 +37,8 @@ public class CapabilityChainShapeTests
     private string NewController() => _did.GenerateDidKey();
 
     // Creates AND registers a root (registered roots are resolvable by the auto-wired resolver).
-    private async Task<Capability> RootAsync(string controller, string[]? actions = null)
-        => _did.RegisterRoot(await _caps.CreateRootCapabilityAsync(controller, Target, actions ?? new[] { "read", "write" }));
+    private Task<Capability> RootAsync(string controller, string[]? actions = null)
+        => TestRoots.CreateAndRegisterRootAsync(_caps, _did, controller, Target, actions ?? new[] { "read", "write" });
 
     private Task<Capability> DelegateAsync(Capability parent, string childController, string[] actions)
         => _caps.DelegateCapabilityAsync(parent, childController, actions, Expiry);
@@ -199,5 +199,92 @@ public class CapabilityChainShapeTests
         var bad = await SignedChildAsync(d1, NewController(), signerDid: d1Did, chain: new object[] { root.Id, root });
 
         (await _verifier.VerifyCapabilityChainAsync(bad)).Should().BeFalse();
+    }
+
+    // ─────────────────────────── Root binding (anti-substitution) ───────────────────────────
+
+    [Fact]
+    public async Task Verify_Rejects_SuppliedRoot_WithMismatchedId()
+    {
+        var rootDid = NewController();
+        var root = await _caps.CreateRootCapabilityAsync(rootDid, Target, new[] { "read" }); // not registered
+        var d1 = await DelegateAsync(root, NewController(), new[] { "read" });
+
+        // A different root (different target ⇒ different id) cannot stand in for the chain's root.
+        var otherRoot = await _caps.CreateRootCapabilityAsync(rootDid, "https://other.example/x", new[] { "read" });
+
+        (await _verifier.VerifyCapabilityChainAsync(d1, otherRoot)).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Verify_Rejects_Root_WithMismatchedInvocationTarget()
+    {
+        var rootDid = NewController();
+        var root = await _caps.CreateRootCapabilityAsync(rootDid, Target, new[] { "read" });
+        var d1 = await DelegateAsync(root, NewController(), new[] { "read" });
+
+        // Right id, but invocationTarget does not match the target encoded in urn:zcap:root:{target}.
+        var tampered = new Capability
+        {
+            Context = "https://w3id.org/zcap/v1",
+            Id = root.Id,
+            Controller = rootDid,
+            InvocationTarget = "https://evil.example/resource"
+        };
+
+        // Rejected whether supplied explicitly or returned by the resolver.
+        (await _verifier.VerifyCapabilityChainAsync(d1, tampered)).Should().BeFalse();
+        _did.RegisterRoot(tampered); // keyed by tampered.Id == root.Id
+        (await _verifier.VerifyCapabilityChainAsync(d1)).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Verify_Rejects_ResolvedRoot_ThatIsNotAValidRoot()
+    {
+        // A "root" carrying a parentCapability (or proof) is not a valid trust anchor — reject even
+        // though its id/target bind correctly.
+        var rootDid = NewController();
+        var root = await _caps.CreateRootCapabilityAsync(rootDid, Target, new[] { "read" });
+        var d1 = await DelegateAsync(root, NewController(), new[] { "read" });
+
+        var notARoot = new Capability
+        {
+            Context = "https://w3id.org/zcap/v1",
+            Id = root.Id,
+            Controller = rootDid,
+            InvocationTarget = Target,
+            ParentCapability = "urn:zcap:root:something-else" // a root MUST NOT have a parent
+        };
+
+        (await _verifier.VerifyCapabilityChainAsync(d1, notARoot)).Should().BeFalse();
+    }
+
+    // ─────────────────────────── Explicit-root coverage (deeper chain + revoke) ───────────────────────────
+
+    [Fact]
+    public async Task Verify_DeeperChain_Succeeds_ViaExplicitRoot_WithoutResolver()
+    {
+        var root = await _caps.CreateRootCapabilityAsync(NewController(), Target, new[] { "read", "write" }); // not registered
+        var d1 = await DelegateAsync(root, NewController(), new[] { "read", "write" });
+        var d2 = await DelegateAsync(d1, NewController(), new[] { "read" });
+
+        (await _verifier.VerifyCapabilityChainAsync(d2, root)).Should().BeTrue();
+        (await _verifier.VerifyCapabilityProofAsync(d2, root)).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task Revoke_FirstLevel_Succeeds_ViaExplicitRoot()
+    {
+        var rootDid = NewController();
+        var childDid = NewController();
+        var root = await _caps.CreateRootCapabilityAsync(rootDid, Target, new[] { "read" }); // not registered
+        var d1 = await _caps.DelegateCapabilityAsync(root, childDid, new[] { "read" }, Expiry);
+
+        // The leaf's own controller signs the revocation (self-revoke); authorization walks the chain,
+        // which needs the root — supplied here via the explicit-root overload.
+        var signed = await _signing.SignRevocationAsync(d1.Id, childDid, d1.InvocationTarget);
+
+        (await _verifier.RevokeCapabilityAsync(d1, signed, root)).Should().BeTrue();
+        (await _verifier.IsCapabilityRevokedAsync(d1.Id)).Should().BeTrue();
     }
 }

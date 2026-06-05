@@ -21,6 +21,12 @@ namespace ZcapLd.Core.Services;
 /// when a verify/revoke call is made <i>without</i> an explicitly supplied root capability; an explicit
 /// root always takes precedence. When neither is available the verifier fails closed.
 /// </para>
+/// <para>
+/// <b>Performance:</b> resolution happens while the verifier builds the chain — before the leaf's
+/// signature is checked — so an attacker-supplied (and ultimately rejected) chain can still trigger a
+/// lookup. Keep <see cref="ResolveRootAsync"/> cheap; an I/O- or database-backed implementation should
+/// cache, since a process's set of roots is small and changes rarely.
+/// </para>
 /// </remarks>
 public interface IRootCapabilityResolver
 {

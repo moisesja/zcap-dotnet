@@ -816,26 +816,9 @@ public class VerificationService : IVerificationService
                 $"Root capability ID '{root.Id}' does not match capabilityChain root ID '{expectedRootId}'.");
         }
 
-        if (!string.IsNullOrEmpty(root.ParentCapability))
-        {
-            throw new CapabilityValidationException("Root capability MUST NOT have parentCapability.");
-        }
-
-        if (root.Proof != null)
-        {
-            throw new CapabilityValidationException("Root capability MUST NOT include a delegation proof.");
-        }
-
-        if (root.Controller is null || root.Controller.IsEmpty)
-        {
-            throw new CapabilityValidationException("Root capability MUST include a non-empty controller.");
-        }
-
-        if (string.IsNullOrWhiteSpace(root.InvocationTarget) ||
-            !Uri.IsWellFormedUriString(root.InvocationTarget, UriKind.Absolute))
-        {
-            throw new CapabilityValidationException("Root capability MUST include a valid absolute invocationTarget URI.");
-        }
+        // Structural root invariants (shared with the standalone proof path); also covers a direct-root
+        // verification, where the leaf IS the root and ResolveRootCapabilityAsync is never reached.
+        ValidateRootCapabilityInvariants(root);
 
         return chain;
     }
@@ -1128,7 +1111,41 @@ public class VerificationService : IVerificationService
             }
         }
 
+        // Enforce the structural root invariants on the standalone proof path too, so it rejects a
+        // malformed root identically to the chain-walk path (which validates chain[0] below).
+        ValidateRootCapabilityInvariants(root);
         return root;
+    }
+
+    /// <summary>
+    /// Enforces the structural invariants every root capability MUST satisfy: no <c>parentCapability</c>,
+    /// no delegation <c>proof</c> (a root is an unsigned trust anchor), a non-empty <c>controller</c>,
+    /// and a valid absolute <c>invocationTarget</c>. Applied wherever a root is obtained — the resolved
+    /// root on the standalone proof path (<see cref="ResolveRootCapabilityAsync"/>) and the <c>chain[0]</c>
+    /// root on the chain-walk path — so both verifier entry points reject a malformed root identically.
+    /// </summary>
+    private static void ValidateRootCapabilityInvariants(Capability root)
+    {
+        if (!string.IsNullOrEmpty(root.ParentCapability))
+        {
+            throw new CapabilityValidationException("Root capability MUST NOT have parentCapability.");
+        }
+
+        if (root.Proof != null)
+        {
+            throw new CapabilityValidationException("Root capability MUST NOT include a delegation proof.");
+        }
+
+        if (root.Controller is null || root.Controller.IsEmpty)
+        {
+            throw new CapabilityValidationException("Root capability MUST include a non-empty controller.");
+        }
+
+        if (string.IsNullOrWhiteSpace(root.InvocationTarget) ||
+            !Uri.IsWellFormedUriString(root.InvocationTarget, UriKind.Absolute))
+        {
+            throw new CapabilityValidationException("Root capability MUST include a valid absolute invocationTarget URI.");
+        }
     }
 
     private static bool TryDeserializeCapability(object element, out Capability? capability)

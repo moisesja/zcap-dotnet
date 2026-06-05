@@ -49,6 +49,26 @@ A request that is unauthenticated (bad/forged signature) or unauthorized (the si
 in the chain) returns **403** and records nothing. A route id that disagrees with the body capability id
 returns **400**.
 
+### Root resolution (required for delegated revocation)
+
+Authorizing the revocation of a **delegated** capability verifies its delegation chain, and a
+spec-exact chain references the root **by id only** (Issue #50). The server must therefore resolve that
+root — it is never trusted from the request body, since a client-supplied root could name an
+attacker-chosen controller. This demo registers an in-memory resolver
+(`AddZcapRootCapabilityResolver<InMemoryRootCapabilityResolver>()`); you must **seed the roots** you
+will accept delegated revocations against, otherwise those requests fail closed with **403**:
+
+```csharp
+// At startup (the resource owner knows its own roots):
+var roots = (InMemoryRootCapabilityResolver)app.Services.GetRequiredService<IRootCapabilityResolver>();
+roots.Register(root); // a Capability created via CreateRootCapabilityAsync
+```
+
+A production resource server implements `IRootCapabilityResolver` over its own root store.
+(Revoking a **root** capability needs no resolver — there is no chain to walk.) The
+`ZcapLd.AspNetCore.Tests` integration tests exercise the full delegated-revocation flow with a seeded
+resolver.
+
 Check status:
 
 ```bash
