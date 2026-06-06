@@ -382,7 +382,8 @@ public class VerificationService : IVerificationService
         Capability capability,
         Capability? parentCapabilityOverride,
         bool requireParentAuthorization,
-        Capability? explicitRoot = null)
+        Capability? explicitRoot = null,
+        bool applyCreatedCheck = true)
     {
         if (capability.Proof == null)
         {
@@ -401,7 +402,8 @@ public class VerificationService : IVerificationService
         foreach (var proof in capability.Proof.DelegationProofs())
         {
             var result = await VerifySingleDelegationProofAsync(
-                capability, proof, parentCapabilityOverride, requireParentAuthorization, explicitRoot);
+                capability, proof, parentCapabilityOverride, requireParentAuthorization, explicitRoot,
+                applyCreatedCheck);
             if (result.IsValid)
             {
                 return result;
@@ -418,10 +420,22 @@ public class VerificationService : IVerificationService
         Proof proof,
         Capability? parentCapabilityOverride,
         bool requireParentAuthorization,
-        Capability? explicitRoot = null)
+        Capability? explicitRoot = null,
+        bool applyCreatedCheck = true)
     {
         try
         {
+            // Delegation-proof `created` soundness (Issue #99): reject a future-dated (beyond clock
+            // skew) or unparseable `created` always, and a missing `created` under policy. Checked
+            // BEFORE the signature gate — mirroring the invocation-side #71 freshness check — so it is a
+            // cheap local gate independent of resolver I/O, and the failure cases stay observable
+            // without a valid signature. There is NO staleness lower-bound: a durable delegation signed
+            // long ago must still verify. Skipped on the revocation-authorization path
+            // (applyCreatedCheck == false) so a delegation with a malformed `created` remains revocable,
+            // mirroring the #73 expiration-ceiling carve-out.
+            if (applyCreatedCheck && CheckDelegationProofCreated(proof) is { } createdFailure)
+                return createdFailure;
+
             // Acquire the immediate parent. The chain-walk caller supplies it directly; the
             // standalone path derives it from the proof chain — an embedded last entry for a deeper
             // delegation, or the resolved root (by id) for a first-level delegation (Issue #50).
@@ -744,6 +758,59 @@ public class VerificationService : IVerificationService
     }
 
     /// <summary>
+    /// Validates a <b>delegation</b> proof's <c>created</c> timestamp (Issue #99). Unlike
+    /// <see cref="GetFreshProofCreatedUtc"/> — which guards ephemeral invocation/revocation proofs and
+    /// applies a staleness <em>lower</em>-bound (the nonce window) — a delegation proof is <b>durable</b>:
+    /// a capability delegated months ago is legitimately valid until it <c>expires</c>, so there is
+    /// deliberately <b>no</b> lower-bound here. The checks are:
+    /// <list type="bullet">
+    ///   <item>future-dated beyond <see cref="_freshnessClockSkew"/> → always rejected (no well-formed
+    ///   signer stamps a future <c>created</c>);</item>
+    ///   <item>present but unparseable → always rejected (a provably-malformed timestamp);</item>
+    ///   <item>missing/empty → rejected only when
+    ///   <see cref="VerificationPolicy.RequireDelegationProofCreated"/> is enabled, so pre-existing or
+    ///   cross-stack delegations that omit <c>created</c> still verify by default.</item>
+    /// </list>
+    /// Returns <see langword="null"/> when the proof's <c>created</c> is acceptable; otherwise a
+    /// fail-closed <see cref="VerificationResult"/> carrying <see cref="VerificationOutcome.InvalidProofTime"/>.
+    /// Reads the raw <see cref="Proof.Created"/> string and parses defensively rather than touching
+    /// <see cref="Proof.CreatedAt"/> (which <em>throws</em> on a non-empty unparseable value), so the
+    /// unparseable case surfaces as <see cref="VerificationOutcome.InvalidProofTime"/> here rather than
+    /// being reclassified as <see cref="VerificationOutcome.InvalidDelegation"/> by the per-proof catch.
+    /// </summary>
+    private VerificationResult? CheckDelegationProofCreated(Proof proof)
+    {
+        if (string.IsNullOrEmpty(proof.Created))
+        {
+            // Missing/empty: durable delegations minted before this check (or by another stack) may
+            // legitimately omit `created`, so this is fail-closed only under the opt-in policy.
+            return _policy.RequireDelegationProofCreated
+                ? VerificationResult.Fail(VerificationOutcome.InvalidProofTime,
+                    "Delegation proof has no created timestamp; the verifier's policy requires one.")
+                : null;
+        }
+
+        DateTime createdUtc;
+        try
+        {
+            createdUtc = ZcapTimestamps.Parse(proof.Created);
+        }
+        catch (FormatException)
+        {
+            // Present but not ISO-8601: provably malformed, always rejected (no legitimate-capability
+            // compat surface). Catch FormatException ONLY so a genuine fault is not masked here.
+            return VerificationResult.Fail(VerificationOutcome.InvalidProofTime,
+                "Delegation proof created timestamp is unparseable.");
+        }
+
+        if (createdUtc > DateTime.UtcNow + _freshnessClockSkew)
+            return VerificationResult.Fail(VerificationOutcome.InvalidProofTime,
+                "Delegation proof created timestamp is in the future beyond the allowed clock skew.");
+
+        return null;
+    }
+
+    /// <summary>
     /// Verifies the cryptographic signature on an invocation-style proof (proof-of-possession):
     /// resolves the proof's <c>verificationMethod</c> to a public key, re-canonicalizes the
     /// invocation-without-proof plus proof options, and checks the signature. Shared by the
@@ -861,9 +928,15 @@ public class VerificationService : IVerificationService
     /// zcap, never a reason to refuse removing one). It is a no-op unless
     /// <see cref="VerificationPolicy.EnforceMaxDelegationExpiration"/> is also enabled.
     /// </para>
+    /// <para>
+    /// <paramref name="applyCreatedCheck"/> gates the per-link delegation-proof <c>created</c> soundness
+    /// check (Issue #99). Default <see langword="true"/>; the revocation-authorization path passes
+    /// <see langword="false"/> for the same reason as the ceiling — a delegation with a malformed
+    /// <c>created</c> must stay revocable.
+    /// </para>
     /// </summary>
     private async Task<VerificationResult> VerifyBuiltChainAsync(
-        List<Capability> chain, bool applyExpirationCeiling = true)
+        List<Capability> chain, bool applyExpirationCeiling = true, bool applyCreatedCheck = true)
     {
         try
         {
@@ -903,7 +976,8 @@ public class VerificationService : IVerificationService
                 var linkResult = await VerifyDelegationProofAsync(
                     child,
                     parentCapabilityOverride: parent,
-                    requireParentAuthorization: true);
+                    requireParentAuthorization: true,
+                    applyCreatedCheck: applyCreatedCheck);
                 if (!linkResult.IsValid)
                     return linkResult;
 
@@ -1644,10 +1718,11 @@ public class VerificationService : IVerificationService
             // this built chain instead of rebuilding it — see VerifyCapabilityChainAsync.)
             var chain = await BuildCapabilityChainAsync(capability, explicitRoot);
 
-            // Do NOT apply the opt-in 3-month expiration ceiling here (Issue #73): revocation must stay
-            // possible for a long-lived delegation — refusing to authorize its removal would be exactly
-            // backwards. The ceiling is a SHOULD on accepting/invoking a zcap, not on revoking one.
-            if (!(await VerifyBuiltChainAsync(chain, applyExpirationCeiling: false)).IsValid)
+            // Do NOT apply the opt-in 3-month expiration ceiling (Issue #73) nor the delegation-proof
+            // `created` soundness check (Issue #99) here: revocation must stay possible for a long-lived
+            // or malformed-`created` delegation — refusing to authorize its removal would be exactly
+            // backwards. Both are constraints on accepting/invoking a zcap, not on revoking one.
+            if (!(await VerifyBuiltChainAsync(chain, applyExpirationCeiling: false, applyCreatedCheck: false)).IsValid)
                 return false;
 
             // Document-based authorization (Issue #65): the revoker is authorized when ANY link in

@@ -76,6 +76,12 @@ Primary assembly: `src/ZcapLd.Core`.
     `MaxDelegationExpirationMonths` (default 3) in the future, measured at verification time — the
     W3C verifier-side SHOULD (Issue #73). Enforced on the invocation/chain paths only; the
     revocation-authorization path bypasses it so a long-lived delegation stays revocable
+  - Checks each delegation proof's `created` for temporal soundness (Issue #99): a future-dated
+    (beyond the clock-skew tolerance) or unparseable `created` is always rejected, and a missing
+    `created` is rejected only under the opt-in `VerificationPolicy.RequireDelegationProofCreated`.
+    Unlike the invocation freshness check (Issue #71) there is no staleness lower-bound — a durable
+    delegation signed long ago verifies until it `expires`. Detailed reason `InvalidProofTime`; like
+    the expiration ceiling it is bypassed on the revocation-authorization path
 - `RevocationService`
   - Persists revocation records via `IRevocationStore`
   - Applies retention/expiry behavior for revocation lookups
@@ -147,7 +153,8 @@ Primary assembly: `src/ZcapLd.Core`.
 Every verify method returns a bare `Task<bool>` **and** has a `...DetailedAsync` sibling returning a
 `VerificationResult` — a `VerificationOutcome` (e.g. `Revoked`, `Expired`, `InvalidSignature`,
 `UnauthorizedController`, `InvalidDelegation`, `AttenuationViolation`, `ChainTooLong`, `CaveatFailed`,
-`Replayed`, `InvalidTarget`, `ActionNotAllowed`, `MalformedCapability`, `CouldNotVerify`) plus an
+`Replayed`, `InvalidTarget`, `ActionNotAllowed`, `StaleProof`, `ExpirationTooFarInFuture`,
+`InvalidProofTime`, `MalformedCapability`, `CouldNotVerify`) plus an
 optional diagnostic message. This lets a caller tell *why* a capability was denied — e.g. `Revoked`
 vs a broken chain — without re-deriving it. `CouldNotVerify` is the explicit "couldn't check"
 (config/transient/infrastructure fault) outcome, distinct from a capability that is provably invalid

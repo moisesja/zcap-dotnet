@@ -72,6 +72,17 @@ public enum VerificationOutcome
     /// </summary>
     StaleProof,
 
+    /// <summary>
+    /// A <b>delegation</b> proof's <c>created</c> timestamp is unacceptable (Issue #99): it is in the
+    /// future beyond the allowed clock skew, present but unparseable, or — only when
+    /// <see cref="Services.VerificationPolicy.RequireDelegationProofCreated"/> is enabled — missing.
+    /// Distinct from <see cref="StaleProof"/>: a delegation proof is <b>durable</b>, so there is
+    /// deliberately <b>no</b> staleness lower-bound (a capability delegated months ago is legitimately
+    /// valid until it <c>expires</c>); and distinct from <see cref="Expired"/>, which is the past-expiry
+    /// MUST on the capability's own <c>expires</c>.
+    /// </summary>
+    InvalidProofTime,
+
     /// <summary>The requested invocation target is not permitted by the capability's <c>invocationTarget</c>.</summary>
     InvalidTarget,
 
