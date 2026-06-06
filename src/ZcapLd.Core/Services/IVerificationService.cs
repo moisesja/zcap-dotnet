@@ -11,12 +11,16 @@ public interface IVerificationService
     /// Verifies the soundness of a delegated capability's <b>single delegation link</b>: its proof
     /// signature, that the signer is authorized by the embedded immediate parent's controller, that
     /// the proof-chain ancestry has not been revoked, that the child does not exceed the parent
-    /// (attenuation), and that the child has not expired. A root capability is valid iff it carries
-    /// no proof.
+    /// (attenuation), that the child has not expired, and that the delegation proof's <c>created</c>
+    /// is sound — not future-dated beyond the clock skew, nor present-but-unparseable (Issue #99). A
+    /// root capability is valid iff it carries no proof.
     /// <para>
-    /// This is <b>not</b> a full authorization gate: it does not walk the whole chain back to the
-    /// root or independently verify every ancestor's own proof. For an authorization decision, use
-    /// <see cref="VerifyCapabilityChainAsync"/> (full chain) or <see cref="VerifyInvocationAsync(Invocation, Capability)"/>.
+    /// This is <b>not</b> a full authorization gate: it does not walk the whole chain back to the root
+    /// or independently verify every ancestor's own proof (signature, attenuation, <c>created</c>). In
+    /// particular, on a deep delegation only the <i>leaf</i> link's <c>created</c> is checked here; an
+    /// intermediate ancestor's <c>created</c> — like its signature — is gated only by the full-chain
+    /// path. For an authorization decision, use <see cref="VerifyCapabilityChainAsync"/> (full chain)
+    /// or <see cref="VerifyInvocationAsync(Invocation, Capability)"/>.
     /// </para>
     /// </summary>
     /// <param name="capability">The capability whose delegation proof to verify</param>

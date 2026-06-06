@@ -178,6 +178,47 @@ public class VerificationServiceDelegationFreshnessTests
             "default policy does not reject a missing created as InvalidProofTime; the gate is bypassed");
     }
 
+    // ─────────────────── single-link vs full-chain scope boundary ───────────────────
+
+    [Fact]
+    public async Task VerifyCapabilityProof_DeepChain_GatesLeafOnly_ChainPathGatesEveryLink()
+    {
+        // Scope boundary (Issue #99 review): the standalone single-link VerifyCapabilityProof path checks
+        // only the LEAF proof's created — by design it never independently verifies an intermediate
+        // ancestor's own proof (its signature OR its created), the same way it already skips ancestor
+        // signatures. Full-ancestry temporal soundness is the chain path's job. This pins that boundary so
+        // it stays intentional rather than an accidental gap.
+        var target = "https://example.com/resource-deep";
+        var rootDid = _didProvider.GenerateDidKey();
+        var midDid = _didProvider.GenerateDidKey();
+        var leafDid = _didProvider.GenerateDidKey();
+
+        var root = await TestRoots.CreateAndRegisterRootAsync(
+            _capabilityService, _didProvider, rootDid, target, new[] { "read" });
+        var mid = await _capabilityService.DelegateCapabilityAsync(
+            root, midDid, new[] { "read" }, DateTime.UtcNow.AddDays(20));
+        // Future-date the INTERMEDIATE link's created (validly re-signed by the root controller) BEFORE
+        // delegating the leaf, so the leaf embeds and signs over the future-dated mid.
+        mid.Proof = await _signingService.SignCapabilityAsync(
+            mid, rootDid, Proof.CapabilityDelegationPurpose,
+            mid.Proof!.Primary.CapabilityChain, DateTime.UtcNow.AddMinutes(10));
+        var leaf = await _capabilityService.DelegateCapabilityAsync(
+            mid, leafDid, new[] { "read" }, DateTime.UtcNow.AddDays(7));
+
+        var verifier = CreateVerifier();
+
+        // Single-link path: the leaf's own created is fresh, so it verifies — the intermediate's
+        // future-dated created is out of this path's scope (so is the intermediate's signature).
+        (await verifier.VerifyCapabilityProofDetailedAsync(leaf, root)).Outcome
+            .Should().Be(VerificationOutcome.Valid,
+                "the single-link path checks only the leaf proof's created, not an intermediate's");
+
+        // Full-chain path: gates EVERY non-root link, so the intermediate's future-dated created is caught.
+        (await verifier.VerifyCapabilityChainDetailedAsync(leaf, root)).Outcome
+            .Should().Be(VerificationOutcome.InvalidProofTime,
+                "the chain path gates every delegated link's created — use it for full-ancestry soundness");
+    }
+
     // ─────────────────── revocation carve-out ───────────────────
 
     [Fact]
