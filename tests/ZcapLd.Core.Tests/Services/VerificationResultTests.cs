@@ -245,6 +245,24 @@ public class VerificationResultTests
         result.Outcome.Should().Be(VerificationOutcome.ChainTooLong);
     }
 
+    [Fact]
+    public async Task ChainDetailed_FutureDatedDelegationCreated_ReturnsInvalidProofTime()
+    {
+        // A delegation proof's `created` dated beyond the clock skew is rejected (Issue #99) — distinct
+        // from StaleProof (invocation/revocation freshness) and Expired (past-`expires`). Re-signed with a
+        // future created so the signature is valid and the only invalid factor is the proof time.
+        var (_, delegated) = await BuildValidDelegationAsync(
+            "did:key:z6MkProofTimeRoot", "did:key:z6MkProofTimeChild", new[] { "read" },
+            invocationTarget: "https://example.com/proof-time");
+        delegated.Proof = await _signingService.SignCapabilityAsync(
+            delegated, "did:key:z6MkProofTimeRoot", "capabilityDelegation",
+            delegated.Proof!.Primary.CapabilityChain, DateTime.UtcNow.AddMinutes(10));
+
+        var result = await _verificationService.VerifyCapabilityChainDetailedAsync(delegated);
+
+        result.Outcome.Should().Be(VerificationOutcome.InvalidProofTime);
+    }
+
     // ---- invocation-specific structural modes ----------------------------
 
     [Fact]

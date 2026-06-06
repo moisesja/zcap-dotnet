@@ -417,6 +417,37 @@ public class NormativeIntegrationComplianceTests
             .IsValid.Should().BeTrue("an expiration within the 3-month ceiling is permitted");
     }
 
+    [Fact(DisplayName = "SHOULD-08 Verifier SHOULD reject a delegation proof whose created is in the future")]
+    public async Task Should08_Verifier_RejectsFutureDatedDelegationProofCreated()
+    {
+        // Issue #99: a delegation proof's `created` must not be future-dated beyond a small clock-skew
+        // tolerance. Because a delegation proof is durable there is NO staleness lower-bound (a capability
+        // delegated months ago is legitimately valid until it `expires`), so this is narrower than the
+        // invocation freshness check (Issue #71). The future-dated check is always on — no policy needed.
+        var fixture = new ComplianceTestFixture();
+        var parentDid = fixture.RegisterControllerDid();
+        var childDid = fixture.RegisterControllerDid();
+
+        var root = await fixture.CapabilityService.CreateRootCapabilityAsync(
+            parentDid, "https://example.com/resources", new[] { "read" });
+        var delegated = await fixture.CapabilityService.DelegateCapabilityAsync(
+            root, childDid, new[] { "read" }, DateTime.UtcNow.AddDays(7));
+
+        // A delegation stamped at delegation time verifies.
+        (await fixture.VerificationService.VerifyCapabilityChainDetailedAsync(delegated, root))
+            .IsValid.Should().BeTrue("a delegation proof with a present-time created verifies");
+
+        // Re-sign the same delegation with a created 10 minutes in the future (validly signed over that
+        // instant, so the only invalid factor is the proof time).
+        delegated.Proof = await fixture.SigningService.SignCapabilityAsync(
+            delegated, parentDid, "capabilityDelegation",
+            delegated.Proof!.Primary.CapabilityChain, DateTime.UtcNow.AddMinutes(10));
+
+        var result = await fixture.VerificationService.VerifyCapabilityChainDetailedAsync(delegated, root);
+        result.IsValid.Should().BeFalse("a future-dated delegation proof created is rejected");
+        result.Outcome.Should().Be(VerificationOutcome.InvalidProofTime);
+    }
+
     private static VerificationService BuildVerifier(ComplianceTestFixture fixture, VerificationPolicy policy)
         => new(
             fixture.DidProvider,

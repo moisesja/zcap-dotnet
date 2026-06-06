@@ -53,6 +53,24 @@ public sealed record VerificationPolicy
 
     private readonly int _maxDelegationExpirationMonths = 3;
 
+    /// <summary>
+    /// When <see langword="true"/>, a delegation proof that omits <c>created</c> (the timestamp is
+    /// missing or empty) is rejected. The delegation-proof <c>created</c> soundness checks added in
+    /// Issue #99 — rejecting a future-dated (beyond clock skew) or present-but-unparseable
+    /// <c>created</c> — are <b>always on</b> because no well-formed signer emits those values; this flag
+    /// governs only the <b>missing</b>-<c>created</c> case.
+    /// <para>
+    /// Default <see langword="false"/>: a delegation proof minted before this check, or by another
+    /// Data Integrity stack, was never required to carry <c>created</c>, so rejecting a missing value
+    /// by default would silently invalidate otherwise-valid durable capabilities. Operators who want to
+    /// require <c>created</c> on every delegation opt in here. The check is enforced on the standalone,
+    /// chain, and invocation paths, but deliberately <b>not</b> on the revocation-authorization path, so
+    /// a delegation can always be revoked regardless of its <c>created</c> field (mirroring
+    /// <see cref="EnforceMaxDelegationExpiration"/>).
+    /// </para>
+    /// </summary>
+    public bool RequireDelegationProofCreated { get; init; }
+
     /// <summary>The default policy: no opt-in SHOULD checks enforced.</summary>
     public static VerificationPolicy Default { get; } = new();
 }

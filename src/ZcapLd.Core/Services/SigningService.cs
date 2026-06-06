@@ -67,11 +67,26 @@ public class SigningService : ISigningService
     /// Signs a capability with the specified signing key
     /// SECURITY FIX S-03: Binds proof metadata cryptographically per Data Integrity spec
     /// </summary>
-    public async Task<Proof> SignCapabilityAsync(
+    public Task<Proof> SignCapabilityAsync(
         Capability capability,
         string signerDid,
         string proofPurpose,
         object[]? capabilityChain = null)
+        => SignCapabilityAsync(capability, signerDid, proofPurpose, capabilityChain, createdOverride: null);
+
+    /// <summary>
+    /// Determinism overload of
+    /// <see cref="SignCapabilityAsync(Capability, string, string, object[])"/> that stamps an explicit
+    /// proof <c>created</c> instant instead of the current UTC time. Provided for deterministic signing
+    /// (test vectors, delegation-proof freshness tests — Issue #99). Not on
+    /// <see cref="ISigningService"/>; production callers should use the four-argument overload.
+    /// </summary>
+    public async Task<Proof> SignCapabilityAsync(
+        Capability capability,
+        string signerDid,
+        string proofPurpose,
+        object[]? capabilityChain,
+        DateTime? createdOverride)
     {
         if (capability == null)
             throw new ArgumentNullException(nameof(capability));
@@ -85,7 +100,7 @@ public class SigningService : ISigningService
         var suite = await ResolveSuiteForDidAsync(signerDid);
         var canonicalizer = ResolveCanonicalizer(suite);
         var verificationMethod = await _resolver.GetVerificationMethodAsync(signerDid);
-        var created = ZcapTimestamps.Format(DateTime.UtcNow);
+        var created = ZcapTimestamps.Format(createdOverride ?? DateTime.UtcNow);
         var proofType = suite.ProofType;
         var normalizedChain = capabilityChain ?? Array.Empty<object>();
 
