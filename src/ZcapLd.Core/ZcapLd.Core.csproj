@@ -43,14 +43,16 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- W3C DID Core and did:key method (provides crypto, DID resolution, and multibase) -->
-    <!-- NetDid 1.3.0 made DER the default for its legacy ECDSA Sign/Verify overloads. The W3C
-         `ecdsa-2019` suite this library implements requires IEEE P1363 (fixed-width r||s), so
-         CryptoSuite calls NetDid's format-aware overloads with EcdsaSignatureFormat.IeeeP1363.
-         See CryptoSuite.cs. -->
+    <!-- Cryptographic primitives. NetDid 2.0.0 relocated all crypto (sign/verify, key model,
+         key generation, ECDSA signature formats) to NetCrypto, which zcap now references directly
+         for raw sign/verify in CryptoSuite. NetCrypto's ECDSA Sign/Verify default to DER, but the
+         W3C `ecdsa-2019` suite requires IEEE P1363 (fixed-width r||s), so CryptoSuite calls the
+         format-aware overloads with EcdsaSignatureFormat.IeeeP1363. See CryptoSuite.cs. -->
+    <PackageReference Include="NetCrypto" Version="1.0.0" />
+    <!-- W3C DID Core and did:key method (DID resolution; crypto via NetCrypto). -->
     <PackageReference Include="dotNetRdf.Core" Version="3.5.1" />
-    <PackageReference Include="NetDid.Core" Version="1.3.1" />
-    <PackageReference Include="NetDid.Method.Key" Version="1.3.1" />
+    <PackageReference Include="NetDid.Core" Version="2.0.0" />
+    <PackageReference Include="NetDid.Method.Key" Version="2.0.0" />
 
     <!-- Logging abstraction only: lets the verifier emit a diagnostic when it fails closed,
          so a misconfiguration/transient fault is distinguishable from an invalid capability

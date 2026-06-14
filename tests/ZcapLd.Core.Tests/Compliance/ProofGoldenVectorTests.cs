@@ -1,6 +1,6 @@
 using System.Text;
 using FluentAssertions;
-using NetDid.Core.Crypto;
+using NetCrypto;
 using Xunit;
 using ZcapLd.Core.Cryptography;
 using ZcapLd.Core.Models;

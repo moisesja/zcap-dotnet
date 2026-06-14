@@ -1,7 +1,7 @@
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
-using NetDid.Core.Crypto;
+using NetCrypto;
 using NetDid.Core.Model;
 using NetDid.Core.Resolution;
 using NetDid.Method.Key;
