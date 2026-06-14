@@ -162,6 +162,12 @@ embedded parent).
 > **Breaking change (3.0.0):** the `capabilityChain` wire format changed (it no longer embeds the
 > root), so capabilities signed by earlier versions do not verify and must be re-delegated; and
 > verifying a delegated capability now requires a resolver or an explicit root as described above.
+>
+> **Breaking change (4.0.0):** the cryptography and canonicalization are now delegated to the
+> composable foundation — **NetCrypto** (via **NetDid 2.0.0**), **DataProofsDotnet.Rdfc**, and
+> **NetCid**. This is **source-breaking** (recompile; the `NetDid.Core.Crypto.*` types moved to
+> `NetCrypto.*`) but **wire-compatible**: the `Ed25519Signature2020` / `EcdsaSecp256r1Signature2019`
+> proof bytes are unchanged, so capabilities issued by 3.x still verify — no re-delegation.
 
 ## Revocation Extensibility
 
@@ -318,5 +324,5 @@ dotnet pack src/ZcapLd.AspNetCore/ZcapLd.AspNetCore.csproj -c Release
 - No default `IDidSigner` ships in the core package — consumers must provide their own (HSM/KMS/Key Vault).
 - `InMemoryDidProvider` (in examples and tests) stores private keys in plaintext memory and is NOT for production use.
 - Canonicalization supports both JCS (JSON Canonicalization Scheme, RFC 8785) and RDFC-1.0 (W3C RDF Dataset Canonicalization) via pluggable `IDocumentCanonicalizer`. JCS is the default; known W3C JSON-LD contexts are embedded for offline operation.
-- DID resolution uses [NetDid](https://www.nuget.org/packages/NetDid.Core) for W3C-compliant did:key support; multibase encoding uses [NetCid](https://www.nuget.org/packages/NetCid).
+- Cryptography is provided by [NetCrypto](https://www.nuget.org/packages/NetCrypto) (Ed25519 / P-256 sign + verify), reached via [NetDid](https://www.nuget.org/packages/NetDid.Core) 2.0.0 for W3C-compliant did:key resolution; multibase + JCS (RFC 8785) via [NetCid](https://www.nuget.org/packages/NetCid); RDFC-1.0 via [DataProofsDotnet.Rdfc](https://www.nuget.org/packages/DataProofsDotnet.Rdfc).
 - The `ICryptoSuite` abstraction supports pluggable algorithms; Ed25519 and P-256 are registered by default.

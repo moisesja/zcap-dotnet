@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [4.0.0] - Unreleased
+
+Delegates zcap's cryptography and canonicalization to the composable foundation (issue #108).
+Includes everything in the (unreleased) 3.0.0 section below.
+
+### Breaking Changes
+
+- **Dependencies / source — crypto + canonicalization delegated to the shared stack.** `NetDid.Core` / `NetDid.Method.Key` move **1.3.1 → 2.0.0** (NetDid 2.0.0 relocated its cryptographic primitives to **NetCrypto**), `NetCrypto` **1.0.0** is added as a direct reference, the direct `dotNetRdf.Core` reference is replaced by **DataProofsDotnet.Rdfc** (which owns dotNetRDF transitively), and **NetCid** rises to 1.6.0. Consumers **recompile**: the crypto types that lived under `NetDid.Core.Crypto` (`DefaultCryptoProvider`, `KeyType`, `EcdsaSignatureFormat`, `DefaultKeyGenerator`) are now `NetCrypto.*`. **No public ZCAP API changed and the proof wire format is unchanged** (see below).
+
+### Changed
+
+- **`CryptoSuite`** now delegates raw sign/verify to `NetCrypto.DefaultCryptoProvider` (was NetDid's), preserving the IEEE-P1363 ECDSA encoding.
+- **`RdfcDocumentCanonicalizer`** is now a thin adapter over `DataProofsDotnet.Rdfc.RdfcDocumentCanonicalizer`; a new internal `RdfcContextDocumentLoader` serves zcap's embedded JSON-LD contexts (`zcap/v1`, `ed25519-2020/v1`) offline (DataProofs' offline loader does not bundle them) and delegates core W3C contexts to it. `CachedContextLoader` (and its HTTP fallback) is removed.
+- **`JsonCanonicalizer`** now delegates RFC 8785 canonicalization to `NetCid.JcsCanonicalizer`, preceded by a null-object-member strip (preserving zcap's historical behavior). Key ordering is now RFC 8785 code-unit order (culture-invariant), fixing a latent locale-dependent determinism bug; canonical bytes are unchanged for spec-conformant (lowercase-ASCII-key) capabilities.
+
+### Wire compatibility
+
+- **Capabilities issued by 3.x still verify — no re-delegation.** The `Ed25519Signature2020` / `EcdsaSecp256r1Signature2019` proof bytes are unchanged. A golden-vector suite (`tests/ZcapLd.Core.Tests/Compliance/ProofGoldenVectorTests`, `CanonicalizationGoldenVectorTests`) pins the deterministic `proofValue`, the RDFC N-Quads + hash-concat payload, and the JCS null-skip behavior byte-for-byte across the swaps.
+
 ## [3.0.0] - Unreleased
 
 ### Breaking Changes
