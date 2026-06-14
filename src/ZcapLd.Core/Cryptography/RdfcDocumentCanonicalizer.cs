@@ -1,18 +1,18 @@
-using System.Text;
 using System.Text.Json;
-using VDS.RDF;
-using VDS.RDF.JsonLd;
-using VDS.RDF.Parsing;
+using InnerCanonicalizer = DataProofsDotnet.Rdfc.RdfcDocumentCanonicalizer;
 
 namespace ZcapLd.Core.Cryptography;
 
 /// <summary>
 /// RDFC-1.0 (W3C RDF Dataset Canonicalization) document canonicalizer.
-/// Parses JSON-LD, canonicalizes to N-Quads via dotNetRdf's <see cref="RdfCanonicalizer"/>.
-/// Known W3C JSON-LD contexts are served from embedded assembly resources for offline operation.
+/// Delegates JSON-LD 1.1 expansion and RDFC-1.0 canonicalization to DataProofs.Rdfc — the
+/// stack's single dotNetRDF home — serving ZCAP-LD's JSON-LD contexts offline via
+/// <see cref="RdfcContextDocumentLoader"/> so the canonical N-Quads stay byte-identical.
 /// </summary>
 public class RdfcDocumentCanonicalizer : IDocumentCanonicalizer
 {
+    // The document is serialized with these options before JSON-LD expansion. Kept identical to
+    // the pre-delegation serializer so the canonical N-Quads do not drift.
     private static readonly JsonSerializerOptions SerializerOptions = new()
     {
         WriteIndented = false,
@@ -21,10 +21,7 @@ public class RdfcDocumentCanonicalizer : IDocumentCanonicalizer
         Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
     };
 
-    private static readonly JsonLdProcessorOptions ParserOptions = new()
-    {
-        DocumentLoader = CachedContextLoader.LoadDocument
-    };
+    private static readonly InnerCanonicalizer Inner = new(RdfcContextDocumentLoader.Instance);
 
     public string Method => "RDFC-1.0";
 
@@ -32,17 +29,10 @@ public class RdfcDocumentCanonicalizer : IDocumentCanonicalizer
     {
         ArgumentNullException.ThrowIfNull(document);
 
-        var jsonString = document is string s
-            ? s
-            : JsonSerializer.Serialize(document, SerializerOptions);
+        using var parsed = document is string s
+            ? JsonDocument.Parse(s)
+            : JsonSerializer.SerializeToDocument(document, SerializerOptions);
 
-        var store = new TripleStore();
-        var parser = new JsonLdParser(ParserOptions);
-        parser.Load(store, new StringReader(jsonString));
-
-        var canonicalizer = new RdfCanonicalizer();
-        var result = canonicalizer.Canonicalize(store);
-
-        return Encoding.UTF8.GetBytes(result.SerializedNQuads);
+        return Inner.CanonicalizeJsonLd(parsed.RootElement);
     }
 }

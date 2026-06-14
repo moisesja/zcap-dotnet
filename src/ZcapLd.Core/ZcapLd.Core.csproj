@@ -49,8 +49,10 @@
          W3C `ecdsa-2019` suite requires IEEE P1363 (fixed-width r||s), so CryptoSuite calls the
          format-aware overloads with EcdsaSignatureFormat.IeeeP1363. See CryptoSuite.cs. -->
     <PackageReference Include="NetCrypto" Version="1.0.0" />
+    <!-- RDFC-1.0 / JSON-LD canonicalization for Data Integrity. RdfcDocumentCanonicalizer adapts
+         this; zcap no longer references dotNetRDF directly (it arrives transitively, same 3.5.1). -->
+    <PackageReference Include="DataProofsDotnet.Rdfc" Version="0.1.0-preview.2" />
     <!-- W3C DID Core and did:key method (DID resolution; crypto via NetCrypto). -->
-    <PackageReference Include="dotNetRdf.Core" Version="3.5.1" />
     <PackageReference Include="NetDid.Core" Version="2.0.0" />
     <PackageReference Include="NetDid.Method.Key" Version="2.0.0" />
 
