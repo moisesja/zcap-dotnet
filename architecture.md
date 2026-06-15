@@ -94,17 +94,17 @@ Primary assembly: `src/ZcapLd.Core`.
 
 ### Crypto (`src/ZcapLd.Core/Cryptography`)
 
-- `ICryptoSuite`: algorithm-specific sign/verify interface (proof type, key type, context URL, canonicalization method)
+- `ICryptoSuite`: suite **metadata** (proof type, key type, context URL, canonicalization method) — the sign/verify crypto is delegated to DataProofs' legacy cryptosuites via `LegacyProofCrypto`
 - `ICryptoSuiteProvider` / `CryptoSuiteProvider`: registry for lookup by proof type or key type
-- `CryptoSuite`: parameterized implementation delegating to NetCrypto's `DefaultCryptoProvider`; static factories `Ed25519()` and `P256()`
+- `CryptoSuite`: parameterized `ICryptoSuite` metadata record; static factories `Ed25519()` and `P256()`
 - `IDocumentCanonicalizer` / `IDocumentCanonicalizerProvider`: abstraction for pluggable canonicalization methods
 - `JcsDocumentCanonicalizer`: RFC 8785 JSON Canonicalization Scheme (wraps `JsonCanonicalizer`)
 - `RdfcDocumentCanonicalizer`: W3C RDFC-1.0 RDF Dataset Canonicalization — a thin adapter over `DataProofsDotnet.Rdfc.RdfcDocumentCanonicalizer` (the stack's single dotNetRDF home), with `RdfcContextDocumentLoader` serving zcap's embedded JSON-LD contexts offline
 - `DocumentCanonicalizerProvider`: dictionary-backed canonicalizer registry
 - `MultibaseCodec`: algorithm-agnostic multibase encoding/decoding (delegates to NetCid)
 - `JsonCanonicalizer`: deterministic JSON canonicalization (RFC 8785) — delegates to `NetCid.JcsCanonicalizer` after a null-object-member strip
-- `ProofSigningPayloadBuilder`: builds signing payloads; JCS combines doc+proof into single object, RDFC-1.0 canonicalizes separately and concatenates SHA-256 hashes (per W3C Data Integrity spec)
-- `SignatureVerifier`: helper wrapper for signature checks (accepts `ICryptoSuite` + optional `IDocumentCanonicalizer`)
+- `LegacyProofCrypto`: bridges signing/verification to DataProofs' legacy cryptosuites (`Ed25519Signature2020` / `EcdsaSecp256r1Signature2019`) — the byte-compatible implementations of zcap's 2020-era embedded-proof convention; `DidSignerAdapter` exposes the consumer's `IDidSigner` as a `NetCrypto.ISigner`, `ResolvedKeyTypeMap` maps the resolved key type to NetCrypto's
+- `ProofSigningPayloadBuilder`: clone-without-proof helpers (production) and the reference signing-payload oracle the Compliance golden vectors assert against (JCS = doc+proof combined; RDFC-1.0 = separate SHA-256 hashes concatenated)
 - `CaveatJsonConverter`: polymorphic `JsonConverter<Caveat>` — writes via runtime concrete type, reads via discriminator lookup against `CaveatTypeRegistry`. Required for cross-language interop (sign-time vs. wire-time bytes match).
 - `ZcapJsonOptions.Default`: shared `JsonSerializerOptions` used by both sign-time canonicalization and verifier-time chain deserialization. Single source of truth for the encoder, null-handling, and the caveat converter.
 

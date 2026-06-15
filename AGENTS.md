@@ -34,8 +34,8 @@ zcap-dotnet/
 │   │   ├── Cryptography/               # ICryptoSuite, CryptoSuiteProvider, CryptoSuite,
 │   │   │                               #   IDocumentCanonicalizer, JcsDocumentCanonicalizer,
 │   │   │                               #   RdfcDocumentCanonicalizer, DocumentCanonicalizerProvider,
-│   │   │                               #   MultibaseCodec, JsonCanonicalizer, SignatureVerifier,
-│   │   │                               #   ProofSigningPayloadBuilder
+│   │   │                               #   MultibaseCodec, JsonCanonicalizer, LegacyProofCrypto,
+│   │   │                               #   RdfcContextDocumentLoader, ProofSigningPayloadBuilder
 │   │   ├── Models/                     # Capability, Proof, Invocation, Caveat, ValidWhileTrueCaveat,
 │   │   │                               #   InvocationContext, ResolvedKey, SignatureResult,
 │   │   │                               #   RevocationRecord, RevocationRequest
@@ -86,7 +86,7 @@ dotnet run --project examples/ZcapLd.Examples                          # Run con
 - **Target framework**: .NET 10 (`net10.0`)
 - **Specification**: W3C ZCAP-LD v0.3 (CG-DRAFT), 95%+ compliance (283 tests)
 - **Composable stack (4.0.0, #108)**: raw cryptography, RDFC-1.0, and JCS are delegated to the shared foundation — **NetCrypto** (sign/verify, key model; reached via **NetDid 2.0.0**, which now builds on NetCrypto), **DataProofsDotnet.Rdfc** (RDFC-1.0/JSON-LD), and **NetCid** (multibase + RFC 8785 JCS). zcap owns no hand-rolled crypto/canonicalization — only ZCAP-specific glue and thin adapters. Source-breaking vs 3.x (consumers recompile; `NetDid.Core.Crypto.*` → `NetCrypto.*`) but **wire-compatible** (Ed25519Signature2020 proof bytes unchanged — Phase 0 golden vectors enforce this in `tests/.../Compliance/ProofGoldenVectorTests` + `CanonicalizationGoldenVectorTests`)
-- **Crypto suites**: Ed25519 and P-256 via NetCrypto's `DefaultCryptoProvider` (`CryptoSuite` wraps it), extensible via `ICryptoSuite` / `ICryptoSuiteProvider`
+- **Crypto suites (Stage C, #108)**: sign/verify is delegated to DataProofs' **legacy cryptosuites** (`Ed25519Signature2020` / `EcdsaSecp256r1Signature2019`, byte-compatible with zcap's 2020-era wire) via the `LegacyProofCrypto` engine; `ICryptoSuite`/`CryptoSuite` are now suite **metadata** records (proof type, key type, context URL, canonicalization method) the engine + #68 binding consume. zcap owns no proof-signing/verification crypto — only the metadata, the chain/policy layer, and the `ProofSigningPayloadBuilder` clone helpers + test oracle
 - **Key management**: No default `IDidSigner` — consumers must provide their own (HSM/KMS/Key Vault)
 - **DID resolution**: `DidKeyResolver` (wraps NetDid's `DidKeyMethod`), `CompositeDidResolver` (multi-method routing); returns `ResolvedKey(byte[] PublicKeyBytes, string KeyType)`
 - **DID packages**: [NetDid.Core](https://www.nuget.org/packages/NetDid.Core) **2.0.0** + [NetDid.Method.Key](https://www.nuget.org/packages/NetDid.Method.Key) **2.0.0** for W3C-compliant did:key creation/resolution (crypto via NetCrypto); cryptographic primitives via [NetCrypto](https://www.nuget.org/packages/NetCrypto); multibase + JCS via [NetCid](https://www.nuget.org/packages/NetCid); RDFC-1.0 via [DataProofsDotnet.Rdfc](https://www.nuget.org/packages/DataProofsDotnet.Rdfc)
