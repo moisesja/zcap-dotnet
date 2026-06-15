@@ -49,6 +49,14 @@
          W3C `ecdsa-2019` suite requires IEEE P1363 (fixed-width r||s), so CryptoSuite calls the
          format-aware overloads with EcdsaSignatureFormat.IeeeP1363. See CryptoSuite.cs. -->
     <PackageReference Include="NetCrypto" Version="1.1.0" />
+    <!-- Data Integrity proof machinery: RDFC-1.0 / JSON-LD canonicalization (DataProofsDotnet.Rdfc)
+         and the legacy Linked-Data-Signature cryptosuites — Ed25519Signature2020 /
+         EcdsaSecp256r1Signature2019 — that sign/verify zcap's 2020-era wire convention
+         (DataProofsDotnet.Legacy). DataProofsDotnet.Core arrives transitively but is listed for
+         clarity. See LegacyProofCrypto.cs. -->
+    <PackageReference Include="DataProofsDotnet.Core" Version="1.0.0" />
+    <PackageReference Include="DataProofsDotnet.Rdfc" Version="1.0.0" />
+    <PackageReference Include="DataProofsDotnet.Legacy" Version="1.0.0" />
     <!-- W3C DID Core and did:key method (DID resolution; crypto via NetCrypto). -->
     <PackageReference Include="NetDid.Core" Version="2.0.1" />
     <PackageReference Include="NetDid.Method.Key" Version="2.0.1" />
@@ -60,19 +68,6 @@
 
     <!-- Embed source and commit metadata for debugging/open-source distribution -->
     <PackageReference Include="Microsoft.SourceLink.GitHub" Version="10.0.300" PrivateAssets="All" />
-  </ItemGroup>
-
-  <!-- TEMPORARY (Stage C, #108): consume DataProofs (Core/Rdfc/Legacy) from the sibling SOURCE
-       while DataProofsDotnet.Legacy's NuGet prefix reservation is being resolved. Replace these
-       ProjectReferences with the published PackageReferences once available:
-         <PackageReference Include="DataProofsDotnet.Core"   Version="1.0.0" />
-         <PackageReference Include="DataProofsDotnet.Rdfc"   Version="1.0.0" />
-         <PackageReference Include="DataProofsDotnet.Legacy" Version="1.0.0" />
-       (DataProofsDotnet.Rdfc + Core arrive transitively via Legacy, but are listed for clarity.) -->
-  <ItemGroup>
-    <ProjectReference Include="../../../dataproofs-dotnet/src/DataProofsDotnet.Core/DataProofsDotnet.Core.csproj" />
-    <ProjectReference Include="../../../dataproofs-dotnet/src/DataProofsDotnet.Rdfc/DataProofsDotnet.Rdfc.csproj" />
-    <ProjectReference Include="../../../dataproofs-dotnet/src/DataProofsDotnet.Legacy/DataProofsDotnet.Legacy.csproj" />
   </ItemGroup>
 
   <ItemGroup>
