@@ -17,6 +17,10 @@ public class SigningService : ISigningService
     private readonly ICryptoSuiteProvider _suiteProvider;
     private readonly IDocumentCanonicalizerProvider _canonicalizerProvider;
 
+    // Stage C (#108): canonicalization + sign are delegated to DataProofs' legacy cryptosuites.
+    // The suite provider above still supplies proof-type / context / canonicalization metadata.
+    private readonly LegacyProofCrypto _legacyProofCrypto = new();
+
     /// <summary>
     /// Backward-compatible constructor (Ed25519 only, JCS canonicalization).
     /// </summary>
@@ -97,8 +101,9 @@ public class SigningService : ISigningService
             throw new ArgumentException("Proof purpose cannot be null or empty", nameof(proofPurpose));
 
         var capabilityWithoutProof = ProofSigningPayloadBuilder.CloneCapabilityWithoutProof(capability);
-        var suite = await ResolveSuiteForDidAsync(signerDid);
-        var canonicalizer = ResolveCanonicalizer(suite);
+        var resolvedKey = await _resolver.ResolvePublicKeyAsync(signerDid);
+        var suite = _suiteProvider.GetByKeyType(resolvedKey.KeyType)
+            ?? throw new CryptographicException($"No crypto suite registered for key type: {resolvedKey.KeyType}");
         var verificationMethod = await _resolver.GetVerificationMethodAsync(signerDid);
         var created = ZcapTimestamps.Format(createdOverride ?? DateTime.UtcNow);
         var proofType = suite.ProofType;
@@ -114,11 +119,9 @@ public class SigningService : ISigningService
             ProofValue = string.Empty
         };
 
-        var canonicalBytes = ProofSigningPayloadBuilder.CanonicalizeCapabilityPayload(
-            capabilityWithoutProof, proof, canonicalizer);
-        var result = await _signer.SignAsync(signerDid, canonicalBytes);
-        ValidateSignatureType(result.SignatureType, proofType);
-        proof.ProofValue = MultibaseCodec.Encode(result.Signature);
+        var didSigner = CreateLegacySigner(signerDid, resolvedKey, proofType);
+        proof.ProofValue = await _legacyProofCrypto.CreateProofValueAsync(
+            capabilityWithoutProof, proof, didSigner, suite.CanonicalizationMethod);
 
         return proof;
     }
@@ -218,8 +221,9 @@ public class SigningService : ISigningService
         DateTime? createdOverride = null)
     {
         var invocationWithoutProof = ProofSigningPayloadBuilder.CloneInvocationWithoutProof(invocation);
-        var suite = await ResolveSuiteForDidAsync(signerDid);
-        var canonicalizer = ResolveCanonicalizer(suite);
+        var resolvedKey = await _resolver.ResolvePublicKeyAsync(signerDid);
+        var suite = _suiteProvider.GetByKeyType(resolvedKey.KeyType)
+            ?? throw new CryptographicException($"No crypto suite registered for key type: {resolvedKey.KeyType}");
         var verificationMethod = await _resolver.GetVerificationMethodAsync(signerDid);
         var created = ZcapTimestamps.Format(createdOverride ?? DateTime.UtcNow);
         var proofType = suite.ProofType;
@@ -248,11 +252,9 @@ public class SigningService : ISigningService
             proof.AdditionalProperties = new Dictionary<string, JsonElement>(additionalProperties, StringComparer.Ordinal);
         }
 
-        var canonicalBytes = ProofSigningPayloadBuilder.CanonicalizeInvocationPayload(
-            invocationWithoutProof, proof, canonicalizer);
-        var result = await _signer.SignAsync(signerDid, canonicalBytes);
-        ValidateSignatureType(result.SignatureType, proofType);
-        proof.ProofValue = MultibaseCodec.Encode(result.Signature);
+        var didSigner = CreateLegacySigner(signerDid, resolvedKey, proofType);
+        proof.ProofValue = await _legacyProofCrypto.CreateProofValueAsync(
+            invocationWithoutProof, proof, didSigner, suite.CanonicalizationMethod);
 
         return proof;
     }
@@ -305,12 +307,11 @@ public class SigningService : ISigningService
                 $"No canonicalizer registered for method: {suite.CanonicalizationMethod}");
     }
 
-    private static void ValidateSignatureType(string actualType, string expectedType)
-    {
-        if (!string.Equals(actualType, expectedType, StringComparison.Ordinal))
-        {
-            throw new CryptographicException(
-                $"Signer returned signature type '{actualType}' but expected '{expectedType}'.");
-        }
-    }
+    private DidSignerAdapter CreateLegacySigner(string signerDid, ResolvedKey resolvedKey, string expectedProofType)
+        => new(
+            _signer,
+            signerDid,
+            ResolvedKeyTypeMap.ToNetCryptoKeyType(resolvedKey.KeyType),
+            expectedProofType,
+            resolvedKey.PublicKeyBytes);
 }

@@ -272,11 +272,11 @@ public class VerificationServiceTests
     [Fact]
     public async Task VerifyInvocation_WithEmptyProofValue_LogsAtDebugNotWarning()
     {
-        // PR #84 review (residual nit): an empty/null proofValue makes MultibaseCodec.Decode throw
-        // ArgumentException from a guard BEFORE its own try, so DecodeProofValue must retype that too
-        // (not only the wrapped CryptographicException) — otherwise this attacker-drivable input lands
-        // at Warning, the exact vector Finding 1 closed. Assert it fails closed and logs at Debug
-        // carrying a CapabilityValidationException whose inner cause is the ArgumentException.
+        // An empty/null proofValue is attacker-drivable malformed input and must fail closed at
+        // Debug — never Warning (the vector Finding 1 / #84 closed). As of Stage C (#108) the
+        // proofValue is decoded inside the DataProofs legacy cryptosuite, which returns a graceful
+        // verification failure (not a thrown exception) for an empty value, so the denial is logged
+        // at Debug via the LogDenial boundary with no exception object — still never Warning.
         var logger = new CapturingLogger<VerificationService>();
         var verifier = new VerificationService(
             _didProvider,
@@ -307,9 +307,8 @@ public class VerificationServiceTests
 
         result.Should().BeFalse("an empty proofValue fails closed");
         logger.Entries.Should().Contain(
-            e => e.Level == LogLevel.Debug && e.Exception is CapabilityValidationException
-                && e.Exception.InnerException is ArgumentException,
-            "an empty proofValue is malformed input — Debug, retyped from the decode ArgumentException");
+            e => e.Level == LogLevel.Debug,
+            "an empty proofValue is malformed input — the denial is logged at Debug");
         logger.Entries.Should().NotContain(e => e.Level == LogLevel.Warning,
             "a malformed proofValue must not reach the Warning channel");
     }

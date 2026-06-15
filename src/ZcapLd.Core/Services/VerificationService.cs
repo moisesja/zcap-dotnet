@@ -24,6 +24,12 @@ public class VerificationService : IVerificationService
     private readonly IRevocationService _revocationService;
     private readonly INonceStore _nonceStore;
     private readonly IDocumentCanonicalizerProvider _canonicalizerProvider;
+
+    // Stage C (#108): canonicalization + signature verification delegated to DataProofs' legacy
+    // cryptosuites. The suite provider above still supplies proof-type / key-type / canonicalization
+    // metadata (incl. the Issue #68 key-type binding).
+    private readonly LegacyProofCrypto _legacyProofCrypto = new();
+
     private readonly TimeSpan _nonceWindow;
     private readonly TimeSpan _freshnessClockSkew;
     private readonly ILogger _logger;
@@ -469,15 +475,9 @@ public class VerificationService : IVerificationService
                     "Resolved key type does not match the delegation proof's suite.");
             }
 
-            var canonicalizer = ResolveCanonicalizer(suite);
             var capabilityWithoutProof = ProofSigningPayloadBuilder.CloneCapabilityWithoutProof(capability);
-            var canonicalBytes = ProofSigningPayloadBuilder.CanonicalizeCapabilityPayload(
-                capabilityWithoutProof,
-                proof,
-                canonicalizer);
-            var signatureBytes = DecodeProofValue(proof.ProofValue);
 
-            if (!suite.Verify(canonicalBytes, signatureBytes, resolvedKey.PublicKeyBytes))
+            if (!_legacyProofCrypto.Verify(capabilityWithoutProof, proof, resolvedKey, suite.CanonicalizationMethod))
                 return VerificationResult.Fail(VerificationOutcome.InvalidSignature,
                     "Delegation proof signature did not verify.");
 
@@ -831,15 +831,9 @@ public class VerificationService : IVerificationService
         if (!KeyTypeMatches(suite, resolvedKey))
             return false;
 
-        var canonicalizer = ResolveCanonicalizer(suite);
         var invocationWithoutProof = ProofSigningPayloadBuilder.CloneInvocationWithoutProof(invocation);
-        var canonicalBytes = ProofSigningPayloadBuilder.CanonicalizeInvocationPayload(
-            invocationWithoutProof,
-            proof,
-            canonicalizer);
-        var signatureBytes = DecodeProofValue(proof.ProofValue);
 
-        return suite.Verify(canonicalBytes, signatureBytes, resolvedKey.PublicKeyBytes);
+        return _legacyProofCrypto.Verify(invocationWithoutProof, proof, resolvedKey, suite.CanonicalizationMethod);
     }
 
     /// <summary>
