@@ -5,11 +5,15 @@ using ZcapLd.Core.Cryptography;
 
 namespace ZcapLd.Core.Tests.Cryptography;
 
+/// <summary>
+/// As of Stage C (#108) <see cref="ICryptoSuite"/> is a metadata record (proof type, key type,
+/// context URL, canonicalization method); the actual sign/verify crypto is delegated to DataProofs'
+/// legacy cryptosuites and exercised end-to-end by the Compliance golden vectors + integration
+/// round-trips. These tests therefore cover only the suite metadata and construction guards.
+/// </summary>
 public class CryptoSuiteTests
 {
-    private static readonly DefaultKeyGenerator KeyGen = new();
-
-    #region Ed25519 Suite
+    #region Ed25519 Suite metadata
 
     [Fact]
     public void Ed25519_ProofType_ShouldBeEd25519Signature2020()
@@ -30,55 +34,15 @@ public class CryptoSuiteTests
     }
 
     [Fact]
-    public void Ed25519_Sign_ShouldProduceValidSignature()
+    public void Ed25519_CanonicalizationMethod_DefaultsToJcs()
     {
-        var suite = CryptoSuite.Ed25519();
-        var kp = KeyGen.Generate(KeyType.Ed25519);
-        var data = "test data"u8.ToArray();
-
-        var signature = suite.Sign(data, kp.PrivateKey);
-
-        signature.Should().HaveCount(64);
-        suite.Verify(data, signature, kp.PublicKey).Should().BeTrue();
-    }
-
-    [Fact]
-    public void Ed25519_Verify_WithValidSignature_ShouldReturnTrue()
-    {
-        var suite = CryptoSuite.Ed25519();
-        var kp = KeyGen.Generate(KeyType.Ed25519);
-        var data = "test data"u8.ToArray();
-        var signature = suite.Sign(data, kp.PrivateKey);
-
-        suite.Verify(data, signature, kp.PublicKey).Should().BeTrue();
-    }
-
-    [Fact]
-    public void Ed25519_Verify_WithInvalidSignature_ShouldReturnFalse()
-    {
-        var suite = CryptoSuite.Ed25519();
-        var kp = KeyGen.Generate(KeyType.Ed25519);
-        var data = "test data"u8.ToArray();
-        var badSignature = new byte[64];
-
-        suite.Verify(data, badSignature, kp.PublicKey).Should().BeFalse();
-    }
-
-    [Fact]
-    public void Ed25519_Verify_WithWrongKey_ShouldReturnFalse()
-    {
-        var suite = CryptoSuite.Ed25519();
-        var kp1 = KeyGen.Generate(KeyType.Ed25519);
-        var kp2 = KeyGen.Generate(KeyType.Ed25519);
-        var data = "test data"u8.ToArray();
-        var signature = suite.Sign(data, kp1.PrivateKey);
-
-        suite.Verify(data, signature, kp2.PublicKey).Should().BeFalse();
+        // CanonicalizationMethod is a default interface member — access via the interface.
+        ((ICryptoSuite)CryptoSuite.Ed25519()).CanonicalizationMethod.Should().Be("JCS");
     }
 
     #endregion
 
-    #region P-256 Suite
+    #region P-256 Suite metadata
 
     [Fact]
     public void P256_ProofType_ShouldBeEcdsaSecp256r1Signature2019()
@@ -99,77 +63,9 @@ public class CryptoSuiteTests
     }
 
     [Fact]
-    public void P256_Sign_ShouldProduceValidSignature()
-    {
-        var suite = CryptoSuite.P256();
-        var kp = KeyGen.Generate(KeyType.P256);
-        var data = "test data for P-256"u8.ToArray();
-
-        var signature = suite.Sign(data, kp.PrivateKey);
-
-        signature.Should().HaveCount(64); // IEEE P1363: 32-byte r + 32-byte s
-        suite.Verify(data, signature, kp.PublicKey).Should().BeTrue();
-    }
-
-    [Fact]
-    public void P256_Sign_ProducesIeeeP1363WireFormat_NotDer()
-    {
-        // Regression guard for the NetDid 1.3.0 trap: NetDid's *legacy* Sign overload defaults
-        // P-256 to ASN.1 DER (~70-72 bytes, starts 0x30). The W3C ecdsa-2019 /
-        // EcdsaSecp256r1Signature2019 wire format (and JOSE ES256) require IEEE P1363 fixed-width
-        // r‖s = exactly 64 bytes for P-256. CryptoSuite must call NetDid's format-aware overload
-        // with EcdsaSignatureFormat.IeeeP1363; if a future change reverts to the 3-arg overload,
-        // signatures become DER and silently break cross-language verification — caught here by
-        // the deterministic 64-byte length (DER is never 64 bytes for P-256).
-        var suite = CryptoSuite.P256();
-        var kp = KeyGen.Generate(KeyType.P256);
-        var data = "ecdsa-2019 wire format compatibility"u8.ToArray();
-
-        var signature = suite.Sign(data, kp.PrivateKey);
-
-        signature.Length.Should().Be(64,
-            "P-256 proofValue must be IEEE P1363 (32-byte r + 32-byte s), not ASN.1 DER");
-        suite.Verify(data, signature, kp.PublicKey).Should().BeTrue();
-    }
-
-    [Fact]
-    public void P256_Verify_WithValidSignature_ShouldReturnTrue()
-    {
-        var suite = CryptoSuite.P256();
-        var kp = KeyGen.Generate(KeyType.P256);
-        var data = "verify this"u8.ToArray();
-        var signature = suite.Sign(data, kp.PrivateKey);
-
-        suite.Verify(data, signature, kp.PublicKey).Should().BeTrue();
-    }
-
-    [Fact]
-    public void P256_Verify_WithInvalidSignature_ShouldReturnFalse()
-    {
-        var suite = CryptoSuite.P256();
-        var kp = KeyGen.Generate(KeyType.P256);
-        var data = "test data"u8.ToArray();
-        var badSignature = new byte[64];
-
-        suite.Verify(data, badSignature, kp.PublicKey).Should().BeFalse();
-    }
-
-    [Fact]
-    public void P256_Verify_WithWrongKey_ShouldReturnFalse()
-    {
-        var suite = CryptoSuite.P256();
-        var kp1 = KeyGen.Generate(KeyType.P256);
-        var kp2 = KeyGen.Generate(KeyType.P256);
-        var data = "test data"u8.ToArray();
-        var signature = suite.Sign(data, kp1.PrivateKey);
-
-        suite.Verify(data, signature, kp2.PublicKey).Should().BeFalse();
-    }
-
-    [Fact]
     public void P256_GenerateKeyPair_ViaKeyGenerator_ShouldProduceValidKeys()
     {
-        var kp = KeyGen.Generate(KeyType.P256);
+        var kp = new DefaultKeyGenerator().Generate(KeyType.P256);
 
         kp.PrivateKey.Should().HaveCount(32);
         kp.PublicKey.Should().HaveCount(33);
@@ -183,21 +79,21 @@ public class CryptoSuiteTests
     [Fact]
     public void Constructor_WithNullProofType_ShouldThrow()
     {
-        var act = () => new CryptoSuite(null!, "key", "url", KeyType.Ed25519);
+        var act = () => new CryptoSuite(null!, "key", "url");
         act.Should().Throw<ArgumentNullException>();
     }
 
     [Fact]
     public void Constructor_WithNullKeyType_ShouldThrow()
     {
-        var act = () => new CryptoSuite("proof", null!, "url", KeyType.Ed25519);
+        var act = () => new CryptoSuite("proof", null!, "url");
         act.Should().Throw<ArgumentNullException>();
     }
 
     [Fact]
     public void Constructor_WithNullContextUrl_ShouldThrow()
     {
-        var act = () => new CryptoSuite("proof", "key", null!, KeyType.Ed25519);
+        var act = () => new CryptoSuite("proof", "key", null!);
         act.Should().Throw<ArgumentNullException>();
     }
 

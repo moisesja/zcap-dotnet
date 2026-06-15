@@ -1,12 +1,15 @@
 namespace ZcapLd.Core.Cryptography;
 
 /// <summary>
-/// Bundles algorithm-specific cryptographic operations for a single signature suite.
-/// Implementations are stateless and thread-safe.
-///
-/// Note: Multibase encoding/decoding lives in <see cref="MultibaseCodec"/>.
-/// Canonicalization method is determined per suite via <see cref="CanonicalizationMethod"/>.
+/// Metadata describing a single ZCAP-LD signature suite: its proof/key vocabulary, JSON-LD
+/// security context, and canonicalization method. Stateless and thread-safe.
 /// </summary>
+/// <remarks>
+/// As of Stage C (#108) the cryptography itself is delegated to DataProofs' legacy cryptosuites
+/// (see <c>LegacyProofCrypto</c>); this interface only carries the metadata the signing/verification
+/// services need — the proof <c>type</c> to emit, the resolver↔suite key-type binding (Issue #68),
+/// the suite context URL, and which canonicalization the proof bytes use.
+/// </remarks>
 public interface ICryptoSuite
 {
     /// <summary>
@@ -33,18 +36,8 @@ public interface ICryptoSuite
     string ContextUrl { get; }
 
     /// <summary>
-    /// Signs data using a raw private key.
-    /// </summary>
-    byte[] Sign(byte[] data, byte[] privateKey);
-
-    /// <summary>
-    /// Verifies a signature against data and a public key.
-    /// </summary>
-    bool Verify(byte[] data, byte[] signature, byte[] publicKey);
-
-    /// <summary>
-    /// The canonicalization method this suite requires (e.g. "JCS", "RDFC-1.0").
-    /// Defaults to "JCS" for backward compatibility.
+    /// The canonicalization method this suite's proof bytes use (e.g. "JCS", "RDFC-1.0").
+    /// Defaults to "JCS". Drives which DataProofs legacy-suite variant verifies/creates the proof.
     /// </summary>
     string CanonicalizationMethod => "JCS";
 }

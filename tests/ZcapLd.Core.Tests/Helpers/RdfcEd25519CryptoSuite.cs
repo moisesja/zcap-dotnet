@@ -14,6 +14,4 @@ public class RdfcEd25519CryptoSuite : ICryptoSuite
     public string KeyType => _inner.KeyType;
     public string ContextUrl => _inner.ContextUrl;
     public string CanonicalizationMethod => "RDFC-1.0";
-    public byte[] Sign(byte[] data, byte[] privateKey) => _inner.Sign(data, privateKey);
-    public bool Verify(byte[] data, byte[] signature, byte[] publicKey) => _inner.Verify(data, signature, publicKey);
 }
