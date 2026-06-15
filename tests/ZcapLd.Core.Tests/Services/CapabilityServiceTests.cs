@@ -610,7 +610,7 @@ public class CapabilityServiceTests
     // ─────────────────── CreateInvocation / CreateRootInvocation (Issue #51 ergonomics) ───────────────────
 
     private VerificationService CreateVerifier() =>
-        new(_didProvider, new CaveatProcessor(), VerificationService.CreateDefaultSuiteProvider(),
+        new(_didProvider, new CaveatProcessor(),
             new RevocationService(new InMemoryRevocationStore()), new InMemoryNonceStore());
 
     [Fact]

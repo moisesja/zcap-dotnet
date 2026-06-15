@@ -57,9 +57,9 @@ Primary assembly: `src/ZcapLd.Core`.
   - Canonicalizes documents and delegates signing to `IDidSigner`
   - Produces delegation and invocation proofs
   - Resolves verification method URIs via `IDidResolver`
-  - Resolves per-suite JSON-LD context URLs via `ICryptoSuiteProvider`
+  - Resolves per-suite JSON-LD context URLs via `ZcapSuiteCatalog`
 - `VerificationService`
-  - Verifies delegation proofs using `ICryptoSuiteProvider` to dispatch to the correct algorithm
+  - Verifies delegation proofs, delegating canonicalization + signature checks to DataProofs' legacy cryptosuites via `LegacyProofCrypto`
   - Verifies capability chains, strictly validating the spec-exact `capabilityChain` shape and rejecting
     non-spec forms (embedded root, duplicated ids, parent referenced both by id and embedded, wrong/missing
     embedded parent) — Issue #50
@@ -94,13 +94,10 @@ Primary assembly: `src/ZcapLd.Core`.
 
 ### Crypto (`src/ZcapLd.Core/Cryptography`)
 
-- `ICryptoSuite`: suite **metadata** (proof type, key type, context URL, canonicalization method) — the sign/verify crypto is delegated to DataProofs' legacy cryptosuites via `LegacyProofCrypto`
-- `ICryptoSuiteProvider` / `CryptoSuiteProvider`: registry for lookup by proof type or key type
-- `CryptoSuite`: parameterized `ICryptoSuite` metadata record; static factories `Ed25519()` and `P256()`
-- `IDocumentCanonicalizer` / `IDocumentCanonicalizerProvider`: abstraction for pluggable canonicalization methods
+- `ZcapSuiteCatalog`: internal, fixed metadata for the supported suites (proof type, the #68 key-type binding, context URL). zcap is **not** a crypto-extension point — new curves are added in NetCrypto + DataProofs (see `docs/crypto-suite-extensibility-decision.md`). The sign/verify crypto is delegated to DataProofs' legacy cryptosuites via `LegacyProofCrypto`; the canonicalization method (JCS / RDFC-1.0) is fixed per service instance.
+- `IDocumentCanonicalizer`: canonicalization abstraction used by `ProofSigningPayloadBuilder`'s reference oracle
 - `JcsDocumentCanonicalizer`: RFC 8785 JSON Canonicalization Scheme (wraps `JsonCanonicalizer`)
 - `RdfcDocumentCanonicalizer`: W3C RDFC-1.0 RDF Dataset Canonicalization — a thin adapter over `DataProofsDotnet.Rdfc.RdfcDocumentCanonicalizer` (the stack's single dotNetRDF home), with `RdfcContextDocumentLoader` serving zcap's embedded JSON-LD contexts offline
-- `DocumentCanonicalizerProvider`: dictionary-backed canonicalizer registry
 - `MultibaseCodec`: algorithm-agnostic multibase encoding/decoding (delegates to NetCid)
 - `JsonCanonicalizer`: deterministic JSON canonicalization (RFC 8785) — delegates to `NetCid.JcsCanonicalizer` after a null-object-member strip
 - `LegacyProofCrypto`: bridges signing/verification to DataProofs' legacy cryptosuites (`Ed25519Signature2020` / `EcdsaSecp256r1Signature2019`) — the byte-compatible implementations of zcap's 2020-era embedded-proof convention; `DidSignerAdapter` exposes the consumer's `IDidSigner` as a `NetCrypto.ISigner`, `ResolvedKeyTypeMap` maps the resolved key type to NetCrypto's
@@ -192,7 +189,12 @@ Production recommendation:
 
 ### Custom Crypto Suites
 
-Implement `ICryptoSuite` for new signature algorithms and register via `CryptoSuiteProvider.Register()` or `AddZcapCryptoSuite<T>()` in ASP.NET DI. Built-in suites: `CryptoSuite.Ed25519()` and `CryptoSuite.P256()`. Override the `CanonicalizationMethod` default interface method to use `"RDFC-1.0"` instead of `"JCS"` for suites that require RDF canonicalization.
+zcap is **not** a crypto-extension point: it supports a fixed set of signature suites
+(`Ed25519Signature2020`, `EcdsaSecp256r1Signature2019`) recorded in the internal `ZcapSuiteCatalog`,
+with sign/verify delegated to DataProofs' legacy cryptosuites. A new curve is added in **NetCrypto**
+(the primitive) and **DataProofs** (the cryptosuite), then wired into `ZcapSuiteCatalog` +
+`LegacyProofCrypto` — never registered through a zcap API. See
+`docs/crypto-suite-extensibility-decision.md`.
 
 ### Custom Caveats
 
@@ -201,7 +203,7 @@ Three steps:
 1. Extend `Caveat` with the discriminator `Type` override and any policy fields. Mark mutable runtime state `[JsonIgnore]` — only the policy goes on the wire (otherwise mutation invalidates the signature).
 2. **Register the type against its discriminator** so the polymorphic JSON converter can dispatch:
    - In-process / examples: `CaveatTypeRegistry.Default.Register<MyCaveat>("MyCaveat")` at startup.
-   - ASP.NET DI: `services.AddZcapCaveatType<MyCaveat>("MyCaveat")` (mirrors `AddZcapCryptoSuite<T>()`).
+   - ASP.NET DI: `services.AddZcapCaveatType<MyCaveat>("MyCaveat")` (a process-global registration).
 3. Add evaluation logic — synchronous via `IsSatisfied` on the caveat, or async by extending `CaveatProcessor` (the ValidWhileTrue pattern below).
 
 Skipping step 2 silently breaks cross-language interop: STJ uses the static array element type for `Capability.Caveat`, dropping derived fields at sign time. Without registration, verifier-time deserialization throws on the abstract `Caveat` base for any wire body coming in from another stack.
@@ -268,7 +270,7 @@ Library is in-process first. Service methods are interface-driven and can be wra
 
 ### Custom Canonicalization
 
-Implement `IDocumentCanonicalizer` for additional canonicalization methods and register via `DocumentCanonicalizerProvider.Register()` or `AddZcapRdfcCanonicalization()` in ASP.NET DI. Built-in canonicalizers: `JcsDocumentCanonicalizer` (RFC 8785) and `RdfcDocumentCanonicalizer` (W3C RDFC-1.0 via dotNetRdf).
+Choose JCS (default) or RDFC-1.0 per service: pass `canonicalizationMethod: "RDFC-1.0"` to the `SigningService` / `VerificationService` constructors, or call `AddZcapRdfcCanonicalization()` in ASP.NET DI. Both are delegated to DataProofs' legacy cryptosuites (RDFC-1.0 via DataProofs.Rdfc over dotNetRDF).
 
 ## Dependencies
 
@@ -289,6 +291,6 @@ Implement `IDocumentCanonicalizer` for additional canonicalization methods and r
 
 ## Thread Safety
 
-- `CryptoSuiteProvider` uses `ConcurrentDictionary` for proof-type lookup; suite registration is expected at startup.
+- `ZcapSuiteCatalog` is a fixed, immutable static metadata table (no registration needed).
 - Service instances are stateless and safe for concurrent usage.
 - `InMemoryDidProvider` (test helper) uses `ConcurrentDictionary` for key storage.

@@ -561,38 +561,18 @@ Console.WriteLine();
 Console.WriteLine("Example 10: RDFC-1.0 vs JCS Canonicalization");
 Console.WriteLine("----------------------------------------------");
 
-// ZCAP-LD proofs can use different canonicalization methods depending on the
-// crypto suite. By default, all built-in suites use JCS (JSON Canonicalization Scheme,
-// RFC 8785). To use RDFC-1.0 (W3C RDF Dataset Canonicalization), you:
-//   1. Create a crypto suite that declares CanonicalizationMethod = "RDFC-1.0"
-//   2. Register both JCS and RDFC-1.0 canonicalizers in a DocumentCanonicalizerProvider
-//   3. Pass the providers to SigningService and VerificationService full constructors
+// ZCAP-LD proofs can use either canonicalization method. By default the services use JCS
+// (JSON Canonicalization Scheme, RFC 8785). To use RDFC-1.0 (W3C RDF Dataset Canonicalization),
+// construct SigningService and VerificationService with the "RDFC-1.0" canonicalization method;
+// the crypto is delegated to DataProofs' legacy RDFC suite. Use one method per deployment.
 
-// --- Setup: register both canonicalizers ---
-var canonicalizerProvider = new DocumentCanonicalizerProvider();
-canonicalizerProvider.Register(new JcsDocumentCanonicalizer());     // always needed as fallback
-canonicalizerProvider.Register(new RdfcDocumentCanonicalizer());    // RDFC-1.0 support
-
-// --- Setup: register both crypto suites ---
-var suiteProvider = new CryptoSuiteProvider();
-suiteProvider.Register(CryptoSuite.Ed25519());       // default Ed25519 (JCS)
-suiteProvider.Register(new RdfcEd25519CryptoSuite()); // Ed25519 with RDFC-1.0
-
-// Note: Both suites have the same ProofType ("Ed25519Signature2020"), so the last
-// registered wins in the provider lookup. This means signing will use RDFC-1.0 and
-// verification will also resolve to RDFC-1.0 for Ed25519Signature2020 proofs.
-//
-// In practice, you would use one canonicalization method per deployment, or use
-// different proof types to distinguish suites.
-
-// --- Wire services with the full constructors ---
+// --- Wire services with RDFC-1.0 canonicalization ---
 var rdfcDidProvider = new InMemoryDidProvider();
-var rdfcSigningService = new SigningService(
-    rdfcDidProvider, rdfcDidProvider, suiteProvider, canonicalizerProvider);
+var rdfcSigningService = new SigningService(rdfcDidProvider, rdfcDidProvider, "RDFC-1.0");
 var rdfcVerificationService = new VerificationService(
-    rdfcDidProvider, caveatProcessor, suiteProvider,
+    rdfcDidProvider, caveatProcessor,
     new RevocationService(new InMemoryRevocationStore()),
-    new InMemoryNonceStore(), canonicalizerProvider);
+    new InMemoryNonceStore(), canonicalizationMethod: "RDFC-1.0");
 
 // --- Create and delegate a capability using RDFC-1.0 ---
 var rdfcOwnerDid = "did:key:z6MkRdfcOwner";

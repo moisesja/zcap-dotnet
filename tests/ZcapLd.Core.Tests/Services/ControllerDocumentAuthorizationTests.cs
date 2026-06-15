@@ -58,10 +58,8 @@ public class ControllerDocumentAuthorizationTests
         new VerificationService(
             _didProvider,
             new CaveatProcessor(),
-            VerificationService.CreateDefaultSuiteProvider(),
             new RevocationService(new InMemoryRevocationStore()),
             new InMemoryNonceStore(),
-            SigningService.CreateDefaultCanonicalizerProvider(),
             nonceWindow: null,
             logger: logger,
             relationshipResolver: relationshipResolver);
@@ -243,10 +241,8 @@ public class ControllerDocumentAuthorizationTests
         var verifier = new VerificationService(
             new KeyOnlyDidResolver(),
             new CaveatProcessor(),
-            VerificationService.CreateDefaultSuiteProvider(),
             new RevocationService(new InMemoryRevocationStore()),
-            new InMemoryNonceStore(),
-            SigningService.CreateDefaultCanonicalizerProvider());
+            new InMemoryNonceStore());
 
         var invocation = await SignedInvocationAsync(root, alice, "read");
 

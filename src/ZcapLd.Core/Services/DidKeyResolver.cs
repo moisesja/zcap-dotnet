@@ -159,7 +159,7 @@ public class DidKeyResolver : IDidResolver, IVerificationRelationshipResolver
 
     /// <summary>
     /// Maps NetCrypto's <see cref="KeyType"/> enum to ZcapLd key type strings
-    /// used by <see cref="Cryptography.ICryptoSuite"/>.
+    /// used by the signature-suite metadata (<c>ZcapSuiteCatalog</c>).
     /// </summary>
     internal static string MapKeyType(KeyType keyType) => keyType switch
     {

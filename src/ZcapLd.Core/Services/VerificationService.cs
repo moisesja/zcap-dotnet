@@ -20,15 +20,14 @@ public class VerificationService : IVerificationService
 {
     private readonly IDidResolver _didResolver;
     private readonly ICaveatProcessor _caveatProcessor;
-    private readonly ICryptoSuiteProvider _suiteProvider;
     private readonly IRevocationService _revocationService;
     private readonly INonceStore _nonceStore;
-    private readonly IDocumentCanonicalizerProvider _canonicalizerProvider;
 
     // Stage C (#108): canonicalization + signature verification delegated to DataProofs' legacy
-    // cryptosuites. The suite provider above still supplies proof-type / key-type / canonicalization
-    // metadata (incl. the Issue #68 key-type binding).
+    // cryptosuites. Suite metadata (proof type, the #68 key-type binding, context URL) comes from the
+    // fixed ZcapSuiteCatalog; the canonicalization method is fixed per service instance.
     private readonly LegacyProofCrypto _legacyProofCrypto = new();
+    private readonly string _canonicalizationMethod;
 
     private readonly TimeSpan _nonceWindow;
     private readonly TimeSpan _freshnessClockSkew;
@@ -56,123 +55,63 @@ public class VerificationService : IVerificationService
     public static readonly TimeSpan DefaultFreshnessClockSkew = TimeSpan.FromMinutes(1);
 
     /// <summary>
-    /// Backward-compatible constructor (Ed25519 only). Each instance gets its own process-local
+    /// Convenience constructor (JCS canonicalization). Each instance gets its own process-local
     /// <see cref="InMemoryNonceStore"/>, so replay state is NOT shared across
     /// <see cref="VerificationService"/> instances; in a per-request / multi-instance setup supply a
     /// shared <see cref="INonceStore"/> via the full constructor (Issue #62; PR #88 review).
     /// </summary>
     public VerificationService(IDidResolver didResolver, ICaveatProcessor caveatProcessor)
-        : this(didResolver, caveatProcessor, CreateDefaultSuiteProvider(),
-               new RevocationService(new InMemoryRevocationStore()))
+        : this(didResolver, caveatProcessor, new RevocationService(new InMemoryRevocationStore()))
     {
     }
 
     /// <summary>
-    /// Backward-compatible constructor with custom revocation service (Ed25519 only). Each instance
-    /// gets its own process-local <see cref="InMemoryNonceStore"/>, so replay state is NOT shared
-    /// across <see cref="VerificationService"/> instances; in a per-request / multi-instance setup
-    /// supply a shared <see cref="INonceStore"/> via the full constructor (Issue #62; PR #88 review).
+    /// Convenience constructor with a custom revocation service (JCS canonicalization). Each instance
+    /// gets its own process-local <see cref="InMemoryNonceStore"/>; supply a shared
+    /// <see cref="INonceStore"/> via the full constructor for multi-instance setups (Issue #62).
     /// </summary>
     public VerificationService(
         IDidResolver didResolver,
         ICaveatProcessor caveatProcessor,
         IRevocationService revocationService)
-        : this(didResolver, caveatProcessor, CreateDefaultSuiteProvider(), revocationService)
+        : this(didResolver, caveatProcessor, revocationService, new InMemoryNonceStore())
     {
     }
 
     /// <summary>
-    /// Constructor with explicit crypto suite provider. Each instance gets its own process-local
-    /// <see cref="InMemoryNonceStore"/>, so replay state is NOT shared across
-    /// <see cref="VerificationService"/> instances; in a per-request / multi-instance setup supply a
-    /// shared <see cref="INonceStore"/> via the full constructor (Issue #62; PR #88 review).
+    /// Full constructor. The optional <paramref name="logger"/> receives a diagnostic whenever
+    /// verification fails closed on an unexpected exception, so operators can tell a
+    /// misconfiguration/transient fault apart from an invalid capability (Issue #64); defaults to
+    /// <see cref="NullLogger"/>. The optional <paramref name="relationshipResolver"/> performs
+    /// controller authorization by resolving the controller's DID document and checking the relevant
+    /// verification relationship (<c>capabilityInvocation</c> / <c>capabilityDelegation</c>) —
+    /// Issue #65 — resolved from the explicit argument, else the supplied
+    /// <paramref name="didResolver"/> if it also implements <see cref="IVerificationRelationshipResolver"/>,
+    /// else a <c>did:key</c>-backed default. The optional <paramref name="freshnessClockSkew"/>
+    /// tolerates a signed <c>proof.created</c> being up to that far in the future (Issue #71; default
+    /// <see cref="DefaultFreshnessClockSkew"/>). The optional <paramref name="policy"/> enables opt-in
+    /// verifier-side SHOULD checks (Issue #73; default <see cref="VerificationPolicy.Default"/>). The
+    /// optional <paramref name="canonicalizationMethod"/> selects the proof canonicalization
+    /// (<c>"JCS"</c> default, or <c>"RDFC-1.0"</c>) for every proof this verifier checks.
     /// </summary>
     public VerificationService(
         IDidResolver didResolver,
         ICaveatProcessor caveatProcessor,
-        ICryptoSuiteProvider suiteProvider)
-        : this(didResolver, caveatProcessor, suiteProvider,
-               new RevocationService(new InMemoryRevocationStore()))
-    {
-    }
-
-    /// <summary>
-    /// Constructor with all core dependencies. Defaults to an in-process
-    /// <see cref="InMemoryNonceStore"/> so replay protection is ON by default — the convenience
-    /// constructors (including the 2- and 3-argument ones that chain here) are secure-by-default.
-    /// Supply an explicit <see cref="INonceStore"/> via the longer constructor to change it:
-    /// a shared store for multi-node verifiers (<see cref="InMemoryNonceStore"/> is process-local),
-    /// or <see cref="NullNonceStore"/> to deliberately opt out of replay protection (Issue #62).
-    /// </summary>
-    public VerificationService(
-        IDidResolver didResolver,
-        ICaveatProcessor caveatProcessor,
-        ICryptoSuiteProvider suiteProvider,
-        IRevocationService revocationService)
-        : this(didResolver, caveatProcessor, suiteProvider, revocationService,
-               new InMemoryNonceStore())
-    {
-    }
-
-    /// <summary>
-    /// Constructor with all dependencies including replay protection (JCS canonicalization).
-    /// </summary>
-    public VerificationService(
-        IDidResolver didResolver,
-        ICaveatProcessor caveatProcessor,
-        ICryptoSuiteProvider suiteProvider,
         IRevocationService revocationService,
         INonceStore nonceStore,
-        TimeSpan? nonceWindow = null,
-        TimeSpan? freshnessClockSkew = null)
-        : this(didResolver, caveatProcessor, suiteProvider, revocationService,
-               nonceStore, SigningService.CreateDefaultCanonicalizerProvider(), nonceWindow,
-               freshnessClockSkew: freshnessClockSkew)
-    {
-    }
-
-    /// <summary>
-    /// Full constructor with all dependencies including canonicalizer provider. The optional
-    /// <paramref name="logger"/> receives a diagnostic whenever verification fails closed on an
-    /// unexpected exception, so operators can tell a misconfiguration/transient fault apart from
-    /// an invalid capability (Issue #64). Defaults to <see cref="NullLogger"/> (no output).
-    /// The optional <paramref name="relationshipResolver"/> performs controller authorization by
-    /// resolving the controller's DID document and checking the relevant verification relationship
-    /// (<c>capabilityInvocation</c> / <c>capabilityDelegation</c>) — Issue #65. Resolution order:
-    /// the explicit argument, else the supplied <paramref name="didResolver"/> if it also implements
-    /// <see cref="IVerificationRelationshipResolver"/> (so a method-aware resolver like
-    /// <see cref="DidKeyResolver"/> self-provides authorization for the DIDs it already resolves),
-    /// else a <c>did:key</c>-backed default (<see cref="CreateDefaultRelationshipResolver"/>). Supply
-    /// a method-appropriate resolver (e.g. one wired by NetDid's <c>AddNetDid</c>) for other DID
-    /// methods, otherwise their controllers fail closed as not authorized.
-    /// The optional <paramref name="freshnessClockSkew"/> tolerates a signed <c>proof.created</c> being
-    /// up to that far in the future before rejecting it (Issue #71); defaults to
-    /// <see cref="DefaultFreshnessClockSkew"/> (1 minute). The staleness bound is the nonce window, not
-    /// this value.
-    /// The optional <paramref name="policy"/> enables opt-in verifier-side SHOULD checks (Issue #73) —
-    /// currently the 3-month delegated-expiration ceiling, off by default; defaults to
-    /// <see cref="VerificationPolicy.Default"/> (nothing enforced).
-    /// </summary>
-    public VerificationService(
-        IDidResolver didResolver,
-        ICaveatProcessor caveatProcessor,
-        ICryptoSuiteProvider suiteProvider,
-        IRevocationService revocationService,
-        INonceStore nonceStore,
-        IDocumentCanonicalizerProvider canonicalizerProvider,
         TimeSpan? nonceWindow = null,
         ILogger<VerificationService>? logger = null,
         IVerificationRelationshipResolver? relationshipResolver = null,
         IRootCapabilityResolver? rootResolver = null,
         TimeSpan? freshnessClockSkew = null,
-        VerificationPolicy? policy = null)
+        VerificationPolicy? policy = null,
+        string? canonicalizationMethod = null)
     {
         _didResolver = didResolver ?? throw new ArgumentNullException(nameof(didResolver));
         _caveatProcessor = caveatProcessor ?? throw new ArgumentNullException(nameof(caveatProcessor));
-        _suiteProvider = suiteProvider ?? throw new ArgumentNullException(nameof(suiteProvider));
         _revocationService = revocationService ?? throw new ArgumentNullException(nameof(revocationService));
         _nonceStore = nonceStore ?? throw new ArgumentNullException(nameof(nonceStore));
-        _canonicalizerProvider = canonicalizerProvider ?? throw new ArgumentNullException(nameof(canonicalizerProvider));
+        _canonicalizationMethod = canonicalizationMethod ?? "JCS";
         _nonceWindow = nonceWindow ?? DefaultNonceWindow;
         _freshnessClockSkew = freshnessClockSkew ?? DefaultFreshnessClockSkew;
         _logger = logger ?? NullLogger<VerificationService>.Instance;
@@ -187,14 +126,6 @@ public class VerificationService : IVerificationService
         // it fails closed.
         _rootResolver = rootResolver ?? didResolver as IRootCapabilityResolver;
         _policy = policy ?? VerificationPolicy.Default;
-    }
-
-    internal static ICryptoSuiteProvider CreateDefaultSuiteProvider()
-    {
-        var provider = new CryptoSuiteProvider();
-        provider.Register(CryptoSuite.Ed25519());
-        provider.Register(CryptoSuite.P256());
-        return provider;
     }
 
     /// <summary>
@@ -271,28 +202,6 @@ public class VerificationService : IVerificationService
     /// </summary>
     private static bool IsExpectedResolutionError(string? resolutionError) => resolutionError is
         "notFound" or "invalidDid" or "invalidDidUrl" or "methodNotSupported" or "representationNotSupported";
-
-    /// <summary>
-    /// Decodes a proof's multibase <c>proofValue</c>, retyping a malformed/unsupported/empty value as
-    /// a <see cref="CapabilityValidationException"/>. A bad <c>proofValue</c> is invalid <i>input</i>,
-    /// not a crypto-configuration fault, so this keeps it on the Debug-severity side of
-    /// <see cref="LogFailedClosed"/> instead of colliding with the missing-canonicalizer
-    /// <see cref="CryptographicException"/> that must stay at Warning. <see cref="MultibaseCodec.Decode"/>
-    /// throws <see cref="ArgumentException"/> (null/empty), a guard before its own try, and
-    /// <see cref="CryptographicException"/> (bad prefix / undecodable) — both are an invalid proofValue
-    /// here (this call's only sources of those types), so both are retyped.
-    /// </summary>
-    private static byte[] DecodeProofValue(string proofValue)
-    {
-        try
-        {
-            return MultibaseCodec.Decode(proofValue);
-        }
-        catch (Exception ex) when (ex is CryptographicException or ArgumentException)
-        {
-            throw new CapabilityValidationException("Malformed or unsupported proofValue.", ex);
-        }
-    }
 
     /// <summary>
     /// Verifies a capability's cryptographic proof. For a delegated capability the immediate parent
@@ -460,7 +369,7 @@ public class VerificationService : IVerificationService
             // depth; also keeps a forged chain from driving the relationship resolver). The
             // invocation path (VerifyInvocationAsync) orders signature before authorization likewise.
             var resolvedKey = await _didResolver.ResolvePublicKeyAsync(proof.VerificationMethod);
-            var suite = _suiteProvider.GetByProofType(proof.Type);
+            var suite = ZcapSuiteCatalog.GetByProofType(proof.Type);
             if (suite == null)
             {
                 return VerificationResult.Fail(VerificationOutcome.InvalidSignature,
@@ -477,7 +386,7 @@ public class VerificationService : IVerificationService
 
             var capabilityWithoutProof = ProofSigningPayloadBuilder.CloneCapabilityWithoutProof(capability);
 
-            if (!_legacyProofCrypto.Verify(capabilityWithoutProof, proof, resolvedKey, suite.CanonicalizationMethod))
+            if (!_legacyProofCrypto.Verify(capabilityWithoutProof, proof, resolvedKey, _canonicalizationMethod))
                 return VerificationResult.Fail(VerificationOutcome.InvalidSignature,
                     "Delegation proof signature did not verify.");
 
@@ -822,7 +731,7 @@ public class VerificationService : IVerificationService
     {
         var proof = invocation.Proof!;
         var resolvedKey = await _didResolver.ResolvePublicKeyAsync(proof.VerificationMethod);
-        var suite = _suiteProvider.GetByProofType(proof.Type)
+        var suite = ZcapSuiteCatalog.GetByProofType(proof.Type)
             ?? throw new CapabilityValidationException(
                 $"Unsupported proof type: {proof.Type}");
 
@@ -833,26 +742,26 @@ public class VerificationService : IVerificationService
 
         var invocationWithoutProof = ProofSigningPayloadBuilder.CloneInvocationWithoutProof(invocation);
 
-        return _legacyProofCrypto.Verify(invocationWithoutProof, proof, resolvedKey, suite.CanonicalizationMethod);
+        return _legacyProofCrypto.Verify(invocationWithoutProof, proof, resolvedKey, _canonicalizationMethod);
     }
 
     /// <summary>
-    /// Binds the crypto suite (selected from the attacker-controlled <c>proof.Type</c>) to the key the
-    /// DID actually resolves to: the suite's <see cref="ICryptoSuite.KeyType"/> must equal the
+    /// Binds the signature suite (selected from the attacker-controlled <c>proof.Type</c>) to the key
+    /// the DID actually resolves to: the suite's <c>KeyType</c> must equal the
     /// <see cref="ResolvedKey.KeyType"/> exactly (Issue #68). The proof type is part of the signed
     /// payload, so tampering already breaks the signature, and key importers reject cross-curve bytes —
     /// but this explicit, fail-closed guard self-documents the invariant and future-proofs against
-    /// custom resolvers/suites that might erode those downstream protections.
+    /// custom resolvers that might erode those downstream protections.
     /// <para>
     /// This couples two vocabularies by design: an <see cref="IDidResolver"/> MUST emit the exact
-    /// <see cref="ResolvedKey.KeyType"/> string the matching <see cref="ICryptoSuite"/> uses
+    /// <see cref="ResolvedKey.KeyType"/> string the matching suite uses
     /// (e.g. <c>Ed25519VerificationKey2020</c>), not a synonym (<c>Multikey</c>, <c>JsonWebKey2020</c>,
     /// <c>Ed25519VerificationKey2018</c>). The in-library pairs already align —
-    /// <c>DidKeyResolver.MapKeyType</c> ↔ <c>CryptoSuite.Ed25519/P256().KeyType</c> — and the contract
+    /// <c>DidKeyResolver.MapKeyType</c> ↔ <c>ZcapSuiteCatalog</c> — and the contract
     /// is documented on both members. The single source of truth for the two verify paths.
     /// </para>
     /// </summary>
-    private static bool KeyTypeMatches(ICryptoSuite suite, ResolvedKey resolvedKey) =>
+    private static bool KeyTypeMatches(ZcapSuiteInfo suite, ResolvedKey resolvedKey) =>
         string.Equals(suite.KeyType, resolvedKey.KeyType, StringComparison.Ordinal);
 
     /// <summary>
@@ -1565,13 +1474,6 @@ public class VerificationService : IVerificationService
         }
 
         return null;
-    }
-
-    private IDocumentCanonicalizer ResolveCanonicalizer(ICryptoSuite suite)
-    {
-        return _canonicalizerProvider.GetByMethod(suite.CanonicalizationMethod)
-            ?? throw new CryptographicException(
-                $"No canonicalizer registered for method: {suite.CanonicalizationMethod}");
     }
 
     /// <summary>

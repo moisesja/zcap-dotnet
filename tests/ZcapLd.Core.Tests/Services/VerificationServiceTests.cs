@@ -158,10 +158,8 @@ public class VerificationServiceTests
         var verifier = new VerificationService(
             _didProvider,
             _caveatProcessor,
-            VerificationService.CreateDefaultSuiteProvider(),
             new RevocationService(new InMemoryRevocationStore()),
             new InMemoryNonceStore(),
-            SigningService.CreateDefaultCanonicalizerProvider(),
             nonceWindow: null,
             logger: logger);
 
@@ -199,10 +197,8 @@ public class VerificationServiceTests
         var verifier = new VerificationService(
             _didProvider,
             _caveatProcessor,
-            VerificationService.CreateDefaultSuiteProvider(),
             new RevocationService(new InMemoryRevocationStore()),
             new InMemoryNonceStore(),
-            SigningService.CreateDefaultCanonicalizerProvider(),
             nonceWindow: null,
             logger: logger);
 
@@ -247,10 +243,8 @@ public class VerificationServiceTests
         var verifier = new VerificationService(
             _didProvider,
             _caveatProcessor,
-            VerificationService.CreateDefaultSuiteProvider(),
             new ThrowingRevocationService(),
             new InMemoryNonceStore(),
-            SigningService.CreateDefaultCanonicalizerProvider(),
             nonceWindow: null,
             logger: logger);
 
@@ -281,10 +275,8 @@ public class VerificationServiceTests
         var verifier = new VerificationService(
             _didProvider,
             _caveatProcessor,
-            VerificationService.CreateDefaultSuiteProvider(),
             new RevocationService(new InMemoryRevocationStore()),
             new InMemoryNonceStore(),
-            SigningService.CreateDefaultCanonicalizerProvider(),
             nonceWindow: null,
             logger: logger);
 
@@ -1391,12 +1383,8 @@ public class VerificationServiceTests
     {
         var store = new InMemoryRevocationStore();
         var revocation = new RevocationService(store);
-        var suiteProvider = new CryptoSuiteProvider();
-        suiteProvider.Register(CryptoSuite.Ed25519());
-        var canon = new DocumentCanonicalizerProvider();
-        canon.Register(new JcsDocumentCanonicalizer());
         var verifier = new VerificationService(
-            _didProvider, _caveatProcessor, suiteProvider, revocation, new InMemoryNonceStore(), canon);
+            _didProvider, _caveatProcessor, revocation, new InMemoryNonceStore());
         return (verifier, revocation, store);
     }
 

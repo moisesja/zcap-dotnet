@@ -39,7 +39,7 @@ public class DelegatedInvocationComplianceTests
     }
 
     private VerificationService CreateVerifier() =>
-        new(_didProvider, _caveatProcessor, VerificationService.CreateDefaultSuiteProvider(),
+        new(_didProvider, _caveatProcessor,
             new RevocationService(new InMemoryRevocationStore()), new InMemoryNonceStore());
 
     private async Task<(Capability root, Capability delegated, string rootDid, string leafDid)> CreateRootAndDelegatedAsync()

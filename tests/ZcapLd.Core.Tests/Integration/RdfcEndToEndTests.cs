@@ -10,8 +10,8 @@ namespace ZcapLd.Core.Tests.Integration;
 /// <summary>
 /// End-to-end tests for RDFC-1.0 canonicalization through the full
 /// signing and verification pipeline: create → delegate → invoke → verify.
-/// These tests wire an ICryptoSuite with CanonicalizationMethod = "RDFC-1.0"
-/// through SigningService and VerificationService.
+/// These configure SigningService and VerificationService with the "RDFC-1.0"
+/// canonicalization method (delegated to DataProofs' legacy RDFC suite).
 /// </summary>
 public class RdfcEndToEndTests
 {
@@ -24,22 +24,13 @@ public class RdfcEndToEndTests
     {
         _didProvider = new InMemoryDidProvider();
 
-        var canonicalizerProvider = new DocumentCanonicalizerProvider();
-        canonicalizerProvider.Register(new JcsDocumentCanonicalizer());
-        canonicalizerProvider.Register(new RdfcDocumentCanonicalizer());
-
-        // Register RDFC Ed25519 suite (last registered wins for same ProofType)
-        var suiteProvider = new CryptoSuiteProvider();
-        suiteProvider.Register(new RdfcEd25519CryptoSuite());
-
-        _signingService = new SigningService(
-            _didProvider, _didProvider, suiteProvider, canonicalizerProvider);
+        _signingService = new SigningService(_didProvider, _didProvider, "RDFC-1.0");
 
         var caveatProcessor = new CaveatProcessor();
         _verificationService = new VerificationService(
-            _didProvider, caveatProcessor, suiteProvider,
+            _didProvider, caveatProcessor,
             new RevocationService(new InMemoryRevocationStore()),
-            new InMemoryNonceStore(), canonicalizerProvider);
+            new InMemoryNonceStore(), canonicalizationMethod: "RDFC-1.0");
 
         _capabilityService = new CapabilityService(_signingService);
     }

@@ -121,7 +121,7 @@ Use `IRevocationStore` to plug in your persistence model:
 
 - This package is designed for in-process usage.
 - No default `IDidSigner` ships in the core package — consumers must provide their own (HSM/KMS/Key Vault).
-- The `ICryptoSuite` abstraction supports pluggable algorithms; Ed25519 and P-256 are registered by default.
+- Ed25519 and P-256 are the supported signature suites; cryptography is delegated to NetCrypto (via DataProofs), not extended through a zcap API.
 - Data integrity processing supports JCS (default) and RDFC-1.0 (W3C RDF Dataset Canonicalization) via pluggable `IDocumentCanonicalizer`. Register `RdfcDocumentCanonicalizer` for full Data Integrity spec compliance.
 
 ## Documentation

@@ -33,10 +33,8 @@ public class VerificationServiceDelegationFreshnessTests
     private VerificationService CreateVerifier(VerificationPolicy? policy = null)
         => new(
             _didProvider, _caveatProcessor,
-            VerificationService.CreateDefaultSuiteProvider(),
             new RevocationService(new InMemoryRevocationStore()),
             new InMemoryNonceStore(),
-            SigningService.CreateDefaultCanonicalizerProvider(),
             policy: policy);
 
     // Root + first-level delegated capability with an explicit `expires`. The root is registered so the

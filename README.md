@@ -20,7 +20,7 @@ This library provides:
 - Invocation replay protection with pluggable nonce stores
 - Revocation persistence with pluggable storage backends
 - ValidWhileTrue caveat support with HTTP-based remote revocation checking
-- Pluggable crypto suites (Ed25519 and P-256 included, additional curves extensible) with JCS or RDFC-1.0 canonicalization
+- Ed25519 and P-256 signature suites with JCS or RDFC-1.0 canonicalization (crypto delegated to NetCrypto via DataProofs)
 - DID resolution via [NetDid](https://www.nuget.org/packages/NetDid.Core) (W3C-compliant did:key support)
 - Multibase signature encoding
 
@@ -325,4 +325,4 @@ dotnet pack src/ZcapLd.AspNetCore/ZcapLd.AspNetCore.csproj -c Release
 - `InMemoryDidProvider` (in examples and tests) stores private keys in plaintext memory and is NOT for production use.
 - Canonicalization supports both JCS (JSON Canonicalization Scheme, RFC 8785) and RDFC-1.0 (W3C RDF Dataset Canonicalization) via pluggable `IDocumentCanonicalizer`. JCS is the default; known W3C JSON-LD contexts are embedded for offline operation.
 - Cryptography is provided by [NetCrypto](https://www.nuget.org/packages/NetCrypto) (Ed25519 / P-256 sign + verify), reached via [NetDid](https://www.nuget.org/packages/NetDid.Core) 2.0.0 for W3C-compliant did:key resolution; multibase + JCS (RFC 8785) via [NetCid](https://www.nuget.org/packages/NetCid); RDFC-1.0 via [DataProofsDotnet.Rdfc](https://www.nuget.org/packages/DataProofsDotnet.Rdfc).
-- The `ICryptoSuite` abstraction supports pluggable algorithms; Ed25519 and P-256 are registered by default.
+- Ed25519 and P-256 are the supported signature suites; cryptography is delegated to NetCrypto (via DataProofs), not extended through a zcap API.

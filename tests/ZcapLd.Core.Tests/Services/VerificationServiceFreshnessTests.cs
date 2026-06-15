@@ -31,7 +31,6 @@ public class VerificationServiceFreshnessTests
     private VerificationService CreateVerificationService(INonceStore nonceStore, TimeSpan? freshnessClockSkew = null)
         => new(
             _didProvider, _caveatProcessor,
-            VerificationService.CreateDefaultSuiteProvider(),
             new RevocationService(new InMemoryRevocationStore()),
             nonceStore, nonceWindow: null, freshnessClockSkew: freshnessClockSkew);
 
