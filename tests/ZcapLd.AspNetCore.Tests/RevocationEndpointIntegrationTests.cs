@@ -86,7 +86,9 @@ public sealed class RevocationEndpointIntegrationTests : IClassFixture<Revocatio
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var status = await GetStatusAsync(http, delegated.Id);
         status.IsRevoked.Should().BeTrue();
-        status.RevokedBy.Should().Be(rootDid);
+        // The anonymous status endpoint intentionally returns only {capabilityId, isRevoked}; it no
+        // longer leaks operational metadata (RevokedBy/Reason/RootCapabilityId) to unauthenticated callers.
+        status.RevokedBy.Should().BeNull();
     }
 
     [Fact]

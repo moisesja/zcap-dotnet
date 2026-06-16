@@ -419,6 +419,19 @@ public class VerificationService : IVerificationService
                     "Delegated capability exceeds the authority of its parent.");
             }
 
+            // Caveat compatibility (symmetric with the chain path's check at VerifyBuiltChainAsync): a
+            // child MUST NOT declare a same-type caveat that is LESS restrictive than its parent's — a
+            // later ExpirationCaveat, a larger UsageCount, or a ValidWhileTrue retargeted to a URI the
+            // parent does not control. Without this, the standalone single-proof check accepted such a
+            // child while the full chain verifier rejected it (the #69 attenuation fix, left open for
+            // caveats).
+            if (parentCapability != null &&
+                !await _caveatProcessor.ValidateCaveatCompatibilityAsync(parentCapability.Caveat, capability.Caveat))
+            {
+                return VerificationResult.Fail(VerificationOutcome.CaveatFailed,
+                    "Delegated capability's caveats are not compatible with its parent's.");
+            }
+
             if (capability.ExpiresAt is { } childExpiresAt && childExpiresAt < DateTime.UtcNow)
             {
                 return VerificationResult.Fail(VerificationOutcome.Expired,
@@ -839,7 +852,8 @@ public class VerificationService : IVerificationService
     /// </para>
     /// </summary>
     private async Task<VerificationResult> VerifyBuiltChainAsync(
-        List<Capability> chain, bool applyExpirationCeiling = true, bool applyCreatedCheck = true)
+        List<Capability> chain, bool applyExpirationCeiling = true, bool applyCreatedCheck = true,
+        bool requireDelegatedExpires = true)
     {
         try
         {
@@ -889,8 +903,21 @@ public class VerificationService : IVerificationService
                     return VerificationResult.Fail(VerificationOutcome.AttenuationViolation,
                         $"Capability '{child.Id}' exceeds the authority of its parent '{parent.Id}'.");
 
-                // Verify expiration hasn't passed
+                // Delegated zcaps MUST carry an expiration (ZCAP-LD MUST-15). Enforced HERE on the
+                // verification path — the crypto paths never call CapabilityService.ValidateCapabilityAsync,
+                // where the create-time check lives — so without this a delegated capability that simply
+                // omits `expires` is accepted, treated as never-expiring, and slips past the attenuation
+                // comparison (which only fires when both sides have a value), letting a child outlive a
+                // short-lived parent indefinitely. Every non-root link (chain[1..]) is delegated, so this
+                // applies to all of them. Skipped on the revocation-authorization path
+                // (requireDelegatedExpires == false) so a non-expiring delegation stays REVOCABLE —
+                // refusing to authorize its removal would be backwards (mirrors the #73/#99 carve-outs).
                 var childExpiresAt = child.ExpiresAt;
+                if (requireDelegatedExpires && childExpiresAt is null)
+                    return VerificationResult.Fail(VerificationOutcome.MalformedCapability,
+                        $"Delegated capability '{child.Id}' MUST include an expiration (expires).");
+
+                // Verify expiration hasn't passed
                 if (childExpiresAt.HasValue && childExpiresAt.Value < DateTime.UtcNow)
                     return VerificationResult.Fail(VerificationOutcome.Expired,
                         $"Capability '{child.Id}' in the chain has expired.");
@@ -991,6 +1018,18 @@ public class VerificationService : IVerificationService
             }
 
             chain.Insert(0, current); // Add to beginning to build root->leaf order
+
+            // Bound the WORK, not just the final acceptance: stop walking as soon as the chain exceeds
+            // the maximum length, BEFORE deserializing the next embedded parent. Previously the
+            // MaxChainLength gate ran only in VerifyBuiltChainAsync, after the entire attacker-supplied
+            // nesting had been walked and re-deserialized. Returning the over-length chain (rather than
+            // throwing) lets that gate still reject it with the precise ChainTooLong outcome; the root
+            // invariants below are intentionally skipped for the truncated chain since it is rejected
+            // for length regardless.
+            if (chain.Count > MaxChainLength)
+            {
+                return chain;
+            }
 
             if (string.IsNullOrEmpty(current.ParentCapability))
             {
@@ -1199,6 +1238,14 @@ public class VerificationService : IVerificationService
             if (suffix.Length == 0)
                 return true; // Exact match (edge case)
 
+            // Reject a path-traversal ("..") segment in the extension. Lexical prefix matching is
+            // spec-correct, but if a downstream resource server resolves/normalizes dot-segments
+            // (or normalizes differently than this verifier) a target like ".../a/../../secret" could
+            // escape the capability's intended subtree. Safer-by-default at the authorization boundary
+            // (Issue #74 follow-up); only the path portion is inspected, so ".." inside a query is fine.
+            if (SuffixHasDotSegment(suffix))
+                return false;
+
             // If capability target has no query string, suffix must start with / or ?
             if (!capabilityTarget.Contains('?'))
             {
@@ -1207,6 +1254,26 @@ public class VerificationService : IVerificationService
 
             // If capability target has query string, suffix must start with &
             return suffix.StartsWith('&');
+        }
+
+        return false;
+    }
+
+    private static readonly char[] QueryOrFragmentChars = { '?', '#' };
+
+    /// <summary>
+    /// True if the path portion of a target suffix contains a <c>..</c> path segment (a complete
+    /// segment, not a substring like <c>a..b</c>). Anything from the first <c>?</c> or <c>#</c>
+    /// onward is treated as query/fragment and ignored.
+    /// </summary>
+    private static bool SuffixHasDotSegment(string suffix)
+    {
+        var queryStart = suffix.IndexOfAny(QueryOrFragmentChars);
+        var path = queryStart >= 0 ? suffix.Substring(0, queryStart) : suffix;
+        foreach (var segment in path.Split('/'))
+        {
+            if (segment == "..")
+                return true;
         }
 
         return false;
@@ -1614,11 +1681,14 @@ public class VerificationService : IVerificationService
             // this built chain instead of rebuilding it — see VerifyCapabilityChainAsync.)
             var chain = await BuildCapabilityChainAsync(capability, explicitRoot);
 
-            // Do NOT apply the opt-in 3-month expiration ceiling (Issue #73) nor the delegation-proof
-            // `created` soundness check (Issue #99) here: revocation must stay possible for a long-lived
-            // or malformed-`created` delegation — refusing to authorize its removal would be exactly
-            // backwards. Both are constraints on accepting/invoking a zcap, not on revoking one.
-            if (!(await VerifyBuiltChainAsync(chain, applyExpirationCeiling: false, applyCreatedCheck: false)).IsValid)
+            // Do NOT apply the opt-in 3-month expiration ceiling (Issue #73), the delegation-proof
+            // `created` soundness check (Issue #99), nor the delegated-`expires` MUST here: revocation
+            // must stay possible for a long-lived, malformed-`created`, or non-expiring delegation —
+            // refusing to authorize its removal would be exactly backwards. All three are constraints on
+            // accepting/invoking a zcap, not on revoking one.
+            if (!(await VerifyBuiltChainAsync(
+                    chain, applyExpirationCeiling: false, applyCreatedCheck: false,
+                    requireDelegatedExpires: false)).IsValid)
                 return false;
 
             // Document-based authorization (Issue #65): the revoker is authorized when ANY link in

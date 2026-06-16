@@ -92,6 +92,7 @@ public class SigningService : ISigningService
         proof.ProofValue = await _legacyProofCrypto.CreateProofValueAsync(
             capabilityWithoutProof, proof, didSigner, _canonicalizationMethod);
 
+        ConfirmSignature(capabilityWithoutProof, proof, resolvedKey);
         return proof;
     }
 
@@ -223,7 +224,29 @@ public class SigningService : ISigningService
         proof.ProofValue = await _legacyProofCrypto.CreateProofValueAsync(
             invocationWithoutProof, proof, didSigner, _canonicalizationMethod);
 
+        ConfirmSignature(invocationWithoutProof, proof, resolvedKey);
         return proof;
+    }
+
+    /// <summary>
+    /// Defense-in-depth: confirm the just-produced <c>proofValue</c> actually verifies against the
+    /// public key the signer DID resolved to, before returning the proof. The signature bytes are
+    /// produced by the consumer's <see cref="IDidSigner"/> (HSM/KMS), whose private key is resolved
+    /// independently of the public verification method — a key mix-up across a multi-key signer, or a
+    /// wrong DID→key mapping, would otherwise emit a structurally valid proof stamped with a
+    /// verificationMethod the signature does not correspond to, only discovered (as an
+    /// InvalidSignature) at verify time, possibly long after issuance. Turning that silent
+    /// mis-issuance into an immediate, localized failure costs one cheap local verify.
+    /// </summary>
+    private void ConfirmSignature(object documentWithoutProof, Proof proof, ResolvedKey resolvedKey)
+    {
+        if (!_legacyProofCrypto.Verify(documentWithoutProof, proof, resolvedKey, _canonicalizationMethod))
+        {
+            throw new CryptographicException(
+                "The produced signature did not verify against the public key resolved for the signer " +
+                "DID. The signing key does not correspond to the resolved verificationMethod " +
+                "(check the IDidSigner ↔ DID key mapping).");
+        }
     }
 
     /// <summary>

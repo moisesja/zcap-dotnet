@@ -296,7 +296,23 @@ public static class ZcapRevocationServiceCollectionExtensions
     {
         ArgumentNullException.ThrowIfNull(services);
 
-        services.AddHttpClient(HttpValidWhileTrueHandler.HttpClientName);
+        // Harden the named client against SSRF and resource-exhaustion by default (the caveat URI is
+        // attacker-controlled). Consumers can still further configure the client, but they no longer
+        // have to remember these guards: no auto-redirect (a 302 cannot bypass the host check), a
+        // connect-time guard that refuses internal addresses (closes the DNS-rebind window), a request
+        // timeout, and a small response-content buffer cap so a hostile endpoint cannot stream a huge body.
+        services.AddHttpClient(HttpValidWhileTrueHandler.HttpClientName, client =>
+            {
+                client.Timeout = TimeSpan.FromSeconds(10);
+                client.MaxResponseContentBufferSize = 64 * 1024; // 64 KB
+            })
+            .ConfigurePrimaryHttpMessageHandler(() => new System.Net.Http.SocketsHttpHandler
+            {
+                AllowAutoRedirect = false,
+                ConnectCallback = SsrfGuard.SafeConnectAsync,
+                ConnectTimeout = TimeSpan.FromSeconds(5),
+                PooledConnectionLifetime = TimeSpan.FromMinutes(2)
+            });
         services.TryAddSingleton<IValidWhileTrueHandler, HttpValidWhileTrueHandler>();
 
         // Re-register CaveatProcessor to pick up the handler,

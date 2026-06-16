@@ -1,4 +1,3 @@
-using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using NetCidJcs = NetCid.JcsCanonicalizer;
@@ -76,17 +75,6 @@ public static class JsonCanonicalizer
     }
 
     /// <summary>
-    /// Per RFC 8785 §3.2.2.2, JSON strings escape only control chars (&lt;0x20), the reverse
-    /// solidus, and the double quote. Used by the proof-removal helpers below, which preserve the
-    /// historical relaxed-escaping writer output.
-    /// </summary>
-    private static readonly JsonWriterOptions CanonicalWriterOptions = new()
-    {
-        Indented = false,
-        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
-    };
-
-    /// <summary>
     /// JSON serialization options for canonical form: compact, original property names, relaxed
     /// escaping, and null model properties omitted.
     /// </summary>
@@ -97,84 +85,4 @@ public static class JsonCanonicalizer
         DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
         Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
     };
-
-    /// <summary>
-    /// Removes the proof field from a capability or invocation object for verification.
-    /// </summary>
-    /// <param name="jsonString">The JSON string with proof</param>
-    /// <returns>JSON string without proof field</returns>
-    public static string RemoveProofField(string jsonString)
-    {
-        using var doc = JsonDocument.Parse(jsonString);
-        using var stream = new MemoryStream();
-        using (var writer = new Utf8JsonWriter(stream, CanonicalWriterOptions))
-        {
-            WriteElementWithoutProof(writer, doc.RootElement);
-        }
-        return Encoding.UTF8.GetString(stream.ToArray());
-    }
-
-    private static void WriteElementWithoutProof(Utf8JsonWriter writer, JsonElement element)
-    {
-        switch (element.ValueKind)
-        {
-            case JsonValueKind.Object:
-                writer.WriteStartObject();
-                foreach (var property in element.EnumerateObject().OrderBy(p => p.Name, StringComparer.Ordinal))
-                {
-                    if (property.Name == "proof")
-                        continue;
-
-                    writer.WritePropertyName(property.Name);
-                    WriteElementWithoutProof(writer, property.Value);
-                }
-                writer.WriteEndObject();
-                break;
-
-            case JsonValueKind.Array:
-                writer.WriteStartArray();
-                foreach (var item in element.EnumerateArray())
-                {
-                    WriteElementWithoutProof(writer, item);
-                }
-                writer.WriteEndArray();
-                break;
-
-            case JsonValueKind.String:
-                writer.WriteStringValue(element.GetString());
-                break;
-
-            case JsonValueKind.Number:
-                if (element.TryGetInt32(out var intValue))
-                    writer.WriteNumberValue(intValue);
-                else if (element.TryGetInt64(out var longValue))
-                    writer.WriteNumberValue(longValue);
-                else if (element.TryGetDouble(out var doubleValue))
-                    writer.WriteNumberValue(doubleValue);
-                break;
-
-            case JsonValueKind.True:
-                writer.WriteBooleanValue(true);
-                break;
-
-            case JsonValueKind.False:
-                writer.WriteBooleanValue(false);
-                break;
-
-            case JsonValueKind.Null:
-                writer.WriteNullValue();
-                break;
-        }
-    }
-
-    /// <summary>
-    /// Creates a canonical JSON string from an object, excluding the proof field.
-    /// </summary>
-    /// <param name="document">The document to canonicalize</param>
-    /// <returns>Canonical JSON string without proof</returns>
-    public static string CanonicalizeWithoutProof(object document)
-    {
-        var json = JsonSerializer.Serialize(document, CanonicalJsonOptions);
-        return RemoveProofField(json);
-    }
 }

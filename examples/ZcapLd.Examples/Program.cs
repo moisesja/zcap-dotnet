@@ -198,7 +198,15 @@ var caveatInvocation = new Invocation
 };
 caveatInvocation.Proof = await signingService.SignInvocationAsync(caveatInvocation, davidDid);
 
-var caveatInvocationValid = await verificationService.VerifyInvocationAsync(caveatInvocation, caveatCapability);
+// A UsageCountCaveat is enforced against the relying party's own usage store: the verifier cannot
+// know the count from the (signed) capability, so supply it via the invocation context. Here 7
+// prior uses < MaxUses 100 -> within the limit. Omitting it makes the caveat fail closed.
+var caveatContext = new Dictionary<string, object>
+{
+    [UsageCountCaveat.CurrentUsesContextKey] = 7
+};
+var caveatInvocationValid = await verificationService.VerifyInvocationAsync(
+    caveatInvocation, caveatCapability, caveatContext);
 Console.WriteLine($"Caveat Invocation Valid: {caveatInvocationValid}");
 Console.WriteLine();
 
@@ -334,7 +342,14 @@ var employeeRead = new Invocation
 };
 employeeRead.Proof = await signingService.SignInvocationAsync(employeeRead, employeeDid);
 
-var employeeCanRead = await verificationService.VerifyInvocationAsync(employeeRead, employeeAccess);
+// The relying party supplies the current usage count (from its own store) so the UsageCountCaveat
+// can be enforced; 12 prior views < 50 -> still ALLOWED.
+var employeeReadContext = new Dictionary<string, object>
+{
+    [UsageCountCaveat.CurrentUsesContextKey] = 12
+};
+var employeeCanRead = await verificationService.VerifyInvocationAsync(
+    employeeRead, employeeAccess, employeeReadContext);
 Console.WriteLine($"\nEmployee reads document: {(employeeCanRead ? "ALLOWED" : "DENIED")}");
 
 // Employee attempts to share document (should fail)

@@ -138,7 +138,10 @@ public class CaveatProcessorTests
         {
             InvocationTime = DateTime.UtcNow,
             RequestedAction = "read",
-            TargetResource = "https://example.com/resource"
+            TargetResource = "https://example.com/resource",
+            // UsageCountCaveat is enforceable only when the relying party supplies the current count
+            // (it cannot be carried in the signed payload). 5 prior uses < MaxUses 10 -> satisfied.
+            Properties = { [UsageCountCaveat.CurrentUsesContextKey] = 5 }
         };
 
         // Act
@@ -209,7 +212,9 @@ public class CaveatProcessorTests
         {
             InvocationTime = DateTime.UtcNow,
             RequestedAction = "read",
-            TargetResource = "https://example.com/resource"
+            TargetResource = "https://example.com/resource",
+            // 5 prior uses < MaxUses 10 -> the usage caveat is satisfied.
+            Properties = { [UsageCountCaveat.CurrentUsesContextKey] = 5 }
         };
 
         // Act
@@ -576,7 +581,9 @@ public class CaveatProcessorTests
         {
             InvocationTime = DateTime.UtcNow,
             RequestedAction = "read",
-            TargetResource = "https://example.com/resource"
+            TargetResource = "https://example.com/resource",
+            // 0 prior uses < MaxUses 10 -> the usage caveat is satisfied.
+            Properties = { [UsageCountCaveat.CurrentUsesContextKey] = 0 }
         };
 
         // Act
@@ -985,17 +992,31 @@ public class CaveatProcessorTests
         // Arrange
         var caveat = new UsageCountCaveat
         {
-            MaxUses = 10,
-            CurrentUses = 5
+            MaxUses = 10
         };
 
-        var context = new InvocationContext();
+        // The current count is supplied by the relying party via the invocation context (it cannot be
+        // carried in the signed payload); 5 prior uses < MaxUses 10 -> satisfied.
+        var context = new InvocationContext
+        {
+            Properties = { [UsageCountCaveat.CurrentUsesContextKey] = 5 }
+        };
 
         // Act
         var result = caveat.IsSatisfied(context);
 
         // Assert
         result.Should().BeTrue();
+    }
+
+    [Fact]
+    public void UsageCountCaveat_NoContextCount_FailsClosed()
+    {
+        // Without a caller-supplied count, the caveat cannot be enforced (CurrentUses is 0 on any
+        // wire-deserialized caveat), so it MUST deny rather than silently grant unlimited use.
+        var caveat = new UsageCountCaveat { MaxUses = 10 };
+
+        caveat.IsSatisfied(new InvocationContext()).Should().BeFalse();
     }
 
     [Fact]

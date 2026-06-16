@@ -1,10 +1,10 @@
 using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Routing;
 using ZcapLd.AspNetCore.Contracts;
 using ZcapLd.Core.Cryptography;
-using ZcapLd.Core.Models;
 using ZcapLd.Core.Services;
 
 namespace ZcapLd.AspNetCore.Endpoints;
@@ -14,6 +14,13 @@ namespace ZcapLd.AspNetCore.Endpoints;
 /// </summary>
 public static class ZcapRevocationEndpointRouteBuilderExtensions
 {
+    /// <summary>
+    /// Upper bound on the (unauthenticated) revoke request body. A legitimate signed revocation —
+    /// even one embedding a full delegation chain — is small; this caps the body an attacker can force
+    /// the server to materialize before any structural/auth check runs.
+    /// </summary>
+    private const long MaxRevocationRequestBytes = 1 * 1024 * 1024; // 1 MB
+
     /// <summary>
     /// Maps revocation endpoints under the provided route prefix.
     /// Defaults to /zcaps/revocations.
@@ -63,6 +70,15 @@ public static class ZcapRevocationEndpointRouteBuilderExtensions
             return TypedResults.BadRequest("Capability ID route value is required.");
         }
 
+        // Bound the unauthenticated request body BEFORE materializing it (DoS): the verifier's
+        // structural limits (chain length, etc.) only run after deserialization, so cap the body here.
+        // Kestrel enforces the per-request limit mid-read and throws BadHttpRequestException on overflow.
+        var bodySizeFeature = httpRequest.HttpContext.Features.Get<IHttpMaxRequestBodySizeFeature>();
+        if (bodySizeFeature is { IsReadOnly: false })
+        {
+            bodySizeFeature.MaxRequestBodySize = MaxRevocationRequestBytes;
+        }
+
         // Deserialize with the ZCAP options (polymorphic caveat converter, etc.) so an embedded
         // capability carrying typed caveats / a controller array round-trips byte-faithfully —
         // otherwise dropped fields would drift the canonical bytes and fail verification.
@@ -75,6 +91,11 @@ public static class ZcapRevocationEndpointRouteBuilderExtensions
         catch (JsonException)
         {
             return TypedResults.BadRequest("Request body is not valid JSON.");
+        }
+        catch (BadHttpRequestException)
+        {
+            // Body exceeded MaxRevocationRequestBytes.
+            return TypedResults.StatusCode(StatusCodes.Status413PayloadTooLarge);
         }
 
         if (request?.Capability == null || request.SignedRevocation == null)
@@ -116,16 +137,17 @@ public static class ZcapRevocationEndpointRouteBuilderExtensions
 
         var decodedCapabilityId = Uri.UnescapeDataString(capabilityId);
         var revocation = await revocationService.GetRevocationAsync(decodedCapabilityId, cancellationToken);
-        if (revocation == null)
-        {
-            return TypedResults.Ok(new RevocationStatusHttpResponse
-            {
-                CapabilityId = decodedCapabilityId,
-                IsRevoked = false
-            });
-        }
 
-        return TypedResults.Ok(ToHttpResponse(revocation, true));
+        // This GET is unauthenticated (the ValidWhileTrue design dereferences it anonymously), so it
+        // returns ONLY the minimal {capabilityId, isRevoked} status — never the operational metadata on
+        // the record (RevokedBy DID, Reason, RootCapabilityId, backend Metadata). Disclosing those to
+        // anonymous callers leaks who/why/linkage for any revoked id. Consumers who need the richer
+        // payload should expose it behind their own authorization.
+        return TypedResults.Ok(new RevocationStatusHttpResponse
+        {
+            CapabilityId = decodedCapabilityId,
+            IsRevoked = revocation != null
+        });
     }
 
     private static string NormalizePrefix(string routePrefix)
@@ -134,20 +156,5 @@ public static class ZcapRevocationEndpointRouteBuilderExtensions
         var withLeadingSlash = trimmed.StartsWith("/", StringComparison.Ordinal) ? trimmed : $"/{trimmed}";
         var normalized = withLeadingSlash.TrimEnd('/');
         return string.IsNullOrEmpty(normalized) ? "/" : normalized;
-    }
-
-    private static RevocationStatusHttpResponse ToHttpResponse(RevocationRecord record, bool isRevoked)
-    {
-        return new RevocationStatusHttpResponse
-        {
-            CapabilityId = record.CapabilityId,
-            IsRevoked = isRevoked,
-            RootCapabilityId = record.RootCapabilityId,
-            RevokedBy = record.RevokedBy,
-            RevokedAt = record.RevokedAt,
-            ExpiresAt = record.ExpiresAt,
-            Reason = record.Reason,
-            Metadata = record.Metadata
-        };
     }
 }

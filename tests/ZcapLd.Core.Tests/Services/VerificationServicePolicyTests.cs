@@ -157,11 +157,13 @@ public class VerificationServicePolicyTests
     }
 
     [Fact]
-    public async Task VerifyChain_DelegatedWithoutExpires_PolicyOn_Rejected_OffVerifies()
+    public async Task VerifyChain_DelegatedWithoutExpires_RejectedByDefaultAsMust()
     {
-        // A delegated zcap with NO `expires` is unbounded — strictly worse for the storage burden the
-        // ceiling caps. The policy treats "missing" as "infinitely far out" and rejects it, so omitting
-        // `expires` cannot trivially defeat the feature. Default-off keeps verifying it (no regression).
+        // A delegated zcap MUST carry an `expires` (ZCAP-LD MUST-15). This is now enforced on the
+        // verification path itself — not only at create-time — independent of the opt-in expiration
+        // ceiling: a missing `expires` is rejected as MalformedCapability whether or not the ceiling
+        // policy is enabled. Without this a no-`expires` delegation would be treated as never-expiring
+        // and could outlive a short-lived parent (the attenuation comparison silently skips it).
         var target = "https://example.com/resource-noexpires";
         var rootDid = _didProvider.GenerateDidKey();
         var childDid = _didProvider.GenerateDidKey();
@@ -171,13 +173,15 @@ public class VerificationServicePolicyTests
         var delegated = await _capabilityService.DelegateCapabilityAsync(root, childDid, new[] { "read" });
         delegated.ExpiresAt.Should().BeNull("test setup: the delegated zcap must carry no expiration");
 
-        var strict = CreateVerifier(new VerificationPolicy { EnforceMaxDelegationExpiration = true });
-        (await strict.VerifyCapabilityChainDetailedAsync(delegated, root)).Outcome
-            .Should().Be(VerificationOutcome.ExpirationTooFarInFuture,
-                "an unbounded (no-expires) delegation is rejected under the ceiling policy");
+        // Default verifier (ceiling policy OFF): rejected as the delegated-`expires` MUST.
+        (await CreateVerifier().VerifyCapabilityChainDetailedAsync(delegated, root)).Outcome
+            .Should().Be(VerificationOutcome.MalformedCapability,
+                "a delegated zcap MUST include an expiration, enforced on the verification path by default");
 
-        (await CreateVerifier().VerifyCapabilityChainDetailedAsync(delegated, root)).IsValid
-            .Should().BeTrue("the default verifier does not enforce the ceiling");
+        // Ceiling policy ON: still rejected (the MUST fires before the ceiling check).
+        var strict = CreateVerifier(new VerificationPolicy { EnforceMaxDelegationExpiration = true });
+        (await strict.VerifyCapabilityChainDetailedAsync(delegated, root)).IsValid
+            .Should().BeFalse("a no-expires delegation is rejected with or without the ceiling policy");
     }
 
     [Theory]

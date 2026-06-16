@@ -1418,6 +1418,32 @@ public class VerificationServiceTests
     }
 
     [Fact]
+    public async Task SignedRevoke_DelegatedWithoutExpires_RejectedOnVerifyButStillRevocable()
+    {
+        // A delegated zcap with no `expires` is rejected on the invocation/chain path (the MUST-15
+        // verifier enforcement). But the delegated-`expires` MUST must NOT block revocation — refusing
+        // to remove a non-expiring delegation would be backwards — so an authorized up-chain controller
+        // can still revoke it.
+        _didProvider.GenerateAndRegisterKeyPair("did:key:z6MkNoExpRoot");
+        _didProvider.GenerateAndRegisterKeyPair("did:key:z6MkNoExpChild");
+        var root = await CreateAndRegisterRootAsync(
+            "did:key:z6MkNoExpRoot", "https://example.com/noexp", new[] { "read" });
+        var delegated = await _capabilityService.DelegateCapabilityAsync(
+            root, "did:key:z6MkNoExpChild", new[] { "read" });
+        delegated.ExpiresAt.Should().BeNull("test setup: the delegation carries no expiration");
+
+        // Rejected on the chain/invocation path (the delegated-`expires` MUST).
+        (await _verificationService.VerifyCapabilityChainDetailedAsync(delegated, root)).Outcome
+            .Should().Be(VerificationOutcome.MalformedCapability);
+
+        // But still revocable by an authorized up-chain controller (the carve-out).
+        var signed = await _signingService.SignRevocationAsync(
+            delegated.Id, "did:key:z6MkNoExpRoot", delegated.InvocationTarget);
+        (await _verificationService.RevokeCapabilityAsync(delegated, signed)).Should().BeTrue();
+        (await _verificationService.IsCapabilityRevokedAsync(delegated.Id)).Should().BeTrue();
+    }
+
+    [Fact]
     public async Task SignedRevoke_UnauthorizedButValidlySigned_ReturnsFalse()
     {
         // Mallory holds a real, resolvable key and signs a perfectly valid revocation request —
@@ -1750,10 +1776,22 @@ public class VerificationServiceTests
     [InlineData("https://example.com/resource", "https://other.com/resource")]               // different host
     [InlineData("https://example.com/resourceX", "https://example.com/resource")]            // suffix lacks a delimiter
     [InlineData("https://example.com/re\u00ADsource/x", "https://example.com/resource")]     // ignorable char breaks the ordinal prefix
+    [InlineData("https://example.com/resource/../../secret", "https://example.com/resource")] // path traversal escapes the subtree
+    [InlineData("https://example.com/resource/..", "https://example.com/resource")]           // trailing dot-segment
+    [InlineData("https://example.com/resource/a/../b", "https://example.com/resource")]       // interior dot-segment
     public void IsValidInvocationTarget_InvalidPrefixes_ReturnsFalse(string invocationTarget, string capabilityTarget)
     {
         _verificationService.IsValidInvocationTarget(invocationTarget, capabilityTarget)
             .Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData("https://example.com/resource/a..b", "https://example.com/resource")]         // ".." inside a segment is fine
+    [InlineData("https://example.com/resource?p=../x", "https://example.com/resource")]       // ".." inside the query is fine
+    public void IsValidInvocationTarget_DotsNotFormingASegment_ReturnsTrue(string invocationTarget, string capabilityTarget)
+    {
+        _verificationService.IsValidInvocationTarget(invocationTarget, capabilityTarget)
+            .Should().BeTrue();
     }
 
     [Fact]

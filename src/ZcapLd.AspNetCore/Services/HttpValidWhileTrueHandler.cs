@@ -38,6 +38,14 @@ public sealed class HttpValidWhileTrueHandler : IValidWhileTrueHandler
         if (string.IsNullOrWhiteSpace(uri))
             return false;
 
+        // SSRF pre-flight (fail-closed): the URI comes from an attacker-controlled caveat, so reject a
+        // non-http(s) scheme or a host that resolves into a blocked (internal) range BEFORE issuing the
+        // request. The named HttpClient is additionally configured (AddZcapValidWhileTrueSupport) with a
+        // connect-time guard, no auto-redirect, a timeout, and a response-size cap; this pre-flight also
+        // protects callers who supply their own HttpClient configuration.
+        if (!await SsrfGuard.ValidateRequestUri(uri, cancellationToken))
+            return false;
+
         try
         {
             var client = _httpClientFactory.CreateClient(HttpClientName);

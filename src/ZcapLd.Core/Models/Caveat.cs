@@ -42,7 +42,12 @@ public class ExpirationCaveat : Caveat
 
     public override bool IsSatisfied(InvocationContext context)
     {
-        return DateTime.UtcNow < Expires;
+        // Evaluate against the invocation's signed time (#71 threads the validated proof.created into
+        // InvocationContext.InvocationTime) rather than the verifier's wall clock, so a delegated
+        // time-based caveat honours when the invoker actually signed. Falls back to UtcNow when no
+        // context is supplied (a direct caller); InvocationTime itself defaults to construction-time UtcNow.
+        var evaluationTime = context?.InvocationTime ?? DateTime.UtcNow;
+        return evaluationTime < Expires;
     }
 }
 
@@ -51,6 +56,15 @@ public class ExpirationCaveat : Caveat
 /// </summary>
 public class UsageCountCaveat : Caveat
 {
+    /// <summary>
+    /// <see cref="InvocationContext.Properties"/> key under which the relying party MUST supply the
+    /// current number of prior uses for the invoked capability (an <see cref="int"/>, or any value
+    /// convertible to one). A usage count is runtime state that cannot live in the signed payload, so
+    /// the verifier cannot derive it from the capability alone — the caller MUST inject it from their
+    /// own usage store (the same way a remote revocation status backs <see cref="ValidWhileTrueCaveat"/>).
+    /// </summary>
+    public const string CurrentUsesContextKey = "zcap:usageCount";
+
     [JsonPropertyName("type")]
     public override string Type => "UsageCount";
 
@@ -61,16 +75,50 @@ public class UsageCountCaveat : Caveat
     public int MaxUses { get; set; }
 
     /// <summary>
-    /// Current usage count. Runtime state — NOT serialized because it changes
-    /// over the capability's lifetime; the signed policy is <see cref="MaxUses"/>.
-    /// Including this in the signed JCS payload would invalidate the signature
-    /// on every increment, which is incompatible with how usage tracking works.
+    /// Legacy in-process usage counter. Runtime state — NOT serialized (it changes over the
+    /// capability's lifetime; the signed policy is <see cref="MaxUses"/>). <b>No longer consulted by
+    /// <see cref="IsSatisfied"/></b>: on a wire-deserialized capability it is always 0, so trusting it
+    /// made the caveat unenforceable (permanently <c>0 &lt; MaxUses</c> == true). Supply the current
+    /// count via <see cref="CurrentUsesContextKey"/> on the invocation context instead.
     /// </summary>
     [JsonIgnore]
     public int CurrentUses { get; set; }
 
     public override bool IsSatisfied(InvocationContext context)
     {
-        return CurrentUses < MaxUses;
+        // SECURITY: a usage count cannot be carried in the signed payload, so the caveat alone cannot
+        // know it. Resolve the count from the caller-supplied invocation context and FAIL CLOSED when
+        // it is absent or unusable — mirroring how ValidWhileTrueCaveat fails closed without a handler.
+        // Trusting the deserialized CurrentUses (always 0 on the wire) would silently grant unlimited use.
+        return TryGetContextUsageCount(context, out var currentUses) && currentUses < MaxUses;
+    }
+
+    private static bool TryGetContextUsageCount(InvocationContext? context, out int currentUses)
+    {
+        currentUses = 0;
+        if (context?.Properties == null ||
+            !context.Properties.TryGetValue(CurrentUsesContextKey, out var raw) || raw == null)
+        {
+            return false;
+        }
+
+        switch (raw)
+        {
+            case int i:
+                currentUses = i;
+                return true;
+            case long l when l >= int.MinValue && l <= int.MaxValue:
+                currentUses = (int)l;
+                return true;
+            case string s when int.TryParse(s, out var parsed):
+                currentUses = parsed;
+                return true;
+            case System.Text.Json.JsonElement je when je.ValueKind == System.Text.Json.JsonValueKind.Number
+                && je.TryGetInt32(out var fromJson):
+                currentUses = fromJson;
+                return true;
+            default:
+                return false;
+        }
     }
 }

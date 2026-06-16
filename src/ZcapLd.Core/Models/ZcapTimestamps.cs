@@ -38,14 +38,35 @@ public static class ZcapTimestamps
 
     /// <summary>
     /// Parses any ISO-8601-shaped timestamp into a UTC <see cref="DateTime"/>.
-    /// Strings with a timezone offset are converted to UTC; strings without are treated as UTC.
+    /// Strings with a timezone offset are converted to UTC; strings <em>without</em> an offset are
+    /// treated as UTC (<see cref="DateTimeStyles.AssumeUniversal"/>) — NOT in the verifier's local
+    /// timezone. Without this, an offsetless <c>expires</c>/<c>created</c> from a cross-stack signer
+    /// (zcap-py/JS/Rust may emit one — ISO-8601 permits omitting the offset) would be read in the
+    /// host timezone, so two verifiers in different zones would disagree on expiry/freshness by up to
+    /// ~26 hours. Throws <see cref="FormatException"/> on an unparseable value (callers that must not
+    /// throw use <see cref="ParseOrNull"/>).
     /// </summary>
     public static DateTime Parse(string value) =>
-        DateTimeOffset.Parse(value, CultureInfo.InvariantCulture).UtcDateTime;
+        DateTimeOffset.Parse(value, CultureInfo.InvariantCulture, AssumeUtcStyles).UtcDateTime;
 
     /// <summary>
-    /// Same as <see cref="Parse"/> but returns null when the input is null/empty.
+    /// Total counterpart of <see cref="Parse"/>: returns null when the input is null/empty
+    /// <em>or unparseable</em> (never throws), so the parsed <c>expires</c>/<c>created</c> views on
+    /// the models are total functions. Offsetless values are still treated as UTC.
     /// </summary>
-    public static DateTime? ParseOrNull(string? value) =>
-        string.IsNullOrEmpty(value) ? null : Parse(value);
+    public static DateTime? ParseOrNull(string? value)
+    {
+        if (string.IsNullOrEmpty(value))
+            return null;
+
+        return DateTimeOffset.TryParse(value, CultureInfo.InvariantCulture, AssumeUtcStyles, out var parsed)
+            ? parsed.UtcDateTime
+            : null;
+    }
+
+    /// <summary>
+    /// Treat an offsetless timestamp as UTC (not local) and normalize any present offset to UTC.
+    /// </summary>
+    private const DateTimeStyles AssumeUtcStyles =
+        DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal;
 }
