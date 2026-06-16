@@ -43,7 +43,12 @@ public static class ZcapJsonOptions
             WriteIndented = false,
             PropertyNamingPolicy = null,
             DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-            Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+            Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+            // Fail closed on a duplicate object key rather than silently taking the last value. A
+            // last-wins parse lets a hostile or buggy producer ship a body that zcap and a
+            // strict-RFC-8785 / first-wins peer canonicalize or authorize differently. Rejecting the
+            // ambiguous body removes that cross-stack disagreement surface entirely.
+            AllowDuplicateProperties = false
         };
         options.Converters.Add(new CaveatJsonConverter(CaveatTypeRegistry.Default));
         return options;

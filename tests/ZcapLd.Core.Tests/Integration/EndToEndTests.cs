@@ -252,8 +252,7 @@ public class EndToEndTests
 
         var usageCaveat = new UsageCountCaveat
         {
-            MaxUses = 3,
-            CurrentUses = 0
+            MaxUses = 3
         };
 
         var rootCapability = await CreateAndRegisterRootAsync(
@@ -268,9 +267,11 @@ public class EndToEndTests
             DateTime.UtcNow.AddDays(5),
             new Caveat[] { usageCaveat });
 
-        // Act - each use is a distinct invocation with its own id/nonce (the realistic flow);
-        // the usage-count caveat is what gates them, not replay protection (on by default).
-        async Task<bool> InvokeOnceAsync()
+        // Act - each use is a distinct invocation with its own id/nonce (the realistic flow). The
+        // current usage count is supplied by the relying party via the invocation context (it cannot
+        // live in the signed payload); this is the wire-faithful flow, unlike mutating an in-process
+        // caveat object. The usage-count caveat is what gates the invocations.
+        async Task<bool> InvokeOnceAsync(int priorUses)
         {
             var invocation = new Invocation
             {
@@ -279,21 +280,21 @@ public class EndToEndTests
                 InvocationTarget = "https://api.example.com/documents/doc1"
             };
             invocation.Proof = await _signingService.SignInvocationAsync(invocation, delegatedControllerDid);
-            return await _verificationService.VerifyInvocationAsync(invocation, delegatedCapability);
+            var contextProperties = new Dictionary<string, object>
+            {
+                [UsageCountCaveat.CurrentUsesContextKey] = priorUses
+            };
+            return await _verificationService.VerifyInvocationAsync(
+                invocation, delegatedCapability, contextProperties);
         }
 
-        // Assert - within the usage limit, each fresh invocation succeeds
-        (await InvokeOnceAsync()).Should().BeTrue();
+        // Assert - within the usage limit (0, 1, 2 prior uses < MaxUses 3), each fresh invocation succeeds
+        (await InvokeOnceAsync(0)).Should().BeTrue();
+        (await InvokeOnceAsync(1)).Should().BeTrue();
+        (await InvokeOnceAsync(2)).Should().BeTrue();
 
-        usageCaveat.CurrentUses = 1;
-        (await InvokeOnceAsync()).Should().BeTrue();
-
-        usageCaveat.CurrentUses = 2;
-        (await InvokeOnceAsync()).Should().BeTrue();
-
-        // At limit - should fail
-        usageCaveat.CurrentUses = 3;
-        (await InvokeOnceAsync()).Should().BeFalse();
+        // At limit (3 prior uses) - should fail
+        (await InvokeOnceAsync(3)).Should().BeFalse();
     }
 
     [Fact]
@@ -343,8 +344,14 @@ public class EndToEndTests
 
         invocation.Proof = await _signingService.SignInvocationAsync(invocation, controller2);
 
-        // Assert - Should verify both caveats
-        var isValid = await _verificationService.VerifyInvocationAsync(invocation, delegatedCapability);
+        // Assert - Should verify both caveats. The usage-count caveat's current count is supplied by
+        // the relying party via the invocation context (0 prior uses < MaxUses 5 -> satisfied).
+        var contextProperties = new Dictionary<string, object>
+        {
+            [UsageCountCaveat.CurrentUsesContextKey] = 0
+        };
+        var isValid = await _verificationService.VerifyInvocationAsync(
+            invocation, delegatedCapability, contextProperties);
         isValid.Should().BeTrue();
 
         // Verify that both caveats are inherited
@@ -678,8 +685,14 @@ public class EndToEndTests
 
         invocation.Proof = await _signingService.SignInvocationAsync(invocation, customer);
 
-        // Assert - Should succeed
-        var isValid = await _verificationService.VerifyInvocationAsync(invocation, customerCapability);
+        // Assert - Should succeed. The relying party supplies the current usage count via the
+        // invocation context (3 prior queries < MaxUses 100 -> within limit).
+        var contextProperties = new Dictionary<string, object>
+        {
+            [UsageCountCaveat.CurrentUsesContextKey] = 3
+        };
+        var isValid = await _verificationService.VerifyInvocationAsync(
+            invocation, customerCapability, contextProperties);
         isValid.Should().BeTrue();
 
         // Verify caveats are in place
