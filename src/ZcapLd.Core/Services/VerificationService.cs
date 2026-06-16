@@ -111,7 +111,7 @@ public class VerificationService : IVerificationService
         _caveatProcessor = caveatProcessor ?? throw new ArgumentNullException(nameof(caveatProcessor));
         _revocationService = revocationService ?? throw new ArgumentNullException(nameof(revocationService));
         _nonceStore = nonceStore ?? throw new ArgumentNullException(nameof(nonceStore));
-        _canonicalizationMethod = canonicalizationMethod ?? "JCS";
+        _canonicalizationMethod = LegacyProofCrypto.ValidateCanonicalizationMethod(canonicalizationMethod ?? "JCS");
         _nonceWindow = nonceWindow ?? DefaultNonceWindow;
         _freshnessClockSkew = freshnessClockSkew ?? DefaultFreshnessClockSkew;
         _logger = logger ?? NullLogger<VerificationService>.Instance;

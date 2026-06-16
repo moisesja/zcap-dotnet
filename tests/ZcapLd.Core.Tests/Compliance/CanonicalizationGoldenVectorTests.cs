@@ -9,18 +9,18 @@ using ZcapLd.Core.Models;
 namespace ZcapLd.Core.Tests.Compliance;
 
 /// <summary>
-/// Canonicalization KNOWN-ANSWER vectors (Phase 0 of issue #108). These lock the two
-/// canonicalization behaviors a future swap to NetCid/DataProofs (Stage B) must reproduce
-/// byte-for-byte, or previously-issued capabilities stop verifying:
+/// Canonicalization KNOWN-ANSWER vectors (Phase 0 of issue #108). Stage B is complete (this PR):
+/// these now lock the two delegating implementations' behavior byte-for-byte against future
+/// changes, or previously-issued capabilities stop verifying:
 /// <list type="number">
 /// <item><description>The RDFC-1.0 document N-Quads and the hash-concat signing payload —
-/// Stage B replaces <see cref="RdfcDocumentCanonicalizer"/> with
+/// <see cref="RdfcDocumentCanonicalizer"/> is now a thin adapter over
 /// <c>DataProofsDotnet.Rdfc.RdfcDocumentCanonicalizer</c> (also over dotNetRdf 3.5.1).</description></item>
-/// <item><description>The JCS present-but-null member SKIP — Stage B replaces the hand-rolled
-/// <see cref="JsonCanonicalizer"/> with <c>NetCid.JcsCanonicalizer</c>. RFC 8785 has no
-/// skip-null rule, so NetCid emits <c>null</c> literally; this vector pins the current
-/// skip behavior so that divergence is caught before it changes signed bytes for any wire
-/// field carrying an explicit null.</description></item>
+/// <item><description>The JCS present-but-null member SKIP — <see cref="JsonCanonicalizer"/> now
+/// delegates RFC 8785 canonicalization to <c>NetCid.JcsCanonicalizer</c> after a null-member
+/// strip. RFC 8785 has no skip-null rule, so NetCid emits <c>null</c> literally; this vector pins
+/// the strip-then-canonicalize behavior so that divergence is caught before it changes signed
+/// bytes for any wire field carrying an explicit null.</description></item>
 /// </list>
 /// If a vector here changes, a canonicalizer swap broke wire compatibility — investigate, do
 /// not "update the golden".

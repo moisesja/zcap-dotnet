@@ -25,6 +25,32 @@ internal sealed class LegacyProofCrypto
 {
     private const string ZcapContext = "https://w3id.org/zcap/v1";
 
+    /// <summary>RFC 8785 JSON Canonicalization Scheme — the default.</summary>
+    public const string JcsCanonicalization = "JCS";
+
+    /// <summary>W3C RDF Dataset Canonicalization (RDFC-1.0).</summary>
+    public const string RdfcCanonicalization = "RDFC-1.0";
+
+    /// <summary>
+    /// Validates a caller-supplied canonicalization method against the supported set
+    /// (<see cref="JcsCanonicalization"/> / <see cref="RdfcCanonicalization"/>), returning it on
+    /// success. Fails fast at construction so a typo (e.g. <c>"rdfc-1.0"</c>) cannot silently fall
+    /// through to JCS in <see cref="Resolve"/> and hand the consumer the wrong algorithm.
+    /// </summary>
+    public static string ValidateCanonicalizationMethod(string canonicalizationMethod)
+    {
+        ArgumentNullException.ThrowIfNull(canonicalizationMethod);
+        if (canonicalizationMethod is not (JcsCanonicalization or RdfcCanonicalization))
+        {
+            throw new ArgumentException(
+                $"Unsupported canonicalization method '{canonicalizationMethod}'. " +
+                $"Expected \"{JcsCanonicalization}\" or \"{RdfcCanonicalization}\" (case-sensitive).",
+                nameof(canonicalizationMethod));
+        }
+
+        return canonicalizationMethod;
+    }
+
     // RDFC canonicalizer wired with zcap's offline context loader (serves zcap/v1 + ed25519-2020/v1),
     // used by the RDFC variant and the RDFC verify fallback. Shared, immutable, thread-safe.
     private static readonly DataProofsRdfc.RdfcDocumentCanonicalizer RdfCanonicalizer =
@@ -90,7 +116,7 @@ internal sealed class LegacyProofCrypto
             return null;
         }
 
-        var canon = string.Equals(canonicalizationMethod, "RDFC-1.0", StringComparison.Ordinal)
+        var canon = string.Equals(canonicalizationMethod, RdfcCanonicalization, StringComparison.Ordinal)
             ? LegacyCanonicalization.Rdfc
             : LegacyCanonicalization.Jcs;
 
@@ -110,11 +136,19 @@ internal sealed class LegacyProofCrypto
     // Serializes the document with zcap's JSON options (the exact bytes the prior payload builder
     // fed to canonicalization). For RDFC over a context-less document (invocations), inject the
     // ZCAP-LD context so JSON-LD expansion matches the prior RdfcInvocation path.
+    //
+    // Invariant: the only zcap documents that arrive here with an "@context" already present are
+    // Capabilities, and zcap controls the model so that context is always zcap/v1 — so when the
+    // guard finds an existing "@context" it is correct to leave it as-is (re-injecting would be a
+    // no-op). Invocations never set "@context" in the model; this handles the serialized-without-
+    // context case. A foreign/non-zcap "@context" cannot occur for a model-built document; if the
+    // model ever gains one, this guard must be revisited (a different context would make RDFC
+    // expansion silently produce the wrong N-Quads).
     private static JsonElement BuildDocumentElement(object documentWithoutProof, string canonicalizationMethod)
     {
         var element = JsonSerializer.SerializeToElement(documentWithoutProof, ZcapJsonOptions.Default);
 
-        if (string.Equals(canonicalizationMethod, "RDFC-1.0", StringComparison.Ordinal)
+        if (string.Equals(canonicalizationMethod, RdfcCanonicalization, StringComparison.Ordinal)
             && element.ValueKind == JsonValueKind.Object
             && !element.TryGetProperty("@context", out _))
         {
@@ -130,7 +164,15 @@ internal sealed class LegacyProofCrypto
     // members map by name (same camelCase), and the ZCAP-specific members (capabilityChain,
     // capability, capabilityAction, invocationTarget, signed extensions) ride in AdditionalProperties.
     // Both options use the same wire names and omit nulls, so the round trip is byte-preserving.
-    private static DataIntegrityProof ToDataIntegrityProof(Proof proof)
+    //
+    // This mapping is load-bearing: every zcap-specific proof field MUST survive into
+    // AdditionalProperties so DataProofs includes it in the signing payload. If DataProofs ever
+    // models one of those names (dropping it from AdditionalProperties), the field would silently
+    // vanish from signed bytes — invisibly, because sign and verify share this method symmetrically.
+    // LegacyProofCryptoMappingTests pins the survival of capabilityChain (incl. an embedded
+    // capability object), capability, capabilityAction, and invocationTarget against that drift.
+    // internal (not private) so that test can assert the real mapping rather than a copy.
+    internal static DataIntegrityProof ToDataIntegrityProof(Proof proof)
     {
         var element = JsonSerializer.SerializeToElement(proof, ZcapJsonOptions.Default);
         return element.Deserialize<DataIntegrityProof>(DataProofsJsonOptions.Default)

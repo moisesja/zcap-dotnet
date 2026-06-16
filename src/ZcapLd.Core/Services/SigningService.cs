@@ -34,7 +34,7 @@ public class SigningService : ISigningService
     {
         _signer = signer ?? throw new ArgumentNullException(nameof(signer));
         _resolver = resolver ?? throw new ArgumentNullException(nameof(resolver));
-        _canonicalizationMethod = canonicalizationMethod ?? throw new ArgumentNullException(nameof(canonicalizationMethod));
+        _canonicalizationMethod = LegacyProofCrypto.ValidateCanonicalizationMethod(canonicalizationMethod);
     }
 
     /// <summary>
