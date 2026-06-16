@@ -128,14 +128,4 @@ public class RdfcCanonicalizeIntegrationTests
             results[i].Should().Equal(results[0]);
         }
     }
-
-    [Fact]
-    public void ICryptoSuite_DefaultCanonicalizationMethod_IsJcs()
-    {
-        ICryptoSuite ed25519 = CryptoSuite.Ed25519();
-        ICryptoSuite p256 = CryptoSuite.P256();
-
-        ed25519.CanonicalizationMethod.Should().Be("JCS");
-        p256.CanonicalizationMethod.Should().Be("JCS");
-    }
 }

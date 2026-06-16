@@ -95,7 +95,7 @@ public class VerificationResultTests
     {
         var revocationService = new RevocationService(new InMemoryRevocationStore());
         var verifier = new VerificationService(
-            _didProvider, _caveatProcessor, VerificationService.CreateDefaultSuiteProvider(), revocationService);
+            _didProvider, _caveatProcessor, revocationService);
         var (_, delegated) = await BuildValidDelegationAsync("did:key:z6MkRevRoot", "did:key:z6MkRevChild", new[] { "read" });
         await revocationService.RevokeAsync(new RevocationRequest { CapabilityId = delegated.Id, RevokedBy = "did:key:z6MkRevRoot" });
 

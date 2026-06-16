@@ -452,9 +452,7 @@ public class NormativeIntegrationComplianceTests
         => new(
             fixture.DidProvider,
             fixture.CaveatProcessor,
-            VerificationService.CreateDefaultSuiteProvider(),
             new RevocationService(new InMemoryRevocationStore()),
             new InMemoryNonceStore(),
-            SigningService.CreateDefaultCanonicalizerProvider(),
             policy: policy);
 }

@@ -1,5 +1,5 @@
 using NetCid;
-using NetDid.Core.Crypto;
+using NetCrypto;
 using NetDid.Core.Model;
 using NetDid.Core.Resolution;
 using NetDid.Method.Key;
@@ -123,7 +123,7 @@ public class DidKeyResolver : IDidResolver, IVerificationRelationshipResolver
 
             var decoded = Multibase.Decode(vm.PublicKeyMultibase);
             var (codec, rawKey) = Multicodec.Decode(decoded);
-            var keyType = KeyTypeExtensions.ToKeyType(codec);
+            var keyType = KeyTypeExtensions.FromMulticodec(codec);
 
             return new ResolvedKey(rawKey, MapKeyType(keyType));
         }
@@ -158,8 +158,8 @@ public class DidKeyResolver : IDidResolver, IVerificationRelationshipResolver
     }
 
     /// <summary>
-    /// Maps NetDid's <see cref="KeyType"/> enum to ZcapLd key type strings
-    /// used by <see cref="Cryptography.ICryptoSuite"/>.
+    /// Maps NetCrypto's <see cref="KeyType"/> enum to ZcapLd key type strings
+    /// used by the signature-suite metadata (<c>ZcapSuiteCatalog</c>).
     /// </summary>
     internal static string MapKeyType(KeyType keyType) => keyType switch
     {

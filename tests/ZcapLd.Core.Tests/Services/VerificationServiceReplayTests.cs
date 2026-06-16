@@ -37,7 +37,6 @@ public class VerificationServiceReplayTests
     {
         return new VerificationService(
             _didProvider, _caveatProcessor,
-            VerificationService.CreateDefaultSuiteProvider(),
             new RevocationService(new InMemoryRevocationStore()),
             nonceStore);
     }

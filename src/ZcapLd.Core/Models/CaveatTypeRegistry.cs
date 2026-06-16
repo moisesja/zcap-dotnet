@@ -6,8 +6,7 @@ namespace ZcapLd.Core.Models;
 /// Maps `Caveat.Type` discriminator strings to concrete CLR types so the
 /// <see cref="ZcapLd.Core.Cryptography.CaveatJsonConverter"/> can dispatch
 /// polymorphic deserialization across packages — third-party caveat libraries
-/// register their derived types here at startup, the same way custom crypto
-/// suites register through <c>ICryptoSuiteProvider</c>.
+/// register their derived types here at startup (a process-global registry).
 ///
 /// The <see cref="Default"/> singleton is pre-populated with the in-library
 /// caveats. The converter holds a reference to <see cref="Default"/> and

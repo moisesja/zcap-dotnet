@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [4.0.0] - Unreleased
+
+Delegates zcap's cryptography and canonicalization to the composable foundation (issue #108).
+Includes everything in the (unreleased) 3.0.0 section below.
+
+### Breaking Changes
+
+- **Dependencies / source — crypto + canonicalization delegated to the shared stack.** `NetDid.Core` / `NetDid.Method.Key` move **1.3.1 → 2.0.1** (NetDid 2.0 relocated its cryptographic primitives to **NetCrypto**), `NetCrypto` **1.1.0** is added as a direct reference, the direct `dotNetRdf.Core` reference is replaced by **DataProofsDotnet.Core / .Rdfc / .Legacy 1.0.0** (which own dotNetRDF + the proof cryptosuites transitively), and **NetCid** rises to 1.6.0. Consumers **recompile**: the crypto types that lived under `NetDid.Core.Crypto` (`DefaultCryptoProvider`, `KeyType`, `EcdsaSignatureFormat`, `DefaultKeyGenerator`) are now `NetCrypto.*`. **The proof wire format is unchanged** (see below).
+- **API — the crypto-suite extension surface is removed.** `ICryptoSuite`, `ICryptoSuiteProvider`, `CryptoSuite`, `CryptoSuiteProvider`, `IDocumentCanonicalizerProvider`, `DocumentCanonicalizerProvider`, `SignatureVerifier`, and `AddZcapCryptoSuite<T>()` are all removed. zcap is no longer a crypto-extension point: it supports a fixed set of suites (`Ed25519Signature2020`, `EcdsaSecp256r1Signature2019`) via the internal `ZcapSuiteCatalog`, with sign/verify delegated to DataProofs' legacy cryptosuites. `SigningService` / `VerificationService` drop their suite-provider and canonicalizer-provider constructor parameters; canonicalization is selected with a `canonicalizationMethod` argument (`"JCS"` default / `"RDFC-1.0"`) or `AddZcapRdfcCanonicalization()`. New curves are added in NetCrypto + DataProofs and wired into `ZcapSuiteCatalog`, never via a zcap API (see `docs/crypto-suite-extensibility-decision.md`). In-policy under SemVer (a major 4.0.0 bump).
+
+### Changed
+
+- **Proof signing/verification (Stage C)** is delegated to DataProofs' legacy Linked-Data-Signature cryptosuites — `Ed25519Signature2020` / `EcdsaSecp256r1Signature2019` (`DataProofsDotnet.Legacy`) — via the new `LegacyProofCrypto` engine; a `DidSignerAdapter` exposes the consumer's `IDidSigner` as a `NetCrypto.ISigner`. zcap retains its proof model, chain walking, the #68 key-type binding, and all authorization/policy. `IDidSigner` is unchanged (no consumer break).
+- **`RdfcDocumentCanonicalizer`** is now a thin adapter over `DataProofsDotnet.Rdfc.RdfcDocumentCanonicalizer`; a new internal `RdfcContextDocumentLoader` serves zcap's embedded JSON-LD contexts (`zcap/v1`, `ed25519-2020/v1`) offline (DataProofs' offline loader does not bundle them) and delegates core W3C contexts to it. `CachedContextLoader` (and its HTTP fallback) is removed.
+- **`JsonCanonicalizer`** now delegates RFC 8785 canonicalization to `NetCid.JcsCanonicalizer`, preceded by a null-object-member strip (preserving zcap's historical behavior). Key ordering is now RFC 8785 code-unit order (culture-invariant), fixing a latent locale-dependent determinism bug; canonical bytes are unchanged for spec-conformant (lowercase-ASCII-key) capabilities.
+
+### Wire compatibility
+
+- **Capabilities issued by 3.x still verify — no re-delegation.** The `Ed25519Signature2020` / `EcdsaSecp256r1Signature2019` proof bytes are unchanged. A golden-vector suite (`tests/ZcapLd.Core.Tests/Compliance/ProofGoldenVectorTests`, `CanonicalizationGoldenVectorTests`) pins the deterministic `proofValue`, the RDFC N-Quads + hash-concat payload, and the JCS null-skip behavior byte-for-byte across the swaps.
+
 ## [3.0.0] - Unreleased
 
 ### Breaking Changes

@@ -1,71 +1,45 @@
+using System.Security.Cryptography;
 using System.Text.Json;
 using ZcapLd.Core.Cryptography;
-using ZcapLd.Core.Exceptions;
 using ZcapLd.Core.Models;
 
 namespace ZcapLd.Core.Services;
 
 /// <summary>
-/// Assembles ZCAP-LD cryptographic proofs by canonicalizing documents,
-/// delegating signing to an <see cref="IDidSigner"/> and DID resolution
-/// to an <see cref="IDidResolver"/>.
+/// Assembles ZCAP-LD cryptographic proofs: it builds the proof metadata, delegates DID resolution
+/// to an <see cref="IDidResolver"/>, and delegates the actual canonicalization + signing to
+/// DataProofs' legacy cryptosuites via <see cref="LegacyProofCrypto"/> (which signs through the
+/// consumer's <see cref="IDidSigner"/>).
 /// </summary>
 public class SigningService : ISigningService
 {
     private readonly IDidSigner _signer;
     private readonly IDidResolver _resolver;
-    private readonly ICryptoSuiteProvider _suiteProvider;
-    private readonly IDocumentCanonicalizerProvider _canonicalizerProvider;
+    private readonly string _canonicalizationMethod;
+    private readonly LegacyProofCrypto _legacyProofCrypto = new();
 
     /// <summary>
-    /// Backward-compatible constructor (Ed25519 only, JCS canonicalization).
+    /// Creates a signing service using JCS canonicalization (the default).
     /// </summary>
     public SigningService(IDidSigner signer, IDidResolver resolver)
-        : this(signer, resolver, CreateDefaultSuiteProvider())
+        : this(signer, resolver, "JCS")
     {
     }
 
     /// <summary>
-    /// Constructor with explicit crypto suite provider (JCS canonicalization).
+    /// Creates a signing service with an explicit canonicalization method (<c>"JCS"</c> or
+    /// <c>"RDFC-1.0"</c>) applied to all proofs it produces.
     /// </summary>
-    public SigningService(IDidSigner signer, IDidResolver resolver, ICryptoSuiteProvider suiteProvider)
-        : this(signer, resolver, suiteProvider, CreateDefaultCanonicalizerProvider())
-    {
-    }
-
-    /// <summary>
-    /// Full constructor with all dependencies.
-    /// </summary>
-    public SigningService(
-        IDidSigner signer,
-        IDidResolver resolver,
-        ICryptoSuiteProvider suiteProvider,
-        IDocumentCanonicalizerProvider canonicalizerProvider)
+    public SigningService(IDidSigner signer, IDidResolver resolver, string canonicalizationMethod)
     {
         _signer = signer ?? throw new ArgumentNullException(nameof(signer));
         _resolver = resolver ?? throw new ArgumentNullException(nameof(resolver));
-        _suiteProvider = suiteProvider ?? throw new ArgumentNullException(nameof(suiteProvider));
-        _canonicalizerProvider = canonicalizerProvider ?? throw new ArgumentNullException(nameof(canonicalizerProvider));
-    }
-
-    private static ICryptoSuiteProvider CreateDefaultSuiteProvider()
-    {
-        var provider = new CryptoSuiteProvider();
-        provider.Register(CryptoSuite.Ed25519());
-        provider.Register(CryptoSuite.P256());
-        return provider;
-    }
-
-    internal static IDocumentCanonicalizerProvider CreateDefaultCanonicalizerProvider()
-    {
-        var provider = new DocumentCanonicalizerProvider();
-        provider.Register(new JcsDocumentCanonicalizer());
-        return provider;
+        _canonicalizationMethod = LegacyProofCrypto.ValidateCanonicalizationMethod(canonicalizationMethod);
     }
 
     /// <summary>
-    /// Signs a capability with the specified signing key
-    /// SECURITY FIX S-03: Binds proof metadata cryptographically per Data Integrity spec
+    /// Signs a capability with the specified signing key.
+    /// SECURITY FIX S-03: Binds proof metadata cryptographically per Data Integrity spec.
     /// </summary>
     public Task<Proof> SignCapabilityAsync(
         Capability capability,
@@ -92,13 +66,13 @@ public class SigningService : ISigningService
             throw new ArgumentNullException(nameof(capability));
         if (string.IsNullOrEmpty(signerDid))
             throw new ArgumentException("Signer DID cannot be null or empty", nameof(signerDid));
-
         if (string.IsNullOrWhiteSpace(proofPurpose))
             throw new ArgumentException("Proof purpose cannot be null or empty", nameof(proofPurpose));
 
         var capabilityWithoutProof = ProofSigningPayloadBuilder.CloneCapabilityWithoutProof(capability);
-        var suite = await ResolveSuiteForDidAsync(signerDid);
-        var canonicalizer = ResolveCanonicalizer(suite);
+        var resolvedKey = await _resolver.ResolvePublicKeyAsync(signerDid);
+        var suite = ZcapSuiteCatalog.GetByKeyType(resolvedKey.KeyType)
+            ?? throw new CryptographicException($"No signature suite for key type: {resolvedKey.KeyType}");
         var verificationMethod = await _resolver.GetVerificationMethodAsync(signerDid);
         var created = ZcapTimestamps.Format(createdOverride ?? DateTime.UtcNow);
         var proofType = suite.ProofType;
@@ -114,18 +88,16 @@ public class SigningService : ISigningService
             ProofValue = string.Empty
         };
 
-        var canonicalBytes = ProofSigningPayloadBuilder.CanonicalizeCapabilityPayload(
-            capabilityWithoutProof, proof, canonicalizer);
-        var result = await _signer.SignAsync(signerDid, canonicalBytes);
-        ValidateSignatureType(result.SignatureType, proofType);
-        proof.ProofValue = MultibaseCodec.Encode(result.Signature);
+        var didSigner = CreateLegacySigner(signerDid, resolvedKey, proofType);
+        proof.ProofValue = await _legacyProofCrypto.CreateProofValueAsync(
+            capabilityWithoutProof, proof, didSigner, _canonicalizationMethod);
 
         return proof;
     }
 
     /// <summary>
-    /// Signs an invocation request
-    /// COMPLIANCE FIX C-05: Populates required invocation proof fields per W3C ZCAP-LD spec
+    /// Signs an invocation request.
+    /// COMPLIANCE FIX C-05: Populates required invocation proof fields per W3C ZCAP-LD spec.
     /// </summary>
     public Task<Proof> SignInvocationAsync(Invocation invocation, string signerDid)
         => SignInvocationAsync(invocation, signerDid, createdOverride: null);
@@ -218,15 +190,15 @@ public class SigningService : ISigningService
         DateTime? createdOverride = null)
     {
         var invocationWithoutProof = ProofSigningPayloadBuilder.CloneInvocationWithoutProof(invocation);
-        var suite = await ResolveSuiteForDidAsync(signerDid);
-        var canonicalizer = ResolveCanonicalizer(suite);
+        var resolvedKey = await _resolver.ResolvePublicKeyAsync(signerDid);
+        var suite = ZcapSuiteCatalog.GetByKeyType(resolvedKey.KeyType)
+            ?? throw new CryptographicException($"No signature suite for key type: {resolvedKey.KeyType}");
         var verificationMethod = await _resolver.GetVerificationMethodAsync(signerDid);
         var created = ZcapTimestamps.Format(createdOverride ?? DateTime.UtcNow);
         var proofType = suite.ProofType;
 
-        // COMPLIANCE FIX C-05: Create the invocation proof with required fields.
-        // Per spec, invocation proofs MUST include capability, invocationTarget, and capabilityAction.
-        // CapabilityChain is intentionally unset — invocation proofs don't carry one,
+        // COMPLIANCE FIX C-05: invocation proofs MUST include capability, invocationTarget, and
+        // capabilityAction. CapabilityChain is intentionally unset — invocation proofs don't carry one,
         // and emitting `"capabilityChain": []` breaks strict cross-language parsers (#37).
         var proof = new Proof
         {
@@ -235,7 +207,6 @@ public class SigningService : ISigningService
             ProofPurpose = proofPurpose,
             VerificationMethod = verificationMethod,
             ProofValue = string.Empty,
-            // Required invocation proof fields:
             Capability = invocation.Capability,
             InvocationTarget = invocation.InvocationTarget,
             CapabilityAction = invocation.CapabilityAction
@@ -248,11 +219,9 @@ public class SigningService : ISigningService
             proof.AdditionalProperties = new Dictionary<string, JsonElement>(additionalProperties, StringComparer.Ordinal);
         }
 
-        var canonicalBytes = ProofSigningPayloadBuilder.CanonicalizeInvocationPayload(
-            invocationWithoutProof, proof, canonicalizer);
-        var result = await _signer.SignAsync(signerDid, canonicalBytes);
-        ValidateSignatureType(result.SignatureType, proofType);
-        proof.ProofValue = MultibaseCodec.Encode(result.Signature);
+        var didSigner = CreateLegacySigner(signerDid, resolvedKey, proofType);
+        proof.ProofValue = await _legacyProofCrypto.CreateProofValueAsync(
+            invocationWithoutProof, proof, didSigner, _canonicalizationMethod);
 
         return proof;
     }
@@ -285,32 +254,18 @@ public class SigningService : ISigningService
         if (string.IsNullOrEmpty(signerDid))
             throw new ArgumentException("Signer DID cannot be null or empty", nameof(signerDid));
 
-        var suite = await ResolveSuiteForDidAsync(signerDid);
+        var resolvedKey = await _resolver.ResolvePublicKeyAsync(signerDid);
+        var suite = ZcapSuiteCatalog.GetByKeyType(resolvedKey.KeyType)
+            ?? throw new CryptographicException($"No signature suite for key type: {resolvedKey.KeyType}");
 
         return suite.ContextUrl;
     }
 
-    private async Task<ICryptoSuite> ResolveSuiteForDidAsync(string signerDid)
-    {
-        var resolvedKey = await _resolver.ResolvePublicKeyAsync(signerDid);
-        return _suiteProvider.GetByKeyType(resolvedKey.KeyType)
-            ?? throw new CryptographicException(
-                $"No crypto suite registered for key type: {resolvedKey.KeyType}");
-    }
-
-    private IDocumentCanonicalizer ResolveCanonicalizer(ICryptoSuite suite)
-    {
-        return _canonicalizerProvider.GetByMethod(suite.CanonicalizationMethod)
-            ?? throw new CryptographicException(
-                $"No canonicalizer registered for method: {suite.CanonicalizationMethod}");
-    }
-
-    private static void ValidateSignatureType(string actualType, string expectedType)
-    {
-        if (!string.Equals(actualType, expectedType, StringComparison.Ordinal))
-        {
-            throw new CryptographicException(
-                $"Signer returned signature type '{actualType}' but expected '{expectedType}'.");
-        }
-    }
+    private DidSignerAdapter CreateLegacySigner(string signerDid, ResolvedKey resolvedKey, string expectedProofType)
+        => new(
+            _signer,
+            signerDid,
+            ResolvedKeyTypeMap.ToNetCryptoKeyType(resolvedKey.KeyType),
+            expectedProofType,
+            resolvedKey.PublicKeyBytes);
 }

@@ -28,49 +28,21 @@ public static class ZcapRevocationServiceCollectionExtensions
     {
         ArgumentNullException.ThrowIfNull(services);
 
-        // Register built-in crypto suites by default; additional suites can be added via AddZcapCryptoSuite<T>()
-        services.TryAddEnumerable(ServiceDescriptor.Singleton<ICryptoSuite>(CryptoSuite.Ed25519()));
-        services.TryAddEnumerable(ServiceDescriptor.Singleton<ICryptoSuite>(CryptoSuite.P256()));
-
-        // Build ICryptoSuiteProvider from all registered ICryptoSuite instances
-        services.TryAddSingleton<ICryptoSuiteProvider>(sp =>
-        {
-            var provider = new CryptoSuiteProvider();
-            foreach (var suite in sp.GetServices<ICryptoSuite>())
-            {
-                provider.Register(suite);
-            }
-            return provider;
-        });
-
-        // Register JCS canonicalizer by default; RDFC-1.0 can be added via AddZcapRdfcCanonicalization()
-        services.TryAddEnumerable(ServiceDescriptor.Singleton<IDocumentCanonicalizer, JcsDocumentCanonicalizer>());
-
-        // Build IDocumentCanonicalizerProvider from all registered IDocumentCanonicalizer instances
-        services.TryAddSingleton<IDocumentCanonicalizerProvider>(sp =>
-        {
-            var provider = new DocumentCanonicalizerProvider();
-            foreach (var canonicalizer in sp.GetServices<IDocumentCanonicalizer>())
-            {
-                provider.Register(canonicalizer);
-            }
-            return provider;
-        });
-
-        // DidKeyResolver delegates to NetDid's DidKeyMethod for did:key resolution
+        // DidKeyResolver delegates to NetDid's DidKeyMethod for did:key resolution.
         services.TryAddSingleton<IDidResolver>(sp => new DidKeyResolver());
 
-        // SigningService depends on IDidSigner + IDidResolver + ICryptoSuiteProvider + IDocumentCanonicalizerProvider.
-        // No default IDidSigner — consumers must provide their own secure implementation.
+        // SigningService delegates proof crypto to DataProofs' legacy cryptosuites; the canonicalization
+        // method (JCS by default, or RDFC-1.0 when AddZcapRdfcCanonicalization() was called) is the only
+        // crypto knob. No default IDidSigner — consumers must provide their own secure implementation.
         services.TryAddSingleton<ISigningService>(sp =>
             new SigningService(
                 sp.GetRequiredService<IDidSigner>(),
                 sp.GetRequiredService<IDidResolver>(),
-                sp.GetRequiredService<ICryptoSuiteProvider>(),
-                sp.GetRequiredService<IDocumentCanonicalizerProvider>()));
-        // CaveatProcessor: use factory to optionally inject IValidWhileTrueHandler
-        // If AddZcapValidWhileTrueSupport() was called, the handler is available;
-        // otherwise GetService returns null and the processor operates fail-closed.
+                ResolveCanonicalizationMethod(sp)));
+
+        // CaveatProcessor: factory to optionally inject IValidWhileTrueHandler. If
+        // AddZcapValidWhileTrueSupport() was called the handler is available; otherwise GetService
+        // returns null and the processor operates fail-closed.
         services.TryAddSingleton<ICaveatProcessor>(sp =>
             new CaveatProcessor(sp.GetService<IValidWhileTrueHandler>()));
         services.TryAddSingleton<ICapabilityService, CapabilityService>();
@@ -78,32 +50,24 @@ public static class ZcapRevocationServiceCollectionExtensions
         services.TryAddSingleton<IRevocationService, RevocationService>();
         services.TryAddSingleton<INonceStore, InMemoryNonceStore>();
 
-        // VerificationService depends on ICryptoSuiteProvider for proof type dispatch,
-        // INonceStore for invocation replay protection, and IDocumentCanonicalizerProvider
-        // for suite-specific canonicalization. The optional IVerificationRelationshipResolver
-        // (Issue #65) performs controller authorization by resolving the controller's DID document;
-        // when a consumer has registered one (e.g. a multi-method resolver from NetDid's AddNetDid)
-        // it is used, otherwise VerificationService falls back to its built-in did:key default.
-        // The optional IRootCapabilityResolver (Issue #50) lets the verifier obtain a root capability
-        // referenced by id only in a spec-exact delegation chain; register one via
-        // AddZcapRootCapabilityResolver to verify/revoke delegated capabilities without passing the
-        // root explicitly on every call (e.g. the revocation endpoint).
-        // The optional VerificationPolicy (Issue #73) enables opt-in verifier-side SHOULD checks (the
-        // 3-month delegated-expiration ceiling); register one (services.AddSingleton(new
-        // VerificationPolicy { EnforceMaxDelegationExpiration = true }) before AddZcapServices) to turn
-        // it on, otherwise VerificationPolicy.Default applies and nothing extra is enforced.
+        // VerificationService dispatches proofs to DataProofs' legacy cryptosuites and uses
+        // INonceStore for replay protection. The optional IVerificationRelationshipResolver (Issue #65)
+        // performs controller authorization by resolving the controller's DID document; the optional
+        // IRootCapabilityResolver (Issue #50) lets it obtain a root referenced by id only in a
+        // spec-exact chain (register via AddZcapRootCapabilityResolver); the optional VerificationPolicy
+        // (Issue #73) enables the opt-in expiration ceiling. RDFC-1.0 canonicalization is selected via
+        // AddZcapRdfcCanonicalization().
         services.TryAddSingleton<IVerificationService>(sp =>
             new VerificationService(
                 sp.GetRequiredService<IDidResolver>(),
                 sp.GetRequiredService<ICaveatProcessor>(),
-                sp.GetRequiredService<ICryptoSuiteProvider>(),
                 sp.GetRequiredService<IRevocationService>(),
                 sp.GetRequiredService<INonceStore>(),
-                sp.GetRequiredService<IDocumentCanonicalizerProvider>(),
                 logger: sp.GetService<ILogger<VerificationService>>(),
                 relationshipResolver: sp.GetService<IVerificationRelationshipResolver>(),
                 rootResolver: sp.GetService<IRootCapabilityResolver>(),
-                policy: sp.GetService<VerificationPolicy>()));
+                policy: sp.GetService<VerificationPolicy>(),
+                canonicalizationMethod: ResolveCanonicalizationMethod(sp)));
 
         return services;
     }
@@ -140,20 +104,6 @@ public static class ZcapRevocationServiceCollectionExtensions
     }
 
     /// <summary>
-    /// Registers an additional crypto suite (e.g. P-256, secp256k1).
-    /// Call this before <see cref="AddZcapServices"/> builds the service provider,
-    /// or before the <see cref="ICryptoSuiteProvider"/> singleton is first resolved.
-    /// </summary>
-    public static IServiceCollection AddZcapCryptoSuite<TSuite>(this IServiceCollection services)
-        where TSuite : class, ICryptoSuite
-    {
-        ArgumentNullException.ThrowIfNull(services);
-
-        services.TryAddEnumerable(ServiceDescriptor.Singleton<ICryptoSuite, TSuite>());
-        return services;
-    }
-
-    /// <summary>
     /// Registers a derived <see cref="Caveat"/> type against its on-the-wire
     /// `type` discriminator so the polymorphic JSON converter can serialize and
     /// deserialize it across the signing boundary (Issue #39). Without this,
@@ -161,8 +111,7 @@ public static class ZcapRevocationServiceCollectionExtensions
     /// counters) are silently dropped at sign time.
     ///
     /// Mutates <see cref="CaveatTypeRegistry.Default"/> directly — registration
-    /// is process-global, mirroring how <see cref="AddZcapCryptoSuite{TSuite}"/>
-    /// composes additional suites onto a single provider.
+    /// is process-global.
     ///
     /// Call before <see cref="AddZcapServices"/> resolves the service provider,
     /// or at any point before the first signing or verification call.
@@ -181,18 +130,20 @@ public static class ZcapRevocationServiceCollectionExtensions
     }
 
     /// <summary>
-    /// Registers RDFC-1.0 (W3C RDF Dataset Canonicalization) support.
-    /// When enabled, crypto suites that declare <c>CanonicalizationMethod = "RDFC-1.0"</c>
-    /// will use the RDFC-1.0 canonicalizer for signing and verification.
+    /// Switches the DI-wired signing and verification services to RDFC-1.0 (W3C RDF Dataset
+    /// Canonicalization) instead of the JCS default. Process-global for the wired services; call before
+    /// the <see cref="ISigningService"/> / <see cref="IVerificationService"/> singletons are first resolved.
     /// </summary>
     public static IServiceCollection AddZcapRdfcCanonicalization(this IServiceCollection services)
     {
         ArgumentNullException.ThrowIfNull(services);
 
-        services.TryAddEnumerable(
-            ServiceDescriptor.Singleton<IDocumentCanonicalizer, RdfcDocumentCanonicalizer>());
+        services.TryAddSingleton<RdfcCanonicalizationMarker>();
         return services;
     }
+
+    private static string ResolveCanonicalizationMethod(IServiceProvider sp)
+        => sp.GetService<RdfcCanonicalizationMarker>() is null ? "JCS" : "RDFC-1.0";
 
     /// <summary>
     /// Registers a custom <see cref="IDidSigner"/> implementation.
@@ -390,3 +341,10 @@ public static class ZcapRevocationServiceCollectionExtensions
         return services;
     }
 }
+
+/// <summary>
+/// Marker the DI factories check to select RDFC-1.0 canonicalization for the wired signing and
+/// verification services. Registered by <see cref="ZcapRevocationServiceCollectionExtensions.AddZcapRdfcCanonicalization"/>;
+/// absent means the JCS default.
+/// </summary>
+internal sealed class RdfcCanonicalizationMarker;

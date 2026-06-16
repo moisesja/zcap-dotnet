@@ -32,10 +32,8 @@ public class VerificationServicePolicyTests
     private VerificationService CreateVerifier(VerificationPolicy? policy = null)
         => new(
             _didProvider, _caveatProcessor,
-            VerificationService.CreateDefaultSuiteProvider(),
             new RevocationService(new InMemoryRevocationStore()),
             new InMemoryNonceStore(),
-            SigningService.CreateDefaultCanonicalizerProvider(),
             policy: policy);
 
     // Root + delegated capability whose expiration is `expires` out. The root is registered so the
