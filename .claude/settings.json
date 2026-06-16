@@ -2,7 +2,40 @@
   "permissions": {
     "allow": [
       "Bash(dotnet run:*)",
-      "Bash(git -C /Users/moises/Projects/zcap-dotnet log --oneline -20)"
+      "Bash(git -C /Users/moises/Projects/zcap-dotnet log --oneline -20)",
+      "Bash(monodis --method /Users/moises/.nuget/packages/netcid/1.6.0/lib/net10.0/NetCid.dll)",
+      "Bash(cd /Users/moises/Projects/zcap-dotnet *)",
+      "Read(//dev/**)",
+      "Bash(sed -n '28,45p' tests/ZcapLd.Core.Tests/Services/VerificationServiceFreshnessTests.cs)",
+      "Bash(sed -n '155,170p' tests/ZcapLd.Core.Tests/Services/VerificationServiceTests.cs)",
+      "Bash(sed -n '20,45p' tests/ZcapLd.Core.Tests/Integration/RdfcEndToEndTests.cs)",
+      "Bash(sed -n '19,41p' src/ZcapLd.Core/Services/VerificationService.cs)",
+      "Bash(sed -n '855,872p' src/ZcapLd.Core/Services/VerificationService.cs)",
+      "Bash(sed -n '276,292p' src/ZcapLd.Core/Services/VerificationService.cs)",
+      "Bash(sed -n '1568,1585p' src/ZcapLd.Core/Services/VerificationService.cs)",
+      "Bash(sed -n '205,232p' src/ZcapLd.Core/Services/VerificationService.cs)",
+      "Bash(sed -n '766,784p' src/ZcapLd.Core/Services/VerificationService.cs)",
+      "Bash(xargs -0 sed -i '' -e '/^[[:space:]]*VerificationService\\\\.CreateDefaultSuiteProvider\\(\\),[[:space:]]*$/d' -e '/^[[:space:]]*SigningService\\\\.CreateDefaultCanonicalizerProvider\\(\\),[[:space:]]*$/d')",
+      "Bash(sed -n '240,251p' tests/ZcapLd.Core.Tests/Services/ControllerDocumentAuthorizationTests.cs)",
+      "Bash(sed -n '55,67p' tests/ZcapLd.Core.Tests/Services/ControllerDocumentAuthorizationTests.cs)",
+      "Bash(sed -n '610,617p' tests/ZcapLd.Core.Tests/Services/CapabilityServiceTests.cs)",
+      "Bash(sed -n '95,100p' tests/ZcapLd.Core.Tests/Services/VerificationResultTests.cs)",
+      "Bash(sed -n '40,46p' tests/ZcapLd.Core.Tests/Compliance/DelegatedInvocationComplianceTests.cs)",
+      "Bash(sed -i '' 's/new CaveatProcessor\\(\\), VerificationService\\\\.CreateDefaultSuiteProvider\\(\\),/new CaveatProcessor\\(\\),/' tests/ZcapLd.Core.Tests/Services/CapabilityServiceTests.cs)",
+      "Bash(sed -i '' 's/_caveatProcessor, VerificationService\\\\.CreateDefaultSuiteProvider\\(\\), revocationService/_caveatProcessor, revocationService/' tests/ZcapLd.Core.Tests/Services/VerificationResultTests.cs)",
+      "Bash(sed -i '' 's/_caveatProcessor, VerificationService\\\\.CreateDefaultSuiteProvider\\(\\),/_caveatProcessor,/' tests/ZcapLd.Core.Tests/Compliance/DelegatedInvocationComplianceTests.cs)",
+      "Bash(sed -n '244,246p' tests/ZcapLd.Core.Tests/Services/ControllerDocumentAuthorizationTests.cs)",
+      "Bash(perl -0pi -e 's/\\\\n\\\\s*new InMemoryNonceStore\\\\\\(\\\\\\),\\\\n\\\\s*SigningService\\\\.CreateDefaultCanonicalizerProvider\\\\\\(\\\\\\)\\\\\\);/\\\\n            new InMemoryNonceStore\\(\\)\\);/' tests/ZcapLd.Core.Tests/Services/ControllerDocumentAuthorizationTests.cs)",
+      "Bash(sed -n '241,247p' tests/ZcapLd.Core.Tests/Services/ControllerDocumentAuthorizationTests.cs)",
+      "Bash(perl -0pi -e 's/        var suiteProvider = new CryptoSuiteProvider\\\\\\(\\\\\\);\\\\n        suiteProvider\\\\.Register\\\\\\(CryptoSuite\\\\.Ed25519\\\\\\(\\\\\\)\\\\\\);\\\\n        var canon = new DocumentCanonicalizerProvider\\\\\\(\\\\\\);\\\\n        canon\\\\.Register\\\\\\(new JcsDocumentCanonicalizer\\\\\\(\\\\\\)\\\\\\);\\\\n        var verifier = new VerificationService\\\\\\(\\\\n            _didProvider, _caveatProcessor, suiteProvider, revocation, new InMemoryNonceStore\\\\\\(\\\\\\), canon\\\\\\);/        var verifier = new VerificationService\\(\\\\n            _didProvider, _caveatProcessor, revocation, new InMemoryNonceStore\\(\\)\\);/' tests/ZcapLd.Core.Tests/Services/VerificationServiceTests.cs)",
+      "Bash(perl -0pi -e 's/\\\\n    \\\\[Fact\\\\]\\\\n    public void ICryptoSuite_DefaultCanonicalizationMethod_IsJcs\\\\\\(\\\\\\)\\\\n    \\\\{\\\\n        ICryptoSuite ed25519 = CryptoSuite\\\\.Ed25519\\\\\\(\\\\\\);\\\\n        ICryptoSuite p256 = CryptoSuite\\\\.P256\\\\\\(\\\\\\);\\\\n\\\\n        ed25519\\\\.CanonicalizationMethod\\\\.Should\\\\\\(\\\\\\)\\\\.Be\\\\\\(\"JCS\"\\\\\\);\\\\n        p256\\\\.CanonicalizationMethod\\\\.Should\\\\\\(\\\\\\)\\\\.Be\\\\\\(\"JCS\"\\\\\\);\\\\n    \\\\}\\\\n//' tests/ZcapLd.Core.Tests/Integration/RdfcCanonicalizeIntegrationTests.cs)",
+      "Bash(sed -n '1383,1392p' tests/ZcapLd.Core.Tests/Services/VerificationServiceTests.cs)",
+      "Bash(sed -n '99,104p' architecture.md)",
+      "Bash(sed -n '191,195p' architecture.md)",
+      "Bash(sed -n '267,270p' architecture.md)",
+      "Bash(sed -n '32,37p' AGENTS.md)",
+      "Bash(sed -i '' -e 's/# ICryptoSuite, CryptoSuiteProvider, CryptoSuite,/# ZcapSuiteCatalog,/' -e 's/RdfcDocumentCanonicalizer, DocumentCanonicalizerProvider,/RdfcDocumentCanonicalizer,/' AGENTS.md)",
+      "Bash(sed -n '34,38p' AGENTS.md)"
     ]
   }
 }
