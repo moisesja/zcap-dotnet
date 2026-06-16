@@ -1,11 +1,11 @@
 <Project>
   <PropertyGroup>
     <!-- Shared package/library version for ZcapLd.Core and ZcapLd.AspNetCore.
-         4.0.0 (#108): crypto/proof code delegated to the composable stack — NetCrypto 1.0.0
+         3.5.0 (#108): crypto/proof code delegated to the composable stack — NetCrypto 1.0.0
          (via NetDid 2.0.0), DataProofs.Rdfc, and NetCid JCS. Source-breaking (consumers
          recompile; NetDid.Core.Crypto types moved to NetCrypto) but WIRE-COMPATIBLE — the
          Ed25519Signature2020 / EcdsaSecp256r1Signature2019 proof bytes are unchanged, so
          capabilities issued by 3.x still verify. -->
-    <ZcapLdVersion>4.0.0</ZcapLdVersion>
+    <ZcapLdVersion>3.5.0</ZcapLdVersion>
   </PropertyGroup>
 </Project>
