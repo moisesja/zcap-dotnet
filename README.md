@@ -287,11 +287,13 @@ When a `ValidWhileTrue` caveat is encountered during verification, the handler G
 - `tests/ZcapLd.Core.Tests`: unit, integration, and compliance tests
 - `examples/ZcapLd.Examples`: console examples (8 scenarios including ValidWhileTrue)
 - `examples/ZcapLd.RevocationEndpointsDemo`: ASP.NET revocation endpoints demo wired to SQLite (with ValidWhileTrue support)
+- `interop`: live cross-stack interop harness vs `@digitalbazaar/zcap` (run `interop/run-interop.sh`)
 - `docs`: implementation/security notes
 
 ## Developer Docs
 
 - Architecture: [`architecture.md`](architecture.md)
+- Interop & spec-compliance analysis: [`docs/ZCAP-LD-INTEROP-COMPATIBILITY-ANALYSIS.md`](docs/ZCAP-LD-INTEROP-COMPATIBILITY-ANALYSIS.md) (with live `@digitalbazaar/zcap` round-trip harness in [`interop/`](interop/README.md))
 - Revocation Integration: [`docs/REVOCATION-INTEGRATION.md`](docs/REVOCATION-INTEGRATION.md)
 - Contributing: [`CONTRIBUTING.md`](CONTRIBUTING.md)
 - NuGet Release Runbook: [`docs/NUGET-RELEASE.md`](docs/NUGET-RELEASE.md)
