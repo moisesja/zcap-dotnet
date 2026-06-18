@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Standalone cross-stack interop harness CLI. Deliberately NOT part of ZcapLd.sln
+    so it never affects `dotnet build ZcapLd.sln`, `dotnet test`, or packaging.
+    Run via the run-interop.sh script (dotnet run with the project path).
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>ZcapLd.Interop</RootNamespace>
+    <AssemblyName>ZcapLd.Interop</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/ZcapLd.Core/ZcapLd.Core.csproj" />
+    <!-- Direct refs for the in-harness deterministic DID provider (mirrors the test helper). -->
+    <PackageReference Include="NetCrypto" Version="1.1.0" />
+    <PackageReference Include="NetDid.Core" Version="2.0.1" />
+  </ItemGroup>
+
+</Project>

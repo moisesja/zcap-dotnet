@@ -1,0 +1,22 @@
+{
+  "name": "zcap-interop-js",
+  "version": "1.0.0",
+  "description": "Node.js interop harness using the @digitalbazaar/zcap reference library to generate and verify ZCAP-LD delegated capabilities for cross-stack interop with zcap-dotnet.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "gen": "node gen.mjs",
+    "verify": "node verify.mjs ../vectors/js-delegated.json ../vectors/js-root.json",
+    "selftest": "node gen.mjs && node verify.mjs ../vectors/js-delegated.json ../vectors/js-root.json"
+  },
+  "dependencies": {
+    "@digitalbazaar/did-method-key": "5.3.0",
+    "@digitalbazaar/ed25519-signature-2020": "5.4.0",
+    "@digitalbazaar/ed25519-verification-key-2020": "4.2.0",
+    "@digitalbazaar/security-document-loader": "3.2.0",
+    "@digitalbazaar/zcap": "9.0.1",
+    "@digitalbazaar/zcap-context": "2.0.1",
+    "ed25519-signature-2020-context": "1.1.0",
+    "jsonld-signatures": "11.6.0"
+  }
+}

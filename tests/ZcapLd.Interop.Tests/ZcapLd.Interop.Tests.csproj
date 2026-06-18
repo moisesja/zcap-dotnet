@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    xUnit wrapper around the live cross-stack interop harness (interop/run-interop.sh).
+    Deliberately NOT part of ZcapLd.sln so `dotnet test ZcapLd.sln` and the core CI never
+    require Node.js. The dedicated ci-interop.yml workflow runs it with Node + .NET set up.
+    The single test skips gracefully when node/npm/bash are unavailable.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.6.0" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5" />
+    <!-- Runtime skip ([SkippableFact] + Skip.IfNot) — xUnit v2 has no Assert.Skip. -->
+    <PackageReference Include="Xunit.SkippableFact" Version="1.5.23" />
+  </ItemGroup>
+
+</Project>

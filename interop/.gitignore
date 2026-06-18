@@ -1,0 +1,10 @@
+# .NET build outputs
+ZcapLd.Interop/bin/
+ZcapLd.Interop/obj/
+
+# JS deps
+js/node_modules/
+
+# Generated vectors — reproduced on every `run-interop.sh` (not source).
+# Byte-stable golden vectors live in tests/.../Compliance/*GoldenVectorTests.cs.
+vectors/
