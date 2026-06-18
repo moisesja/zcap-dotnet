@@ -221,3 +221,19 @@ When delegating a capability that contains a `ValidWhileTrue` caveat, the child 
 - `VerificationService` checks revocation during proof, chain, and invocation verification.
 - `RevocationService` treats expired revocation records as inactive and deletes them on read.
 - For production, implement authorization policy in your endpoint/service boundary to validate who is allowed to revoke.
+
+### Security note — `reason`/`metadata` are informational, not tamper-evident (4.0.0)
+
+As of 4.0.0 zcap signs proofs with RDFC-1.0 only. RDFC drops JSON-LD terms that are not defined in a
+served context from the canonical N-Quads, and the free-form `reason`/`metadata` you pass to
+`SignRevocationAsync` are not zcap-context terms — so they are **not covered by the signature**. They
+are recorded on the `RevocationRecord` for audit, but an actor who already holds a validly-signed
+revocation request can alter them without invalidating it.
+
+What **is** cryptographically bound and cannot be forged or altered: the capability being revoked
+(`capability`), the `revoke` action (`capabilityAction`), the `invocationTarget`, and the revoker's
+identity (authenticated by key possession; `RevokedBy` is the verification method that signed the
+request, never client-asserted). A revocation therefore cannot be forged, retargeted to a different
+capability, or attributed to another party — only the human-readable note is unbound. If you need
+`reason`/`metadata` to be tamper-evident, do not rely on the proof for it (e.g. record them in an
+authenticated server-side audit log). (Pre-4.0.0 JCS builds did bind these fields.)

@@ -62,4 +62,36 @@ public class CanonicalizationGoldenVectorTests
             "the RDFC hash-concat signing payload (canonicalize doc + proofOptions, SHA-256 each, " +
             "concatenate) must be byte-identical after the Stage B canonicalizer swap");
     }
+
+    [Fact(DisplayName = "Golden: RDFC-1.0 invocation hash-concat signing payload")]
+    public void Rdfc_InvocationPayload_MatchesGolden()
+    {
+        // Locks the RDFC-1.0 signing payload for an INVOCATION (the per-stack byte-stability guard the
+        // deleted JCS invocation pin used to provide). Cross-stack invocation interop is separate and
+        // deferred (#117); this only pins zcap-dotnet's own invocation signing bytes against drift.
+        var invocation = new Invocation
+        {
+            Id = "urn:uuid:00000000-0000-0000-0000-0000000000a1",
+            Capability = "urn:zcap:root:https%3A%2F%2Fexample.com%2Fapi%2Fresource",
+            CapabilityAction = "read",
+            InvocationTarget = "https://example.com/api/resource",
+        };
+        var proof = new Proof
+        {
+            Type = "Ed25519Signature2020",
+            Created = "2026-06-13T00:00:00.000000Z",
+            ProofPurpose = "capabilityInvocation",
+            VerificationMethod = "did:key:z6MkfixedSigner#z6MkfixedSigner",
+            Capability = "urn:zcap:root:https%3A%2F%2Fexample.com%2Fapi%2Fresource",
+            CapabilityAction = "read",
+            InvocationTarget = "https://example.com/api/resource",
+            ProofValue = string.Empty,
+        };
+
+        var payload = ProofSigningPayloadBuilder.CanonicalizeInvocationPayload(
+            invocation, proof, new RdfcDocumentCanonicalizer());
+        Convert.ToHexString(SHA256.HashData(payload)).Should().Be(
+            "FE2FD435B527FE991644212490FFE362A4070CEF2508C327A5A3F9998756D83C",
+            "the RDFC-1.0 invocation signing payload must stay byte-stable");
+    }
 }
