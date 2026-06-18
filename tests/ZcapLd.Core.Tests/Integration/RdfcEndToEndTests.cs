@@ -10,8 +10,8 @@ namespace ZcapLd.Core.Tests.Integration;
 /// <summary>
 /// End-to-end tests for RDFC-1.0 canonicalization through the full
 /// signing and verification pipeline: create → delegate → invoke → verify.
-/// These configure SigningService and VerificationService with the "RDFC-1.0"
-/// canonicalization method (delegated to DataProofs' legacy RDFC suite).
+/// RDFC-1.0 is the only canonicalization ZCAP-LD supports (delegated to DataProofs'
+/// legacy RDFC suite), so the default-constructed services exercise it.
 /// </summary>
 public class RdfcEndToEndTests
 {
@@ -24,13 +24,13 @@ public class RdfcEndToEndTests
     {
         _didProvider = new InMemoryDidProvider();
 
-        _signingService = new SigningService(_didProvider, _didProvider, "RDFC-1.0");
+        _signingService = new SigningService(_didProvider, _didProvider);
 
         var caveatProcessor = new CaveatProcessor();
         _verificationService = new VerificationService(
             _didProvider, caveatProcessor,
             new RevocationService(new InMemoryRevocationStore()),
-            new InMemoryNonceStore(), canonicalizationMethod: "RDFC-1.0");
+            new InMemoryNonceStore());
 
         _capabilityService = new CapabilityService(_signingService);
     }

@@ -1,13 +1,13 @@
 namespace ZcapLd.Core.Cryptography;
 
 /// <summary>
-/// Produces a deterministic byte representation of a JSON/JSON-LD document.
-/// Implementations include JCS (RFC 8785) and RDFC-1.0 (W3C RDF Dataset Canonicalization).
+/// Produces a deterministic byte representation of a JSON/JSON-LD document. The implementation is
+/// RDFC-1.0 (W3C RDF Dataset Canonicalization) — the only canonicalization ZCAP-LD supports.
 /// </summary>
 public interface IDocumentCanonicalizer
 {
     /// <summary>
-    /// Identifier for the canonicalization method (e.g. "JCS", "RDFC-1.0").
+    /// Identifier for the canonicalization method (currently always <c>"RDFC-1.0"</c>).
     /// </summary>
     string Method { get; }
 

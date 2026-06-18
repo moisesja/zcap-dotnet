@@ -27,7 +27,6 @@ public class VerificationService : IVerificationService
     // cryptosuites. Suite metadata (proof type, the #68 key-type binding, context URL) comes from the
     // fixed ZcapSuiteCatalog; the canonicalization method is fixed per service instance.
     private readonly LegacyProofCrypto _legacyProofCrypto = new();
-    private readonly string _canonicalizationMethod;
 
     private readonly TimeSpan _nonceWindow;
     private readonly TimeSpan _freshnessClockSkew;
@@ -90,9 +89,9 @@ public class VerificationService : IVerificationService
     /// else a <c>did:key</c>-backed default. The optional <paramref name="freshnessClockSkew"/>
     /// tolerates a signed <c>proof.created</c> being up to that far in the future (Issue #71; default
     /// <see cref="DefaultFreshnessClockSkew"/>). The optional <paramref name="policy"/> enables opt-in
-    /// verifier-side SHOULD checks (Issue #73; default <see cref="VerificationPolicy.Default"/>). The
-    /// optional <paramref name="canonicalizationMethod"/> selects the proof canonicalization
-    /// (<c>"JCS"</c> default, or <c>"RDFC-1.0"</c>) for every proof this verifier checks.
+    /// verifier-side SHOULD checks (Issue #73; default <see cref="VerificationPolicy.Default"/>).
+    /// All proofs are verified under RDFC-1.0 canonicalization (the only canonicalization ZCAP-LD
+    /// supports; required for interop with <c>@digitalbazaar/zcap</c>).
     /// </summary>
     public VerificationService(
         IDidResolver didResolver,
@@ -104,14 +103,12 @@ public class VerificationService : IVerificationService
         IVerificationRelationshipResolver? relationshipResolver = null,
         IRootCapabilityResolver? rootResolver = null,
         TimeSpan? freshnessClockSkew = null,
-        VerificationPolicy? policy = null,
-        string? canonicalizationMethod = null)
+        VerificationPolicy? policy = null)
     {
         _didResolver = didResolver ?? throw new ArgumentNullException(nameof(didResolver));
         _caveatProcessor = caveatProcessor ?? throw new ArgumentNullException(nameof(caveatProcessor));
         _revocationService = revocationService ?? throw new ArgumentNullException(nameof(revocationService));
         _nonceStore = nonceStore ?? throw new ArgumentNullException(nameof(nonceStore));
-        _canonicalizationMethod = LegacyProofCrypto.ValidateCanonicalizationMethod(canonicalizationMethod ?? "JCS");
         _nonceWindow = nonceWindow ?? DefaultNonceWindow;
         _freshnessClockSkew = freshnessClockSkew ?? DefaultFreshnessClockSkew;
         _logger = logger ?? NullLogger<VerificationService>.Instance;
@@ -386,7 +383,7 @@ public class VerificationService : IVerificationService
 
             var capabilityWithoutProof = ProofSigningPayloadBuilder.CloneCapabilityWithoutProof(capability);
 
-            if (!_legacyProofCrypto.Verify(capabilityWithoutProof, proof, resolvedKey, _canonicalizationMethod))
+            if (!_legacyProofCrypto.Verify(capabilityWithoutProof, proof, resolvedKey))
                 return VerificationResult.Fail(VerificationOutcome.InvalidSignature,
                     "Delegation proof signature did not verify.");
 
@@ -755,7 +752,7 @@ public class VerificationService : IVerificationService
 
         var invocationWithoutProof = ProofSigningPayloadBuilder.CloneInvocationWithoutProof(invocation);
 
-        return _legacyProofCrypto.Verify(invocationWithoutProof, proof, resolvedKey, _canonicalizationMethod);
+        return _legacyProofCrypto.Verify(invocationWithoutProof, proof, resolvedKey);
     }
 
     /// <summary>
@@ -1197,12 +1194,16 @@ public class VerificationService : IVerificationService
                 return false;
         }
 
-        // 3. Allowed actions must be subset of parent (if parent specifies).
-        // Null on either side == unrestricted at that level → no check needed.
-        if (parent.AllowedAction is { Length: > 0 } parentActions &&
-            child.AllowedAction is { Length: > 0 } childActions)
+        // 3. Allowed actions: when the parent restricts actions, the child MUST also restrict to a
+        // subset. A child that OMITS allowedAction under a restricting parent is NOT a valid
+        // attenuation — it would widen authority back to "any action" (the omit-to-widen bypass).
+        // Matches @digitalbazaar/zcap hasValidAllowedAction (an undefined child allowedAction under
+        // a restricting parent is rejected). A parent with no allowedAction is unrestricted, so a
+        // first-level child of an action-less root may legitimately omit it.
+        if (parent.AllowedAction is { Length: > 0 } parentActions)
         {
-            if (!childActions.All(action => parentActions.Contains(action)))
+            if (child.AllowedAction is not { Length: > 0 } childActions ||
+                !childActions.All(action => parentActions.Contains(action)))
                 return false;
         }
 

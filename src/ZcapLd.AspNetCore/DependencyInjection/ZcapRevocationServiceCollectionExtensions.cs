@@ -31,14 +31,14 @@ public static class ZcapRevocationServiceCollectionExtensions
         // DidKeyResolver delegates to NetDid's DidKeyMethod for did:key resolution.
         services.TryAddSingleton<IDidResolver>(sp => new DidKeyResolver());
 
-        // SigningService delegates proof crypto to DataProofs' legacy cryptosuites; the canonicalization
-        // method (JCS by default, or RDFC-1.0 when AddZcapRdfcCanonicalization() was called) is the only
-        // crypto knob. No default IDidSigner — consumers must provide their own secure implementation.
+        // SigningService delegates proof crypto to DataProofs' legacy cryptosuites; all proofs use
+        // RDFC-1.0 canonicalization (the only canonicalization ZCAP-LD supports — required for interop
+        // with @digitalbazaar/zcap). No default IDidSigner — consumers must provide their own secure
+        // implementation.
         services.TryAddSingleton<ISigningService>(sp =>
             new SigningService(
                 sp.GetRequiredService<IDidSigner>(),
-                sp.GetRequiredService<IDidResolver>(),
-                ResolveCanonicalizationMethod(sp)));
+                sp.GetRequiredService<IDidResolver>()));
 
         // CaveatProcessor: factory to optionally inject IValidWhileTrueHandler. If
         // AddZcapValidWhileTrueSupport() was called the handler is available; otherwise GetService
@@ -55,8 +55,7 @@ public static class ZcapRevocationServiceCollectionExtensions
         // performs controller authorization by resolving the controller's DID document; the optional
         // IRootCapabilityResolver (Issue #50) lets it obtain a root referenced by id only in a
         // spec-exact chain (register via AddZcapRootCapabilityResolver); the optional VerificationPolicy
-        // (Issue #73) enables the opt-in expiration ceiling. RDFC-1.0 canonicalization is selected via
-        // AddZcapRdfcCanonicalization().
+        // (Issue #73) enables the opt-in expiration ceiling. All proofs are verified under RDFC-1.0.
         services.TryAddSingleton<IVerificationService>(sp =>
             new VerificationService(
                 sp.GetRequiredService<IDidResolver>(),
@@ -66,8 +65,7 @@ public static class ZcapRevocationServiceCollectionExtensions
                 logger: sp.GetService<ILogger<VerificationService>>(),
                 relationshipResolver: sp.GetService<IVerificationRelationshipResolver>(),
                 rootResolver: sp.GetService<IRootCapabilityResolver>(),
-                policy: sp.GetService<VerificationPolicy>(),
-                canonicalizationMethod: ResolveCanonicalizationMethod(sp)));
+                policy: sp.GetService<VerificationPolicy>()));
 
         return services;
     }
@@ -128,22 +126,6 @@ public static class ZcapRevocationServiceCollectionExtensions
         CaveatTypeRegistry.Default.Register<TCaveat>(discriminator);
         return services;
     }
-
-    /// <summary>
-    /// Switches the DI-wired signing and verification services to RDFC-1.0 (W3C RDF Dataset
-    /// Canonicalization) instead of the JCS default. Process-global for the wired services; call before
-    /// the <see cref="ISigningService"/> / <see cref="IVerificationService"/> singletons are first resolved.
-    /// </summary>
-    public static IServiceCollection AddZcapRdfcCanonicalization(this IServiceCollection services)
-    {
-        ArgumentNullException.ThrowIfNull(services);
-
-        services.TryAddSingleton<RdfcCanonicalizationMarker>();
-        return services;
-    }
-
-    private static string ResolveCanonicalizationMethod(IServiceProvider sp)
-        => sp.GetService<RdfcCanonicalizationMarker>() is null ? "JCS" : "RDFC-1.0";
 
     /// <summary>
     /// Registers a custom <see cref="IDidSigner"/> implementation.
@@ -357,10 +339,3 @@ public static class ZcapRevocationServiceCollectionExtensions
         return services;
     }
 }
-
-/// <summary>
-/// Marker the DI factories check to select RDFC-1.0 canonicalization for the wired signing and
-/// verification services. Registered by <see cref="ZcapRevocationServiceCollectionExtensions.AddZcapRdfcCanonicalization"/>;
-/// absent means the JCS default.
-/// </summary>
-internal sealed class RdfcCanonicalizationMarker;

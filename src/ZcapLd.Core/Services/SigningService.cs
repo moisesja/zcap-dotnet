@@ -15,26 +15,17 @@ public class SigningService : ISigningService
 {
     private readonly IDidSigner _signer;
     private readonly IDidResolver _resolver;
-    private readonly string _canonicalizationMethod;
     private readonly LegacyProofCrypto _legacyProofCrypto = new();
 
     /// <summary>
-    /// Creates a signing service using JCS canonicalization (the default).
+    /// Creates a signing service. Every proof it produces uses RDFC-1.0 canonicalization — the only
+    /// canonicalization ZCAP-LD supports, and what makes proofs interoperable with
+    /// <c>@digitalbazaar/zcap</c>.
     /// </summary>
     public SigningService(IDidSigner signer, IDidResolver resolver)
-        : this(signer, resolver, "JCS")
-    {
-    }
-
-    /// <summary>
-    /// Creates a signing service with an explicit canonicalization method (<c>"JCS"</c> or
-    /// <c>"RDFC-1.0"</c>) applied to all proofs it produces.
-    /// </summary>
-    public SigningService(IDidSigner signer, IDidResolver resolver, string canonicalizationMethod)
     {
         _signer = signer ?? throw new ArgumentNullException(nameof(signer));
         _resolver = resolver ?? throw new ArgumentNullException(nameof(resolver));
-        _canonicalizationMethod = LegacyProofCrypto.ValidateCanonicalizationMethod(canonicalizationMethod);
     }
 
     /// <summary>
@@ -90,7 +81,7 @@ public class SigningService : ISigningService
 
         var didSigner = CreateLegacySigner(signerDid, resolvedKey, proofType);
         proof.ProofValue = await _legacyProofCrypto.CreateProofValueAsync(
-            capabilityWithoutProof, proof, didSigner, _canonicalizationMethod);
+            capabilityWithoutProof, proof, didSigner);
 
         ConfirmSignature(capabilityWithoutProof, proof, resolvedKey);
         return proof;
@@ -222,7 +213,7 @@ public class SigningService : ISigningService
 
         var didSigner = CreateLegacySigner(signerDid, resolvedKey, proofType);
         proof.ProofValue = await _legacyProofCrypto.CreateProofValueAsync(
-            invocationWithoutProof, proof, didSigner, _canonicalizationMethod);
+            invocationWithoutProof, proof, didSigner);
 
         ConfirmSignature(invocationWithoutProof, proof, resolvedKey);
         return proof;
@@ -240,7 +231,7 @@ public class SigningService : ISigningService
     /// </summary>
     private void ConfirmSignature(object documentWithoutProof, Proof proof, ResolvedKey resolvedKey)
     {
-        if (!_legacyProofCrypto.Verify(documentWithoutProof, proof, resolvedKey, _canonicalizationMethod))
+        if (!_legacyProofCrypto.Verify(documentWithoutProof, proof, resolvedKey))
         {
             throw new CryptographicException(
                 "The produced signature did not verify against the public key resolved for the signer " +

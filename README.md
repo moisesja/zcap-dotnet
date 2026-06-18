@@ -16,11 +16,11 @@ This library provides:
 - Delegation-chain verification
 - Invocation signing and verification
 - Caveat processing (expiration, usage count, ValidWhileTrue remote revocation) with polymorphic JSON serialization for third-party caveat types via `CaveatTypeRegistry`
-- Cross-language wire-format compatibility (W3C Data Integrity flat JCS shape, RFC 8785 escaping, derived-class field preservation)
+- Cross-language wire-format compatibility — proven live against `@digitalbazaar/zcap` (RDFC-1.0 / W3C Data Integrity; see [`interop/`](interop/README.md))
 - Invocation replay protection with pluggable nonce stores
 - Revocation persistence with pluggable storage backends
 - ValidWhileTrue caveat support with HTTP-based remote revocation checking
-- Ed25519 and P-256 signature suites with JCS or RDFC-1.0 canonicalization (crypto delegated to NetCrypto via DataProofs)
+- Ed25519 and P-256 signature suites with RDFC-1.0 canonicalization (crypto delegated to NetCrypto via DataProofs)
 - DID resolution via [NetDid](https://www.nuget.org/packages/NetDid.Core) (W3C-compliant did:key support)
 - Multibase signature encoding
 
@@ -325,6 +325,6 @@ dotnet pack src/ZcapLd.AspNetCore/ZcapLd.AspNetCore.csproj -c Release
 
 - No default `IDidSigner` ships in the core package — consumers must provide their own (HSM/KMS/Key Vault).
 - `InMemoryDidProvider` (in examples and tests) stores private keys in plaintext memory and is NOT for production use.
-- Canonicalization supports both JCS (JSON Canonicalization Scheme, RFC 8785) and RDFC-1.0 (W3C RDF Dataset Canonicalization) via pluggable `IDocumentCanonicalizer`. JCS is the default; known W3C JSON-LD contexts are embedded for offline operation.
-- Cryptography is provided by [NetCrypto](https://www.nuget.org/packages/NetCrypto) (Ed25519 / P-256 sign + verify), reached via [NetDid](https://www.nuget.org/packages/NetDid.Core) 2.0.0 for W3C-compliant did:key resolution; multibase + JCS (RFC 8785) via [NetCid](https://www.nuget.org/packages/NetCid); RDFC-1.0 via [DataProofsDotnet.Rdfc](https://www.nuget.org/packages/DataProofsDotnet.Rdfc).
+- Canonicalization is RDFC-1.0 (W3C RDF Dataset Canonicalization) only — the format that interoperates with `@digitalbazaar/zcap`. JCS support was removed in 4.0.0; there is no canonicalization option. Known W3C JSON-LD contexts are embedded for offline operation.
+- Cryptography is provided by [NetCrypto](https://www.nuget.org/packages/NetCrypto) (Ed25519 / P-256 sign + verify), reached via [NetDid](https://www.nuget.org/packages/NetDid.Core) 2.0.0 for W3C-compliant did:key resolution; multibase via [NetCid](https://www.nuget.org/packages/NetCid); RDFC-1.0 via [DataProofsDotnet.Rdfc](https://www.nuget.org/packages/DataProofsDotnet.Rdfc).
 - Ed25519 and P-256 are the supported signature suites; cryptography is delegated to NetCrypto (via DataProofs), not extended through a zcap API.

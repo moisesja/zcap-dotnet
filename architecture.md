@@ -94,14 +94,13 @@ Primary assembly: `src/ZcapLd.Core`.
 
 ### Crypto (`src/ZcapLd.Core/Cryptography`)
 
-- `ZcapSuiteCatalog`: internal, fixed metadata for the supported suites (proof type, the #68 key-type binding, context URL). zcap is **not** a crypto-extension point — new curves are added in NetCrypto + DataProofs (see `docs/crypto-suite-extensibility-decision.md`). The sign/verify crypto is delegated to DataProofs' legacy cryptosuites via `LegacyProofCrypto`; the canonicalization method (JCS / RDFC-1.0) is fixed per service instance.
-- `IDocumentCanonicalizer`: canonicalization abstraction used by `ProofSigningPayloadBuilder`'s reference oracle
-- `JcsDocumentCanonicalizer`: RFC 8785 JSON Canonicalization Scheme (wraps `JsonCanonicalizer`)
+- `ZcapSuiteCatalog`: internal, fixed metadata for the supported suites (proof type, the #68 key-type binding, context URL). zcap is **not** a crypto-extension point — new curves are added in NetCrypto + DataProofs (see `docs/crypto-suite-extensibility-decision.md`). The sign/verify crypto is delegated to DataProofs' legacy cryptosuites via `LegacyProofCrypto`; canonicalization is **RDFC-1.0 only** — the sole canonicalization (the `@digitalbazaar/zcap` interop format).
+- `IDocumentCanonicalizer`: canonicalization abstraction with a single implementation (`RdfcDocumentCanonicalizer`), used by `ProofSigningPayloadBuilder`'s reference oracle
 - `RdfcDocumentCanonicalizer`: W3C RDFC-1.0 RDF Dataset Canonicalization — a thin adapter over `DataProofsDotnet.Rdfc.RdfcDocumentCanonicalizer` (the stack's single dotNetRDF home), with `RdfcContextDocumentLoader` serving zcap's embedded JSON-LD contexts offline
 - `MultibaseCodec`: algorithm-agnostic multibase encoding/decoding (delegates to NetCid)
-- `JsonCanonicalizer`: deterministic JSON canonicalization (RFC 8785) — delegates to `NetCid.JcsCanonicalizer` after a null-object-member strip
+- `UriEncoding`: `encodeURIComponent`-exact percent-encoding so the root id `urn:zcap:root:{encodeURIComponent(invocationTarget)}` is byte-identical to @digitalbazaar/zcap (un-escapes `! ' ( ) *` that `Uri.EscapeDataString` over-escapes)
 - `LegacyProofCrypto`: bridges signing/verification to DataProofs' legacy cryptosuites (`Ed25519Signature2020` / `EcdsaSecp256r1Signature2019`) — the byte-compatible implementations of zcap's 2020-era embedded-proof convention; `DidSignerAdapter` exposes the consumer's `IDidSigner` as a `NetCrypto.ISigner`, `ResolvedKeyTypeMap` maps the resolved key type to NetCrypto's
-- `ProofSigningPayloadBuilder`: clone-without-proof helpers (production) and the reference signing-payload oracle the Compliance golden vectors assert against (JCS = doc+proof combined; RDFC-1.0 = separate SHA-256 hashes concatenated)
+- `ProofSigningPayloadBuilder`: clone-without-proof helpers (production) and the reference RDFC-1.0 signing-payload oracle the Compliance golden vectors assert against (`SHA-256(RDFC(proofOptions)) || SHA-256(RDFC(document))`)
 - `CaveatJsonConverter`: polymorphic `JsonConverter<Caveat>` — writes via runtime concrete type, reads via discriminator lookup against `CaveatTypeRegistry`. Required for cross-language interop (sign-time vs. wire-time bytes match).
 - `ZcapJsonOptions.Default`: shared `JsonSerializerOptions` used by both sign-time canonicalization and verifier-time chain deserialization. Single source of truth for the encoder, null-handling, and the caveat converter.
 
@@ -268,9 +267,9 @@ Reference implementation guide: `docs/REVOCATION-INTEGRATION.md`.
 
 Library is in-process first. Service methods are interface-driven and can be wrapped by gRPC/HTTP without changing core models.
 
-### Custom Canonicalization
+### Canonicalization
 
-Choose JCS (default) or RDFC-1.0 per service: pass `canonicalizationMethod: "RDFC-1.0"` to the `SigningService` / `VerificationService` constructors, or call `AddZcapRdfcCanonicalization()` in ASP.NET DI. Both are delegated to DataProofs' legacy cryptosuites (RDFC-1.0 via DataProofs.Rdfc over dotNetRDF).
+Every proof is canonicalized with **RDFC-1.0** (W3C RDF Dataset Canonicalization) — the only canonicalization, and the format that interoperates with `@digitalbazaar/zcap`. There is no per-service option: JCS support (and the `canonicalizationMethod` argument / `AddZcapRdfcCanonicalization()` toggle) was **removed in 4.0.0**. Canonicalization is delegated to DataProofs' legacy cryptosuites (RDFC-1.0 via DataProofs.Rdfc over dotNetRDF). Cross-stack interop is proven live by `interop/run-interop.sh`. Note: under RDFC, JSON-LD terms not defined in a served context are dropped from the signed N-Quads, so free-form revocation `reason`/`metadata` are informational (the bound revocation fields and the revoker's key-possession auth are unaffected).
 
 ## Dependencies
 
@@ -278,8 +277,8 @@ Choose JCS (default) or RDFC-1.0 per service: pass `canonicalizationMethod: "RDF
 
 - **NetCrypto** — the cryptographic foundation: Ed25519 / P-256 sign + verify (`DefaultCryptoProvider`, `EcdsaSignatureFormat`), the key model, and key generation. `CryptoSuite` calls it directly.
 - **NetDid.Core** / **NetDid.Method.Key** (2.0.0) — W3C-compliant `did:key` creation/resolution and the `IVerificationRelationshipResolver`. As of 2.0.0 NetDid itself builds on NetCrypto (it no longer bundles its own crypto), so zcap and NetDid share one crypto stack.
-- **DataProofsDotnet.Rdfc** — the RDFC-1.0 / JSON-LD canonicalization `RdfcDocumentCanonicalizer` adapts; it owns the dotNetRDF dependency transitively (zcap references no RDF library directly). The default JCS path does not load it.
-- **NetCid** — multibase/multicodec encoding and the RFC 8785 `JcsCanonicalizer` the JCS path delegates to (arrives transitively via NetCrypto / NetDid / DataProofs.Rdfc, all pinned to the same version).
+- **DataProofsDotnet.Rdfc** — the RDFC-1.0 / JSON-LD canonicalization `RdfcDocumentCanonicalizer` adapts; it owns the dotNetRDF dependency transitively (zcap references no RDF library directly). RDFC-1.0 is the only canonicalization, so it is always on the signing/verification path.
+- **NetCid** — multibase/multicodec encoding (arrives transitively via NetCrypto / NetDid / DataProofs.Rdfc, all pinned to the same version).
 - **Microsoft.Extensions.Logging.Abstractions** — added in Issue #64 so `VerificationService` can log the cause when it fails closed. This is the **abstractions** assembly only (it carries no concrete logging implementation): consumers who don't otherwise use `Microsoft.Extensions.*` pull in just the `ILogger` / `NullLogger` types, and the verifier defaults to `NullLogger` (zero output) when no logger is supplied.
 
 `Microsoft.SourceLink.GitHub` is a build-only dependency (`PrivateAssets="All"`) and is not propagated to consumers.

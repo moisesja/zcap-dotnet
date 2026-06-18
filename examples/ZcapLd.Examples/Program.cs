@@ -571,25 +571,24 @@ Console.WriteLine($"    Invocation valid: {noPropsResult} (expected: False — n
 Console.WriteLine();
 
 // ===================================================
-// Example 10: RDFC-1.0 vs JCS Canonicalization
+// Example 10: RDFC-1.0 Canonicalization (the interop format)
 // ===================================================
-Console.WriteLine("Example 10: RDFC-1.0 vs JCS Canonicalization");
+Console.WriteLine("Example 10: RDFC-1.0 Canonicalization");
 Console.WriteLine("----------------------------------------------");
 
-// ZCAP-LD proofs can use either canonicalization method. By default the services use JCS
-// (JSON Canonicalization Scheme, RFC 8785). To use RDFC-1.0 (W3C RDF Dataset Canonicalization),
-// construct SigningService and VerificationService with the "RDFC-1.0" canonicalization method;
-// the crypto is delegated to DataProofs' legacy RDFC suite. Use one method per deployment.
+// All ZCAP-LD proofs use RDFC-1.0 (W3C RDF Dataset Canonicalization) — the only canonicalization
+// the library supports, and what makes proofs interoperable with @digitalbazaar/zcap. The crypto is
+// delegated to DataProofs' legacy RDFC suite; there is no canonicalization knob to configure.
 
-// --- Wire services with RDFC-1.0 canonicalization ---
+// --- Wire services (RDFC-1.0 is automatic) ---
 var rdfcDidProvider = new InMemoryDidProvider();
-var rdfcSigningService = new SigningService(rdfcDidProvider, rdfcDidProvider, "RDFC-1.0");
+var rdfcSigningService = new SigningService(rdfcDidProvider, rdfcDidProvider);
 var rdfcVerificationService = new VerificationService(
     rdfcDidProvider, caveatProcessor,
     new RevocationService(new InMemoryRevocationStore()),
-    new InMemoryNonceStore(), canonicalizationMethod: "RDFC-1.0");
+    new InMemoryNonceStore());
 
-// --- Create and delegate a capability using RDFC-1.0 ---
+// --- Create and delegate a capability ---
 var rdfcOwnerDid = "did:key:z6MkRdfcOwner";
 var rdfcDelegateDid = "did:key:z6MkRdfcDelegate";
 rdfcDidProvider.GenerateAndRegisterKeyPair(rdfcOwnerDid);
@@ -630,19 +629,10 @@ rdfcInvocation.Proof = await rdfcSigningService.SignInvocationAsync(rdfcInvocati
 var rdfcInvocationValid = await rdfcVerificationService.VerifyInvocationAsync(rdfcInvocation, rdfcDelegated);
 Console.WriteLine($"RDFC-1.0 Invocation Valid: {rdfcInvocationValid}");
 
-// --- Compare: show that JCS and RDFC-1.0 produce different proofs ---
-Console.WriteLine("\nComparing JCS vs RDFC-1.0 canonicalization:");
-
-var jcsCanonicalizer = new JcsDocumentCanonicalizer();
+// Show the canonical N-Quads form the proof is computed over.
 var rdfcCanonicalizer = new RdfcDocumentCanonicalizer();
-
-// Canonicalize the same root capability with both methods
-var jcsBytes = jcsCanonicalizer.Canonicalize(rdfcRoot);
 var rdfcBytes = rdfcCanonicalizer.Canonicalize(rdfcRoot);
-
-Console.WriteLine($"  JCS output size:      {jcsBytes.Length} bytes (compact JSON)");
-Console.WriteLine($"  RDFC-1.0 output size: {rdfcBytes.Length} bytes (N-Quads)");
-Console.WriteLine($"  Same output:          {jcsBytes.SequenceEqual(rdfcBytes)} (expected: False)");
+Console.WriteLine($"RDFC-1.0 canonical N-Quads size: {rdfcBytes.Length} bytes");
 
 // ===================================================
 // Example 11: Single vs Multiple Controllers

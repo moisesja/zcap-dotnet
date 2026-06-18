@@ -6,6 +6,6 @@
          recompile; NetDid.Core.Crypto types moved to NetCrypto) but WIRE-COMPATIBLE — the
          Ed25519Signature2020 / EcdsaSecp256r1Signature2019 proof bytes are unchanged, so
          capabilities issued by 3.x still verify. -->
-    <ZcapLdVersion>3.5.0</ZcapLdVersion>
+    <ZcapLdVersion>4.0.0</ZcapLdVersion>
   </PropertyGroup>
 </Project>

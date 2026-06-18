@@ -21,31 +21,7 @@ public class RdfcCanonicalizeIntegrationTests
     }
 
     [Fact]
-    public void RdfcCanonicalizer_ProducesDifferentOutputThanJcs()
-    {
-        // A ZCAP-LD capability has @context, making it valid JSON-LD
-        var capability = new Capability
-        {
-            Context = new object[] { "https://w3id.org/zcap/v1" },
-            Id = "urn:zcap:root:https%3A%2F%2Fexample.com%2Ffoo",
-            Controller = "did:key:example",
-            InvocationTarget = "https://example.com/foo"
-        };
-
-        var jcs = new JcsDocumentCanonicalizer();
-        var rdfc = new RdfcDocumentCanonicalizer();
-
-        var jcsBytes = jcs.Canonicalize(capability);
-        var rdfcBytes = rdfc.Canonicalize(capability);
-
-        // Different canonical representations
-        jcsBytes.Should().NotEqual(rdfcBytes);
-        jcsBytes.Length.Should().BeGreaterThan(0);
-        rdfcBytes.Length.Should().BeGreaterThan(0);
-    }
-
-    [Fact]
-    public void ProofSigningPayloadBuilder_WithJcsCanonicalizer_ProducesExpectedOutput()
+    public void ProofSigningPayloadBuilder_RdfcProducesHashConcatPayload()
     {
         var capability = new Capability
         {
@@ -65,45 +41,14 @@ public class RdfcCanonicalizeIntegrationTests
             CapabilityChain = new object[] { "urn:zcap:root:https%3A%2F%2Fexample.com%2Ffoo" }
         };
 
-        var jcs = new JcsDocumentCanonicalizer();
-
-        // Default (no canonicalizer) should match explicit JCS
-        var defaultBytes = ProofSigningPayloadBuilder.CanonicalizeCapabilityPayload(capability, proof);
-        var jcsBytes = ProofSigningPayloadBuilder.CanonicalizeCapabilityPayload(capability, proof, jcs);
-
-        defaultBytes.Should().Equal(jcsBytes);
-    }
-
-    [Fact]
-    public void ProofSigningPayloadBuilder_RdfcProducesDifferentPayloadThanJcs()
-    {
-        var capability = new Capability
-        {
-            Context = new object[] { "https://w3id.org/zcap/v1", "https://w3id.org/security/suites/ed25519-2020/v1" },
-            Id = "urn:uuid:test-cap",
-            ParentCapability = "urn:zcap:root:https%3A%2F%2Fexample.com%2Ffoo",
-            Controller = "did:key:example",
-            InvocationTarget = "https://example.com/foo"
-        };
-
-        var proof = new Proof
-        {
-            Type = "Ed25519Signature2020",
-            Created = "2024-01-01T00:00:00.000000Z",
-            ProofPurpose = "capabilityDelegation",
-            VerificationMethod = "did:key:example#key-1",
-            CapabilityChain = new object[] { "urn:zcap:root:https%3A%2F%2Fexample.com%2Ffoo" }
-        };
-
-        var jcs = new JcsDocumentCanonicalizer();
         var rdfc = new RdfcDocumentCanonicalizer();
 
-        var jcsBytes = ProofSigningPayloadBuilder.CanonicalizeCapabilityPayload(capability, proof, jcs);
+        // RDFC-1.0 signing payload = SHA-256(proofOptions) || SHA-256(document) = 64 bytes.
         var rdfcBytes = ProofSigningPayloadBuilder.CanonicalizeCapabilityPayload(capability, proof, rdfc);
+        var defaultBytes = ProofSigningPayloadBuilder.CanonicalizeCapabilityPayload(capability, proof);
 
-        // RDFC-1.0 produces SHA-256(proofOptions) || SHA-256(document) = 64 bytes
         rdfcBytes.Length.Should().Be(64);
-        jcsBytes.Should().NotEqual(rdfcBytes);
+        defaultBytes.Should().Equal(rdfcBytes); // the default canonicalizer is RDFC-1.0
     }
 
     [Fact]
