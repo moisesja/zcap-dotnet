@@ -84,22 +84,4 @@ public class RdfcDocumentCanonicalizerTests
         result.Length.Should().BeGreaterThan(0);
     }
 
-    [Fact]
-    public void Canonicalize_DiffersFromJcs()
-    {
-        // Same document should produce different canonical forms for JCS vs RDFC-1.0
-        var jsonLd = new Dictionary<string, object>
-        {
-            ["@context"] = "https://w3id.org/zcap/v1",
-            ["id"] = "urn:zcap:root:https%3A%2F%2Fexample.com%2Ffoo",
-            ["controller"] = "did:key:example",
-            ["invocationTarget"] = "https://example.com/foo"
-        };
-
-        var rdfcResult = _canonicalizer.Canonicalize(jsonLd);
-        var jcsResult = new JcsDocumentCanonicalizer().Canonicalize(jsonLd);
-
-        // RDFC-1.0 produces N-Quads, JCS produces compact JSON — they should differ
-        rdfcResult.Should().NotEqual(jcsResult);
-    }
 }

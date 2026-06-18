@@ -81,32 +81,4 @@ public class MultibaseCodecTests
         act.Should().Throw<ArgumentException>();
     }
 
-    [Fact]
-    public void JcsCanonicalizer_ShouldProduceDeterministicOutput()
-    {
-        var document = new
-        {
-            id = "urn:uuid:test",
-            controller = "did:key:example",
-            invocationTarget = "https://example.com/foo"
-        };
-
-        var canonicalizer = new JcsDocumentCanonicalizer();
-        var canonical1 = canonicalizer.Canonicalize(document);
-        var canonical2 = canonicalizer.Canonicalize(document);
-
-        canonical1.Should().Equal(canonical2);
-    }
-
-    [Fact]
-    public void CanonicalizeDocument_WithDifferentPropertyOrder_ShouldProduceSameOutput()
-    {
-        var json1 = """{"id":"urn:uuid:test","controller":"did:key:example"}""";
-        var json2 = """{"controller":"did:key:example","id":"urn:uuid:test"}""";
-
-        var canonical1 = JsonCanonicalizer.CanonicalizeString(json1);
-        var canonical2 = JsonCanonicalizer.CanonicalizeString(json2);
-
-        canonical1.Should().Equal(canonical2);
-    }
 }

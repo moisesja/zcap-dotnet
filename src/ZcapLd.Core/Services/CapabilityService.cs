@@ -1,4 +1,5 @@
 using System.Text.Json;
+using ZcapLd.Core.Cryptography;
 using ZcapLd.Core.Models;
 
 namespace ZcapLd.Core.Services;
@@ -45,8 +46,10 @@ public class CapabilityService : ICapabilityService
             throw new ArgumentException("InvocationTarget must be a valid absolute URI", nameof(invocationTarget));
         }
 
-        // Root capability ID format per spec: urn:zcap:root:${encodeURIComponent(invocationTarget)}
-        var encodedTarget = Uri.EscapeDataString(invocationTarget);
+        // Root capability ID format per spec: urn:zcap:root:${encodeURIComponent(invocationTarget)}.
+        // Use encodeURIComponent-exact encoding (NOT Uri.EscapeDataString, which over-escapes
+        // ! ' ( ) *) so the id is byte-identical to what @digitalbazaar/zcap derives.
+        var encodedTarget = UriEncoding.EncodeUriComponent(invocationTarget);
         var rootId = $"urn:zcap:root:{encodedTarget}";
 
         var capability = new Capability
@@ -310,9 +313,19 @@ public class CapabilityService : ICapabilityService
     /// </summary>
     private void ValidateAttenuation(Capability parentCapability, string[] allowedActions, DateTime? expires)
     {
-        // Validate allowed actions (child must not add actions not in parent)
+        // Validate allowed actions (child must not add actions not in parent). When the parent
+        // restricts actions, the child MUST specify a non-empty subset — omitting allowedAction
+        // would widen authority back to "any action" (the omit-to-widen bypass). Mirrors the
+        // verifier-side attenuation check and @digitalbazaar/zcap's hasValidAllowedAction.
         if (parentCapability.AllowedAction != null && parentCapability.AllowedAction.Length > 0)
         {
+            if (allowedActions is null || allowedActions.Length == 0)
+            {
+                throw new InvalidOperationException(
+                    "A delegated capability must specify allowedAction (a non-empty subset of the " +
+                    "parent's) when the parent restricts actions. Omitting it would expand authority.");
+            }
+
             foreach (var action in allowedActions)
             {
                 if (!parentCapability.AllowedAction.Contains(action))

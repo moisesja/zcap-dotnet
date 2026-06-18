@@ -25,52 +25,26 @@ internal sealed class LegacyProofCrypto
 {
     private const string ZcapContext = "https://w3id.org/zcap/v1";
 
-    /// <summary>RFC 8785 JSON Canonicalization Scheme — the default.</summary>
-    public const string JcsCanonicalization = "JCS";
-
-    /// <summary>W3C RDF Dataset Canonicalization (RDFC-1.0).</summary>
-    public const string RdfcCanonicalization = "RDFC-1.0";
-
-    /// <summary>
-    /// Validates a caller-supplied canonicalization method against the supported set
-    /// (<see cref="JcsCanonicalization"/> / <see cref="RdfcCanonicalization"/>), returning it on
-    /// success. Fails fast at construction so a typo (e.g. <c>"rdfc-1.0"</c>) cannot silently fall
-    /// through to JCS in <see cref="Resolve"/> and hand the consumer the wrong algorithm.
-    /// </summary>
-    public static string ValidateCanonicalizationMethod(string canonicalizationMethod)
-    {
-        ArgumentNullException.ThrowIfNull(canonicalizationMethod);
-        if (canonicalizationMethod is not (JcsCanonicalization or RdfcCanonicalization))
-        {
-            throw new ArgumentException(
-                $"Unsupported canonicalization method '{canonicalizationMethod}'. " +
-                $"Expected \"{JcsCanonicalization}\" or \"{RdfcCanonicalization}\" (case-sensitive).",
-                nameof(canonicalizationMethod));
-        }
-
-        return canonicalizationMethod;
-    }
-
-    // RDFC canonicalizer wired with zcap's offline context loader (serves zcap/v1 + ed25519-2020/v1),
-    // used by the RDFC variant and the RDFC verify fallback. Shared, immutable, thread-safe.
+    // RDFC canonicalizer wired with zcap's offline context loader (serves zcap/v1 + ed25519-2020/v1).
+    // RDFC-1.0 (W3C RDF Dataset Canonicalization) is the ONLY canonicalization zcap supports — it is
+    // what makes proofs interoperable with @digitalbazaar/zcap. Shared, immutable, thread-safe.
     private static readonly DataProofsRdfc.RdfcDocumentCanonicalizer RdfCanonicalizer =
         new(RdfcContextDocumentLoader.Instance);
 
-    // Suites are immutable + thread-safe; cache per (proofType, canonicalization) so the RDFC
-    // variant's canonicalizer is built once.
-    private readonly ConcurrentDictionary<(string ProofType, LegacyCanonicalization Canon), ICryptosuite> _suites = new();
+    // Suites are immutable + thread-safe; cache per proofType so each suite's canonicalizer is built once.
+    private readonly ConcurrentDictionary<string, ICryptosuite> _suites = new();
 
     /// <summary>
     /// Signs <paramref name="documentWithoutProof"/> under <paramref name="proofOptions"/> via the
     /// legacy suite for the proof's type, returning the base58-btc multibase <c>proofValue</c>.
     /// </summary>
     public async Task<string> CreateProofValueAsync(
-        object documentWithoutProof, Proof proofOptions, ISigner signer, string canonicalizationMethod)
+        object documentWithoutProof, Proof proofOptions, ISigner signer)
     {
-        var suite = Resolve(proofOptions.Type, canonicalizationMethod)
+        var suite = Resolve(proofOptions.Type)
             ?? throw new CryptographicException($"No legacy cryptosuite for proof type: {proofOptions.Type}");
 
-        var document = BuildDocumentElement(documentWithoutProof, canonicalizationMethod);
+        var document = BuildDocumentElement(documentWithoutProof);
         var diProofOptions = ToDataIntegrityProof(proofOptions);
 
         var proof = await suite.CreateProofAsync(document, diProofOptions, signer).ConfigureAwait(false);
@@ -84,9 +58,9 @@ internal sealed class LegacyProofCrypto
     /// failure (never throws for invalid input — mirrors the prior <c>suite.Verify</c> contract).
     /// </summary>
     public bool Verify(
-        object documentWithoutProof, Proof proof, ResolvedKey resolvedKey, string canonicalizationMethod)
+        object documentWithoutProof, Proof proof, ResolvedKey resolvedKey)
     {
-        var suite = Resolve(proof.Type, canonicalizationMethod);
+        var suite = Resolve(proof.Type);
         if (suite is null)
         {
             return false;
@@ -104,38 +78,34 @@ internal sealed class LegacyProofCrypto
             return false;
         }
 
-        var document = BuildDocumentElement(documentWithoutProof, canonicalizationMethod);
+        var document = BuildDocumentElement(documentWithoutProof);
         var diProof = ToDataIntegrityProof(proof);
         return suite.VerifyProof(document, diProof, publicKey).Verified;
     }
 
-    private ICryptosuite? Resolve(string? proofType, string canonicalizationMethod)
+    private ICryptosuite? Resolve(string? proofType)
     {
         if (string.IsNullOrEmpty(proofType))
         {
             return null;
         }
 
-        var canon = string.Equals(canonicalizationMethod, RdfcCanonicalization, StringComparison.Ordinal)
-            ? LegacyCanonicalization.Rdfc
-            : LegacyCanonicalization.Jcs;
-
         return proofType switch
         {
             Ed25519Signature2020Cryptosuite.ProofType or EcdsaSecp256r1Signature2019Cryptosuite.ProofType
-                => _suites.GetOrAdd((proofType, canon), static k => Create(k.ProofType, k.Canon)),
+                => _suites.GetOrAdd(proofType, static t => Create(t)),
             _ => null,
         };
     }
 
-    private static ICryptosuite Create(string proofType, LegacyCanonicalization canon)
+    private static ICryptosuite Create(string proofType)
         => proofType == Ed25519Signature2020Cryptosuite.ProofType
-            ? new Ed25519Signature2020Cryptosuite(canon, RdfCanonicalizer)
-            : new EcdsaSecp256r1Signature2019Cryptosuite(canon, RdfCanonicalizer);
+            ? new Ed25519Signature2020Cryptosuite(LegacyCanonicalization.Rdfc, RdfCanonicalizer)
+            : new EcdsaSecp256r1Signature2019Cryptosuite(LegacyCanonicalization.Rdfc, RdfCanonicalizer);
 
-    // Serializes the document with zcap's JSON options (the exact bytes the prior payload builder
-    // fed to canonicalization). For RDFC over a context-less document (invocations), inject the
-    // ZCAP-LD context so JSON-LD expansion matches the prior RdfcInvocation path.
+    // Serializes the document with zcap's JSON options. RDFC-1.0 canonicalization is always used;
+    // for a context-less document (invocations) inject the ZCAP-LD context so JSON-LD expansion
+    // produces the right N-Quads.
     //
     // Invariant: the only zcap documents that arrive here with an "@context" already present are
     // Capabilities, and zcap controls the model so that context is always zcap/v1 — so when the
@@ -144,12 +114,11 @@ internal sealed class LegacyProofCrypto
     // context case. A foreign/non-zcap "@context" cannot occur for a model-built document; if the
     // model ever gains one, this guard must be revisited (a different context would make RDFC
     // expansion silently produce the wrong N-Quads).
-    private static JsonElement BuildDocumentElement(object documentWithoutProof, string canonicalizationMethod)
+    private static JsonElement BuildDocumentElement(object documentWithoutProof)
     {
         var element = JsonSerializer.SerializeToElement(documentWithoutProof, ZcapJsonOptions.Default);
 
-        if (string.Equals(canonicalizationMethod, RdfcCanonicalization, StringComparison.Ordinal)
-            && element.ValueKind == JsonValueKind.Object
+        if (element.ValueKind == JsonValueKind.Object
             && !element.TryGetProperty("@context", out _))
         {
             var node = JsonObject.Create(element)!;

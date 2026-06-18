@@ -41,6 +41,43 @@ public class VerificationServiceTests
         => TestRoots.CreateAndRegisterRootAsync(
             _capabilityService, _didProvider, controller, invocationTarget, allowedActions, expires, caveats);
 
+    [Fact]
+    public async Task VerifyChain_ChildOmitsAllowedActionUnderRestrictingParent_ReturnsFalse()
+    {
+        // Omit-to-widen (verify side, the security-critical gate): a delegated child that OMITS
+        // allowedAction under a parent that restricts it would widen authority back to "any action".
+        // The verifier MUST reject it (matches @digitalbazaar/zcap hasValidAllowedAction).
+        // CapabilityService blocks this at create time, so we hand-build the non-compliant child and
+        // sign it directly to exercise the verifier's attenuation gate.
+        const string c0 = "did:key:z6MkOmitRoot";
+        const string c1 = "did:key:z6MkOmitMid";
+        const string c2 = "did:key:z6MkOmitLeaf";
+        _didProvider.GenerateAndRegisterKeyPair(c0);
+        _didProvider.GenerateAndRegisterKeyPair(c1);
+        _didProvider.GenerateAndRegisterKeyPair(c2);
+
+        var root = await CreateAndRegisterRootAsync(c0, "https://example.com/omit", new[] { "read", "write" });
+        var level1 = await _capabilityService.DelegateCapabilityAsync(
+            root, c1, new[] { "read" }, DateTime.UtcNow.AddDays(30));
+
+        // Hand-built level-2 that OMITS allowedAction (would widen back to all actions), validly signed.
+        var level2 = new Capability
+        {
+            Context = new object[] { "https://w3id.org/zcap/v1", "https://w3id.org/security/suites/ed25519-2020/v1" },
+            Id = "urn:uuid:omit-leaf",
+            Controller = c2,
+            InvocationTarget = level1.InvocationTarget,
+            Expires = ZcapTimestamps.Format(DateTime.UtcNow.AddDays(20)),
+            ParentCapability = level1.Id,
+            // AllowedAction intentionally omitted.
+        };
+        level2.Proof = await _signingService.SignCapabilityAsync(
+            level2, c1, "capabilityDelegation", new object[] { root.Id, level1 });
+
+        (await _verificationService.VerifyCapabilityChainAsync(level2)).Should().BeFalse(
+            "a validly-signed child that omits allowedAction under a restricting parent must be rejected (omit-to-widen)");
+    }
+
     #region Capability Proof Verification Tests
 
     [Fact]
@@ -1581,17 +1618,23 @@ public class VerificationServiceTests
     }
 
     [Fact]
-    public async Task SignedRevoke_TamperedReason_FailsSignature_ReturnsFalse()
+    public async Task SignedRevoke_TamperedReason_IsInformationalUnderRdfc_ReturnsTrue()
     {
-        // The reason is part of the signed bytes — flipping it after signing invalidates the proof.
+        // Under RDFC-1.0 (the only canonicalization ZCAP-LD supports), the free-form revocation
+        // `reason`/`metadata` are NOT defined in any JSON-LD context, so they are dropped from the
+        // canonical N-Quads and are therefore INFORMATIONAL — not signature-bound. The bound fields
+        // (which capability, the `revoke` action, the target) and the revoker's authentication (key
+        // possession) are unaffected, so altering only the reason does not invalidate an otherwise-valid
+        // revocation. Bound-field integrity is covered by SignedRevoke_WrongCapabilityBinding /
+        // _WrongCapabilityAction / _ProofBodyMismatch.
         var (_, delegated) = await BuildDelegatedChainAsync("did:key:z6MkTamperRoot", "did:key:z6MkTamperChild");
 
         var signed = await _signingService.SignRevocationAsync(
             delegated.Id, "did:key:z6MkTamperRoot", delegated.InvocationTarget, reason: "legitimate");
         signed.Proof!.AdditionalProperties![Proof.RevocationReasonField] =
-            JsonSerializer.SerializeToElement("forged-reason");
+            JsonSerializer.SerializeToElement("changed-reason");
 
-        (await _verificationService.RevokeCapabilityAsync(delegated, signed)).Should().BeFalse();
+        (await _verificationService.RevokeCapabilityAsync(delegated, signed)).Should().BeTrue();
     }
 
     [Fact]

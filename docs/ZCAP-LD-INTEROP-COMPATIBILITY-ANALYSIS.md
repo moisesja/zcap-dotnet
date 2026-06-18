@@ -124,9 +124,11 @@ Evidence: [SigningService.cs:24-27](../src/ZcapLd.Core/Services/SigningService.c
 
 Ordered by interop leverage × correctness; effort in rough engineer-days (S ≈ <1, M ≈ 1–3, L ≈ 3–5).
 
-1. **Default to RDFC-1.0 for interop deployments (or document JCS as private).** *Effort: S — wiring already exists.* Flip the `SigningService`/`VerificationService`/DI defaults (or surface a single "interop mode" switch) and add a cross-stack capability golden vector verified by `@digitalbazaar/zcap`. Unblocks all outbound capability interop. **Highest leverage.**
-2. **Fix the `allowedAction` omit-to-widen MUST violation.** *Effort: S.* Reject a null/empty child `allowedAction` when the parent restricts; mirror at create time. Closes the one outright spec noncompliance.
-3. **Fix root-id encoding to match `encodeURIComponent`.** *Effort: S.* Post-process `Uri.EscapeDataString` to un-escape `%21 %27 %28 %29 %2A`; add a golden vector with `! ' ( ) * ~`.
+> **Status (4.0.0): items 1–3 below are IMPLEMENTED.** JCS was removed entirely (RDFC-1.0 is the only canonicalization), the `allowedAction` omit-to-widen bypass is closed on both the verify and create paths, and the root-id encoder now matches `encodeURIComponent`. See `CHANGELOG.md` (4.0.0) and the regression tests in `CapabilityServiceTests` / `VerificationServiceTests` / `ProofGoldenVectorTests`.
+
+1. ✅ **Done (4.0.0) — RDFC-1.0 is the only canonicalization.** Rather than flip a default, JCS support was removed outright: `SigningService`/`VerificationService` no longer take a `canonicalizationMethod`, `AddZcapRdfcCanonicalization()` is gone, and the live `interop/run-interop.sh` harness verifies cross-stack delegation against `@digitalbazaar/zcap`. **Highest leverage.**
+2. ✅ **Done (4.0.0) — `allowedAction` omit-to-widen MUST violation fixed.** A null/empty child `allowedAction` under a restricting parent is rejected on the verify path and at create time. Closes the one outright spec noncompliance.
+3. ✅ **Done (4.0.0) — root-id encoding matches `encodeURIComponent`.** `UriEncoding.EncodeUriComponent` un-escapes `%21 %27 %28 %29 %2A`; covered by a regression test using a target with `! ' ( ) * ~`.
 4. **Include the suite context in RDFC invocation proofOptions `@context`.** *Effort: S–M.* Add `ed25519-2020/v1`; add a cross-stack RDFC invocation golden vector.
 5. **Add a digitalbazaar-compatible invocation mode (proof-on-application-document).** *Effort: M–L.* Sign an arbitrary application payload with an invocation proof carrying `capability`/`capabilityAction`/`invocationTarget` **only in the proof object**. Structural fix for cross-stack invocation; until then, document invocation interop as out of scope.
 6. **Tighten verify-path data-model strictness for db parity.** *Effort: S–M.* Fold into the verify path: root/delegated `@context` value checks; root `expires`/`allowedAction`/`caveat`/`AdditionalProperties` rejection (inside `ValidateRootCapabilityInvariants`).

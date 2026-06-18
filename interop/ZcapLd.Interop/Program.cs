@@ -70,8 +70,8 @@ async Task<int> GenerateAsync(string rootOut, string delegatedOut)
     var rootDid = provider.RegisterDeterministicDidKey(Seed(0x11));
     var delegateDid = provider.RegisterDeterministicDidKey(Seed(0x22));
 
-    // RDFC-1.0 everywhere — this is the cross-stack-interoperable canonicalization.
-    var signing = new SigningService(provider, provider, "RDFC-1.0");
+    // RDFC-1.0 is the only canonicalization — the cross-stack-interoperable one.
+    var signing = new SigningService(provider, provider);
     var caps = new CapabilityService(signing);
 
     var root = await caps.CreateRootCapabilityAsync(rootDid, Target);
@@ -101,7 +101,7 @@ async Task<int> GenerateMultiAsync(string rootOut, string l1Out, string l2Out)
     var c1 = provider.RegisterDeterministicDidKey(Seed(0x22)); // mid (level-1 controller)
     var c2 = provider.RegisterDeterministicDidKey(Seed(0x33)); // leaf (level-2 controller)
 
-    var signing = new SigningService(provider, provider, "RDFC-1.0");
+    var signing = new SigningService(provider, provider);
     var caps = new CapabilityService(signing);
 
     var root = await caps.CreateRootCapabilityAsync(c0, Target);
@@ -135,8 +135,7 @@ async Task<int> VerifyAsync(string delegatedFile, string rootFile)
         provider,
         new CaveatProcessor(),
         new RevocationService(new InMemoryRevocationStore()),
-        new InMemoryNonceStore(),
-        canonicalizationMethod: "RDFC-1.0");
+        new InMemoryNonceStore());
 
     var result = await verifier.VerifyCapabilityChainDetailedAsync(delegated);
 

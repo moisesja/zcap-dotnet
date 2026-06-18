@@ -11,10 +11,9 @@ namespace ZcapLd.Core.Tests.Compliance;
 
 /// <summary>
 /// End-to-end signed-capability KNOWN-ANSWER vectors (Phase 0 of the NetCrypto/DataProofs
-/// migration — issue #108). Unlike <see cref="CrossLanguageJcsInteropTests"/>, which pins only
-/// the JCS signing <em>payload</em>, these lock the full signing stack output — canonicalization
+/// migration — issue #108). These lock the full signing stack output — RDFC-1.0 canonicalization
 /// → Ed25519 → base58-btc multibase — to an exact <c>proofValue</c> for a FIXED key and a FIXED
-/// <c>created</c>.
+/// <c>created</c>. RDFC-1.0 is the only canonicalization ZCAP-LD supports (the interop format).
 ///
 /// Why this matters: the migration swaps the raw-crypto provider from NetDid's
 /// <c>DefaultCryptoProvider</c> to NetCrypto's (Stage A), and later the canonicalizer/multibase to
@@ -81,13 +80,13 @@ public class ProofGoldenVectorTests
         proof.Created.Should().Be(ExpectedCreated);
         proof.VerificationMethod.Should().Be($"{did}#{kp.MultibasePublicKey}");
 
-        // 2. The exact signature — the byte-compatibility lock for Stage A / Stage B.
+        // 2. The exact signature — the byte-compatibility lock for the RDFC-1.0 signing stack.
         proof.ProofValue.Should().Be(
-            "z5vKNNJVDziWyjoSSxFCNXJ6ZL4FSfrA7TbWDwhkBmkHCgN4448kTMJTUoK3pW35dNrGbyWP1moBSCb4nsYAc5fx8",
-            "the end-to-end Ed25519 signature over the JCS payload must be byte-identical before and " +
-            "after the NetDid→NetCrypto / NetCid swaps — a changed value means a swap broke the wire format");
+            "zaBYygkT813o6D6LWvMvoougMwgcvNVUvfB1PKBhE54Q5EqyHENknRzBtsm4CQ6ofh9pTYH7whvJp7YWuwLLYqgG",
+            "the end-to-end Ed25519 signature over the RDFC-1.0 payload must be byte-stable — a changed " +
+            "value means a canonicalizer/crypto swap broke the wire format");
 
-        // 3. The golden is a REAL, valid signature over the exact JCS payload (not just a frozen string).
+        // 3. The golden is a REAL, valid signature over the exact RDFC-1.0 payload (not just a frozen string).
         var canonicalBytes = ProofSigningPayloadBuilder.CanonicalizeCapabilityPayload(
             ProofSigningPayloadBuilder.CloneCapabilityWithoutProof(capability),
             new Proof
@@ -102,7 +101,7 @@ public class ProofGoldenVectorTests
         var signature = MultibaseCodec.Decode(proof.ProofValue);
         new DefaultCryptoProvider()
             .Verify(KeyType.Ed25519, kp.PublicKey, canonicalBytes, signature)
-            .Should().BeTrue("the golden proofValue must verify against the public key over the JCS payload");
+            .Should().BeTrue("the golden proofValue must verify against the public key over the RDFC-1.0 payload");
 
         // Surface the canonical payload in test output for cross-stack diffing.
         _ = Encoding.UTF8.GetString(canonicalBytes);

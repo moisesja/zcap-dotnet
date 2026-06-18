@@ -9,21 +9,11 @@ using ZcapLd.Core.Models;
 namespace ZcapLd.Core.Tests.Compliance;
 
 /// <summary>
-/// Canonicalization KNOWN-ANSWER vectors (Phase 0 of issue #108). Stage B is complete (this PR):
-/// these now lock the two delegating implementations' behavior byte-for-byte against future
-/// changes, or previously-issued capabilities stop verifying:
-/// <list type="number">
-/// <item><description>The RDFC-1.0 document N-Quads and the hash-concat signing payload —
-/// <see cref="RdfcDocumentCanonicalizer"/> is now a thin adapter over
-/// <c>DataProofsDotnet.Rdfc.RdfcDocumentCanonicalizer</c> (also over dotNetRdf 3.5.1).</description></item>
-/// <item><description>The JCS present-but-null member SKIP — <see cref="JsonCanonicalizer"/> now
-/// delegates RFC 8785 canonicalization to <c>NetCid.JcsCanonicalizer</c> after a null-member
-/// strip. RFC 8785 has no skip-null rule, so NetCid emits <c>null</c> literally; this vector pins
-/// the strip-then-canonicalize behavior so that divergence is caught before it changes signed
-/// bytes for any wire field carrying an explicit null.</description></item>
-/// </list>
-/// If a vector here changes, a canonicalizer swap broke wire compatibility — investigate, do
-/// not "update the golden".
+/// Canonicalization KNOWN-ANSWER vector. RDFC-1.0 is the only canonicalization ZCAP-LD supports;
+/// this locks the <see cref="RdfcDocumentCanonicalizer"/> document N-Quads and the hash-concat
+/// signing payload byte-for-byte against future changes (the canonicalizer is a thin adapter over
+/// <c>DataProofsDotnet.Rdfc.RdfcDocumentCanonicalizer</c>). If the vector here changes, a
+/// canonicalizer swap broke wire compatibility — investigate, do not "update the golden".
 /// </summary>
 public class CanonicalizationGoldenVectorTests
 {
@@ -71,57 +61,5 @@ public class CanonicalizationGoldenVectorTests
             "1A9A00A5066EE02B0E3B3AAB2BA3E9E6B125FE876CC5C4EFA4C3100CCD039586",
             "the RDFC hash-concat signing payload (canonicalize doc + proofOptions, SHA-256 each, " +
             "concatenate) must be byte-identical after the Stage B canonicalizer swap");
-    }
-
-    [Fact(DisplayName = "Golden: JCS skips present-but-null members (diverges from NetCid JCS)")]
-    public void Jcs_PresentButNullMember_IsSkipped()
-    {
-        // A wire body carrying an explicit null unmodeled member alongside a non-null one.
-        const string OnWire = """
-        {
-          "@context": "https://w3id.org/zcap/v1",
-          "id": "urn:uuid:null-member",
-          "controller": "did:key:zC",
-          "invocationTarget": "https://example.com/r",
-          "extraPresent": "kept",
-          "extraNull": null
-        }
-        """;
-        var capability = JsonSerializer.Deserialize<Capability>(OnWire)!;
-        var proof = new Proof
-        {
-            Type = "Ed25519Signature2020",
-            Created = "2026-06-13T00:00:00.000000Z",
-            ProofPurpose = "capabilityDelegation",
-            VerificationMethod = "did:key:zX#zX",
-            CapabilityChain = new object[] { "urn:zcap:root:test" },
-            ProofValue = string.Empty,
-        };
-
-        var canonical = Encoding.UTF8.GetString(
-            ProofSigningPayloadBuilder.CanonicalizeCapabilityPayload(capability, proof));
-
-        const string Expected =
-            "{" +
-                "\"@context\":\"https://w3id.org/zcap/v1\"," +
-                "\"controller\":\"did:key:zC\"," +
-                "\"extraPresent\":\"kept\"," +
-                "\"id\":\"urn:uuid:null-member\"," +
-                "\"invocationTarget\":\"https://example.com/r\"," +
-                "\"proof\":{" +
-                    "\"capabilityChain\":[\"urn:zcap:root:test\"]," +
-                    "\"created\":\"2026-06-13T00:00:00.000000Z\"," +
-                    "\"proofPurpose\":\"capabilityDelegation\"," +
-                    "\"type\":\"Ed25519Signature2020\"," +
-                    "\"verificationMethod\":\"did:key:zX#zX\"" +
-                "}" +
-            "}";
-
-        canonical.Should().Be(Expected);
-        canonical.Should().Contain("\"extraPresent\":\"kept\"");
-        canonical.Should().NotContain("extraNull",
-            "zcap's JcsCanonicalizer skips present-but-null members; NetCid.JcsCanonicalizer emits " +
-            "them as `null` (RFC 8785 has no skip-null rule). Stage B must preserve this skip or the " +
-            "signed bytes change for any wire field carrying an explicit null.");
     }
 }

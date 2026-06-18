@@ -14,15 +14,17 @@ namespace ZcapLd.Core.Cryptography;
 /// relies on this exact shape — any wrapper or hand-picked proof-field whitelist
 /// breaks signature compatibility silently.
 ///
-/// Two canonicalization strategies are supported:
-/// - JCS: serialize the flat verification payload through JSON-then-canonicalize
-///   (RFC 8785 — alphabetically sorted keys, no whitespace).
-/// - RDFC-1.0: canonicalize document and proof options separately, SHA-256 each,
-///   concatenate (per W3C Data Integrity spec).
+/// Canonicalization is RDFC-1.0 (W3C RDF Dataset Canonicalization): canonicalize the document and
+/// the proof options separately, SHA-256 each, concatenate (per W3C Data Integrity). This is the
+/// only canonicalization ZCAP-LD supports and what makes proofs verify under @digitalbazaar/zcap.
+///
+/// NOTE: the <c>Canonicalize*</c> methods here are a test oracle (golden vectors / cross-stack
+/// diffing); the production signing input is built inside <see cref="LegacyProofCrypto"/> via the
+/// DataProofs cryptosuites. Only the <c>Clone*</c> helpers are on the production path.
 /// </summary>
 internal static class ProofSigningPayloadBuilder
 {
-    private static readonly JcsDocumentCanonicalizer DefaultJcs = new();
+    private static readonly RdfcDocumentCanonicalizer DefaultRdfc = new();
 
     /// <summary>
     /// Sign-time and verifier-time JSON options live in <see cref="ZcapJsonOptions.Default"/>
@@ -73,14 +75,8 @@ internal static class ProofSigningPayloadBuilder
         ArgumentNullException.ThrowIfNull(capabilityWithoutProof);
         ArgumentNullException.ThrowIfNull(proof);
 
-        canonicalizer ??= DefaultJcs;
-
-        if (canonicalizer.Method == "RDFC-1.0")
-        {
-            return CanonicalizeCapabilityRdfc(capabilityWithoutProof, proof, canonicalizer);
-        }
-
-        return CanonicalizeCapabilityJcs(capabilityWithoutProof, proof, canonicalizer);
+        canonicalizer ??= DefaultRdfc;
+        return CanonicalizeCapabilityRdfc(capabilityWithoutProof, proof, canonicalizer);
     }
 
     public static byte[] CanonicalizeInvocationPayload(
@@ -91,32 +87,8 @@ internal static class ProofSigningPayloadBuilder
         ArgumentNullException.ThrowIfNull(invocationWithoutProof);
         ArgumentNullException.ThrowIfNull(proof);
 
-        canonicalizer ??= DefaultJcs;
-
-        if (canonicalizer.Method == "RDFC-1.0")
-        {
-            return CanonicalizeInvocationRdfc(invocationWithoutProof, proof, canonicalizer);
-        }
-
-        return CanonicalizeInvocationJcs(invocationWithoutProof, proof, canonicalizer);
-    }
-
-    // ─── JCS — W3C Data Integrity flat shape ───────────────────────────
-
-    private static byte[] CanonicalizeCapabilityJcs(
-        Capability capabilityWithoutProof, Proof proof, IDocumentCanonicalizer canonicalizer)
-    {
-        var doc = ToFieldDictionary(capabilityWithoutProof);
-        doc["proof"] = ToFieldDictionary(proof, exclude: "proofValue");
-        return canonicalizer.Canonicalize(doc);
-    }
-
-    private static byte[] CanonicalizeInvocationJcs(
-        Invocation invocationWithoutProof, Proof proof, IDocumentCanonicalizer canonicalizer)
-    {
-        var doc = ToFieldDictionary(invocationWithoutProof);
-        doc["proof"] = ToFieldDictionary(proof, exclude: "proofValue");
-        return canonicalizer.Canonicalize(doc);
+        canonicalizer ??= DefaultRdfc;
+        return CanonicalizeInvocationRdfc(invocationWithoutProof, proof, canonicalizer);
     }
 
     // ─── RDFC-1.0 — W3C Data Integrity hash-concat shape ───────────────

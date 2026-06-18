@@ -42,6 +42,44 @@ public class CapabilityServiceTests
     }
 
     [Fact]
+    public async Task CreateRootCapability_EncodesInvocationTargetLikeEncodeUriComponent()
+    {
+        // The root id MUST be urn:zcap:root:${encodeURIComponent(invocationTarget)} byte-for-byte with
+        // @digitalbazaar/zcap. JS encodeURIComponent leaves ! ' ( ) * ~ unescaped; .NET's
+        // Uri.EscapeDataString escapes the first five, which would diverge. This locks the
+        // encodeURIComponent-exact encoding for a target containing all of them.
+        var target = "https://example.com/a(b)*!'c~d";
+
+        var root = await _capabilityService.CreateRootCapabilityAsync("did:key:z6MkExample", target);
+
+        root.Id.Should().Be("urn:zcap:root:https%3A%2F%2Fexample.com%2Fa(b)*!'c~d");
+    }
+
+    [Fact]
+    public async Task DelegateCapability_OmitsAllowedActionUnderRestrictingParent_Throws()
+    {
+        // Omit-to-widen (create side): a child that omits allowedAction under a parent that restricts
+        // actions would widen authority back to "any action". Creation MUST reject it (matches the
+        // verifier and @digitalbazaar/zcap).
+        const string c0 = "did:key:z6MkCreateOmitRoot";
+        const string c1 = "did:key:z6MkCreateOmitMid";
+        const string c2 = "did:key:z6MkCreateOmitLeaf";
+        _didProvider.GenerateAndRegisterKeyPair(c0);
+        _didProvider.GenerateAndRegisterKeyPair(c1);
+
+        var root = await _capabilityService.CreateRootCapabilityAsync(c0, "https://example.com/omit");
+        // Root carries no allowedAction; level-1 restricts to ["read"].
+        var level1 = await _capabilityService.DelegateCapabilityAsync(
+            root, c1, new[] { "read" }, DateTime.UtcNow.AddDays(30));
+
+        // Delegating level-1 -> c2 with EMPTY allowedActions under a restricting parent must throw.
+        var act = async () => await _capabilityService.DelegateCapabilityAsync(
+            level1, c2, Array.Empty<string>(), DateTime.UtcNow.AddDays(10));
+
+        await act.Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    [Fact]
     public async Task CreateRootCapability_ViaInterface_AllowedActionsOptional()
     {
         // Issue #66: the ICapabilityService signature now matches the implementation
