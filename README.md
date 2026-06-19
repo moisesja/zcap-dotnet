@@ -328,3 +328,11 @@ dotnet pack src/ZcapLd.AspNetCore/ZcapLd.AspNetCore.csproj -c Release
 - Canonicalization is RDFC-1.0 (W3C RDF Dataset Canonicalization) only — the format that interoperates with `@digitalbazaar/zcap`. JCS support was removed in 4.0.0; there is no canonicalization option. Known W3C JSON-LD contexts are embedded for offline operation.
 - Cryptography is provided by [NetCrypto](https://www.nuget.org/packages/NetCrypto) (Ed25519 / P-256 sign + verify), reached via [NetDid](https://www.nuget.org/packages/NetDid.Core) 2.0.0 for W3C-compliant did:key resolution; multibase via [NetCid](https://www.nuget.org/packages/NetCid); RDFC-1.0 via [DataProofsDotnet.Rdfc](https://www.nuget.org/packages/DataProofsDotnet.Rdfc).
 - Ed25519 and P-256 are the supported signature suites; cryptography is delegated to NetCrypto (via DataProofs), not extended through a zcap API.
+
+### Cross-stack interop caveats (`@digitalbazaar/zcap`)
+
+Capability **delegation** interoperates with `@digitalbazaar/zcap` (proven live by [`interop/`](interop/README.md)). Two things to know for cross-stack use:
+
+- **Use `Ed25519Signature2020`.** P-256 (`EcdsaSecp256r1Signature2019`) has no `@digitalbazaar/zcap` counterpart — it ships/tests Ed25519 only and serves no `ecdsa-2019/v1` context, so a P-256 capability will not verify there.
+- **Custom caveats are not enforced cross-stack.** `@digitalbazaar/zcap` has no generic caveat engine, so a capability whose security depends on `UsageCountCaveat`/`ValidWhileTrueCaveat` verifies there with the caveat **silently un-enforced**. For cross-stack security guarantees, rely only on `expires`/`allowedAction`/`invocationTarget`.
+- **Invocation** interop is not yet supported (tracked in the roadmap / issue #117) — delegation only, today.

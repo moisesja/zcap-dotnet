@@ -52,8 +52,15 @@ public class ExpirationCaveat : Caveat
 }
 
 /// <summary>
-/// Caveat that limits the number of times a capability can be used
+/// Caveat that limits the number of times a capability can be used.
 /// </summary>
+/// <remarks>
+/// CROSS-STACK: <c>@digitalbazaar/zcap</c> has no generic caveat engine — it enforces only
+/// <c>expires</c>, <c>allowedAction</c> subsetting, and <c>invocationTarget</c> attenuation. A
+/// capability whose security depends on this caveat verifies in <c>@digitalbazaar/zcap</c> with the
+/// caveat <b>silently un-enforced</b>. For cross-stack security guarantees, rely only on
+/// <c>expires</c>/<c>allowedAction</c>/<c>invocationTarget</c>.
+/// </remarks>
 public class UsageCountCaveat : Caveat
 {
     /// <summary>

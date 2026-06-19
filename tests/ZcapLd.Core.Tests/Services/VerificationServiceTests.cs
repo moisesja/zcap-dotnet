@@ -78,6 +78,76 @@ public class VerificationServiceTests
             "a validly-signed child that omits allowedAction under a restricting parent must be rejected (omit-to-widen)");
     }
 
+    [Fact]
+    public async Task VerifyChain_ResolvedRootWithExpires_ReturnsFalse()
+    {
+        // R-ROOT-NOEXTRA (MUST NOT) on the verify path: a resolved root carrying `expires` (or any
+        // field beyond @context/id/controller/invocationTarget) must be rejected. The create path
+        // already enforces this; the crypto verify path did not until this change.
+        const string c0 = "did:key:z6MkRootExpiresOwner";
+        const string c1 = "did:key:z6MkRootExpiresChild";
+        _didProvider.GenerateAndRegisterKeyPair(c0);
+        _didProvider.GenerateAndRegisterKeyPair(c1);
+
+        var root = await CreateAndRegisterRootAsync(c0, "https://example.com/root-expires", new[] { "read" });
+        var delegated = await _capabilityService.DelegateCapabilityAsync(
+            root, c1, new[] { "read" }, DateTime.UtcNow.AddDays(30));
+
+        // Tamper the (registered, resolver-returned) root so it carries a forbidden field.
+        root.Expires = ZcapTimestamps.Format(DateTime.UtcNow.AddDays(99));
+
+        (await _verificationService.VerifyCapabilityChainAsync(delegated)).Should().BeFalse(
+            "a resolved root that carries expires violates the root MUST-NOT-extra-fields invariant");
+    }
+
+    [Fact]
+    public async Task VerifyChain_ResolvedRootWithWrongContext_ReturnsFalse()
+    {
+        // R-CTX-1 (MUST) on the verify path: a root @context that is not the single string
+        // "https://w3id.org/zcap/v1" must be rejected.
+        const string c0 = "did:key:z6MkRootCtxOwner";
+        const string c1 = "did:key:z6MkRootCtxChild";
+        _didProvider.GenerateAndRegisterKeyPair(c0);
+        _didProvider.GenerateAndRegisterKeyPair(c1);
+
+        var root = await CreateAndRegisterRootAsync(c0, "https://example.com/root-ctx", new[] { "read" });
+        var delegated = await _capabilityService.DelegateCapabilityAsync(
+            root, c1, new[] { "read" }, DateTime.UtcNow.AddDays(30));
+
+        root.Context = new object[] { "https://example.com/not-zcap" };
+
+        (await _verificationService.VerifyCapabilityChainAsync(delegated)).Should().BeFalse(
+            "a resolved root whose @context is not the zcap/v1 string must be rejected");
+    }
+
+    [Fact]
+    public async Task VerifyChain_DelegatedWithWrongContextFirstEntry_ReturnsFalse()
+    {
+        // R-CTX-2 (MUST) on the verify path: a delegated zcap's @context MUST be an array beginning
+        // with "https://w3id.org/zcap/v1". Sign a valid delegated cap, then reorder its @context so
+        // the zcap-ld context is no longer first (both entries are known contexts, so this isolates
+        // the order check, not a load failure). The context gate runs before the signature gate, so
+        // it surfaces as MalformedCapability.
+        const string c0 = "did:key:z6MkDelegCtxOwner";
+        const string c1 = "did:key:z6MkDelegCtxChild";
+        _didProvider.GenerateAndRegisterKeyPair(c0);
+        _didProvider.GenerateAndRegisterKeyPair(c1);
+
+        var root = await CreateAndRegisterRootAsync(c0, "https://example.com/deleg-ctx", new[] { "read" });
+        var delegated = await _capabilityService.DelegateCapabilityAsync(
+            root, c1, new[] { "read" }, DateTime.UtcNow.AddDays(20));
+
+        // Reorder so the suite context is first and zcap/v1 is second — violates "[0] == zcap/v1".
+        delegated.Context = new object[]
+        {
+            "https://w3id.org/security/suites/ed25519-2020/v1",
+            "https://w3id.org/zcap/v1",
+        };
+
+        (await _verificationService.VerifyCapabilityChainAsync(delegated)).Should().BeFalse(
+            "a delegated capability whose @context does not begin with the zcap/v1 context must be rejected");
+    }
+
     #region Capability Proof Verification Tests
 
     [Fact]

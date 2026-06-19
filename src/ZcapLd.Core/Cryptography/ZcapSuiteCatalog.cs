@@ -24,6 +24,10 @@ internal static class ZcapSuiteCatalog
         "Ed25519VerificationKey2020",
         "https://w3id.org/security/suites/ed25519-2020/v1");
 
+    // CROSS-STACK: @digitalbazaar/zcap ships/tests Ed25519 only and serves no ecdsa-2019/v1 context,
+    // so a P-256 (EcdsaSecp256r1Signature2019) capability will NOT verify against an out-of-the-box
+    // @digitalbazaar/zcap deployment. Use Ed25519Signature2020 for guaranteed cross-stack interop.
+    // (Not a spec violation — ZCAP-LD is suite-neutral.)
     private static readonly ZcapSuiteInfo P256 = new(
         "EcdsaSecp256r1Signature2019",
         "EcdsaSecp256r1VerificationKey2019",
