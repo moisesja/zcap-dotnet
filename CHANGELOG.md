@@ -5,11 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [4.0.0] - Unreleased
+## [4.0.0] - 2026-06-19
 
 Delegates zcap's cryptography and canonicalization to the composable foundation (issue #108) and
 makes the wire format interoperable with the `@digitalbazaar/zcap` reference implementation.
-Includes everything in the (unreleased) 3.0.0 section below.
+Includes everything in the 3.0.0 section below (which was never released as a separate version).
 
 ### Added
 
@@ -68,7 +68,7 @@ Remediation of a multi-agent security + W3C ZCAP-LD compliance scan (28 confirme
 
 - **Capabilities issued by 3.x still verify — no re-delegation.** The `Ed25519Signature2020` / `EcdsaSecp256r1Signature2019` proof bytes are unchanged. A golden-vector suite (`tests/ZcapLd.Core.Tests/Compliance/ProofGoldenVectorTests`, `CanonicalizationGoldenVectorTests`) pins the deterministic `proofValue`, the RDFC N-Quads + hash-concat payload, and the JCS null-skip behavior byte-for-byte across the swaps.
 
-## [3.0.0] - Unreleased
+## [3.0.0] - Folded into 4.0.0 (never released separately)
 
 ### Breaking Changes
 
