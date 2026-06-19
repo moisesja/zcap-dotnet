@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using ZcapLd.Core.Cryptography;
 using ZcapLd.Core.Models;
 
@@ -174,6 +175,103 @@ public class SigningService : ISigningService
     /// so a revocation proof (purpose <c>capabilityRevocation</c>, carrying a signed reason) is
     /// byte-disjoint from a normal <c>capabilityInvocation</c> proof.
     /// </summary>
+    /// <summary>
+    /// Signs an application document with a Data Integrity <c>capabilityInvocation</c> proof, producing
+    /// a <c>@digitalbazaar/zcap</c>-compatible ("Path A") invocation. Unlike the self-contained
+    /// <see cref="Invocation"/> envelope (used in-stack and for revocation), the invocation metadata
+    /// (<paramref name="capability"/>/<paramref name="capabilityAction"/>/<paramref name="invocationTarget"/>)
+    /// lives ONLY in the proof; the signed document is the application payload. The signing input is
+    /// <c>SHA-256(RDFC(proofOptions)) || SHA-256(RDFC(applicationDocument))</c> with the proof options
+    /// canonicalized under the document's <c>@context</c> — byte-compatible with what
+    /// <c>@digitalbazaar/zcap</c> verifies. Returns the secured document (the application document with
+    /// the proof attached).
+    /// </summary>
+    /// <param name="capability">Root zcap id string (root invocation) or the full embedded delegated
+    /// zcap object (delegated invocation).</param>
+    /// <param name="applicationDocument">Optional JSON-LD application payload to invoke against. When
+    /// <see langword="null"/>, a minimal default request document is generated. A supplied document MUST
+    /// carry an <c>@context</c> containing <c>https://w3id.org/zcap/v1</c> and the signing suite context,
+    /// and MUST expand to a non-empty RDF dataset (e.g. carry an <c>id</c> + an absolute-IRI <c>type</c>).</param>
+    public Task<JsonObject> SignCapabilityInvocationAsync(
+        InvocationCapability capability,
+        string capabilityAction,
+        string invocationTarget,
+        string signerDid,
+        JsonObject? applicationDocument = null)
+        => SignCapabilityInvocationAsync(
+            capability, capabilityAction, invocationTarget, signerDid, applicationDocument, createdOverride: null);
+
+    /// <summary>
+    /// Determinism overload of
+    /// <see cref="SignCapabilityInvocationAsync(InvocationCapability, string, string, string, JsonObject?)"/>
+    /// that stamps an explicit proof <c>created</c> instant. Not on <see cref="ISigningService"/>.
+    /// </summary>
+    public async Task<JsonObject> SignCapabilityInvocationAsync(
+        InvocationCapability capability,
+        string capabilityAction,
+        string invocationTarget,
+        string signerDid,
+        JsonObject? applicationDocument,
+        DateTime? createdOverride)
+    {
+        ArgumentNullException.ThrowIfNull(capability);
+        if (string.IsNullOrEmpty(capabilityAction))
+            throw new ArgumentException("Capability action cannot be null or empty", nameof(capabilityAction));
+        if (string.IsNullOrEmpty(invocationTarget))
+            throw new ArgumentException("Invocation target cannot be null or empty", nameof(invocationTarget));
+        if (string.IsNullOrEmpty(signerDid))
+            throw new ArgumentException("Signer DID cannot be null or empty", nameof(signerDid));
+
+        var resolvedKey = await _resolver.ResolvePublicKeyAsync(signerDid);
+        var suite = ZcapSuiteCatalog.GetByKeyType(resolvedKey.KeyType)
+            ?? throw new CryptographicException($"No signature suite for key type: {resolvedKey.KeyType}");
+        var verificationMethod = await _resolver.GetVerificationMethodAsync(signerDid);
+        var created = ZcapTimestamps.Format(createdOverride ?? DateTime.UtcNow);
+
+        var document = BuildInvocationRequestDocument(applicationDocument, suite.ContextUrl);
+
+        // Invocation proof: capability/action/target live ONLY here. No capabilityChain (that is a
+        // delegation-proof field), and no @context (the verifier derives it from the document).
+        var proof = new Proof
+        {
+            Type = suite.ProofType,
+            Created = created,
+            ProofPurpose = Proof.CapabilityInvocationPurpose,
+            VerificationMethod = verificationMethod,
+            ProofValue = string.Empty,
+            Capability = capability,
+            InvocationTarget = invocationTarget,
+            CapabilityAction = capabilityAction,
+        };
+
+        var didSigner = CreateLegacySigner(signerDid, resolvedKey, suite.ProofType);
+        proof.ProofValue = await _legacyProofCrypto.CreateProofValueAsync(document, proof, didSigner);
+        ConfirmSignature(document, proof, resolvedKey);
+
+        var secured = document.DeepClone()!.AsObject();
+        secured["proof"] = JsonSerializer.SerializeToNode(proof, ZcapJsonOptions.Default);
+        return secured;
+    }
+
+    /// <summary>
+    /// Builds the JSON-LD application document a Path-A invocation signs. A supplied document is used
+    /// as-is (the caller owns its contents). The generated default carries the zcap + suite contexts and
+    /// an <c>id</c> + absolute-IRI <c>type</c> — both required because the JSON-LD canonicalizer rejects
+    /// a document that expands to an empty RDF dataset (it would otherwise have no triples to sign).
+    /// </summary>
+    private static JsonObject BuildInvocationRequestDocument(JsonObject? applicationDocument, string suiteContextUrl)
+    {
+        if (applicationDocument is not null)
+            return applicationDocument.DeepClone()!.AsObject();
+
+        return new JsonObject
+        {
+            ["@context"] = new JsonArray("https://w3id.org/zcap/v1", suiteContextUrl),
+            ["id"] = $"urn:uuid:{Guid.NewGuid()}",
+            ["type"] = "https://w3id.org/zcap#CapabilityInvocationRequest",
+        };
+    }
+
     private async Task<Proof> SignInvocationProofAsync(
         Invocation invocation,
         string signerDid,

@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using ZcapLd.Core.Models;
 
 namespace ZcapLd.Core.Services;
@@ -222,4 +223,33 @@ public interface IVerificationService
     /// <param name="capabilityId">The ID of the capability to check</param>
     /// <returns>True if the capability has been revoked</returns>
     Task<bool> IsCapabilityRevokedAsync(string capabilityId);
+
+    /// <summary>
+    /// Verifies a <c>@digitalbazaar/zcap</c>-compatible ("Path A") Data Integrity invocation — an
+    /// application document carrying a <c>capabilityInvocation</c> proof. The relying party MUST declare
+    /// the action and target(s) it authorizes; the verifier fails closed unless the proof matches them
+    /// (this binding prevents a confused-deputy replay of an invocation signed over a different
+    /// capability). See <see cref="VerifyCapabilityInvocationDetailedAsync(JsonObject, string, IReadOnlyCollection{string}, IReadOnlyCollection{string}, Capability, Dictionary{string, object})"/>
+    /// for structured results and root pinning.
+    /// </summary>
+    Task<bool> VerifyCapabilityInvocationAsync(
+        JsonObject securedDocument, string expectedAction, IReadOnlyCollection<string> expectedTargets);
+
+    /// <inheritdoc cref="VerifyCapabilityInvocationAsync(JsonObject, string, IReadOnlyCollection{string})"/>
+    Task<VerificationResult> VerifyCapabilityInvocationDetailedAsync(
+        JsonObject securedDocument,
+        string expectedAction,
+        IReadOnlyCollection<string> expectedTargets,
+        IReadOnlyCollection<string>? expectedRootCapabilityIds = null,
+        Capability? rootCapability = null,
+        Dictionary<string, object>? contextProperties = null);
+
+    /// <summary>Single-expected-target convenience overload of
+    /// <see cref="VerifyCapabilityInvocationDetailedAsync(JsonObject, string, IReadOnlyCollection{string}, IReadOnlyCollection{string}, Capability, Dictionary{string, object})"/>.</summary>
+    Task<VerificationResult> VerifyCapabilityInvocationDetailedAsync(
+        JsonObject securedDocument,
+        string expectedAction,
+        string expectedTarget,
+        Capability? rootCapability = null,
+        Dictionary<string, object>? contextProperties = null);
 }

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using ZcapLd.Core.Cryptography;
 using ZcapLd.Core.Models;
 using ZcapLd.Core.Services;
@@ -51,6 +52,25 @@ try
                 return 2;
             }
             return await VerifyAsync(args[1], args[2]);
+
+        case "gen-invocation":
+            if (args.Length != 2)
+            {
+                Console.Error.WriteLine("Usage: ZcapLd.Interop gen-invocation <vectorsDir>");
+                return 2;
+            }
+            return await GenerateInvocationAsync(args[1]);
+
+        case "verify-invocation":
+            if (args.Length is < 3 or > 5)
+            {
+                Console.Error.WriteLine("Usage: ZcapLd.Interop verify-invocation <securedDocFile> <rootFile> [expectedAction] [expectedTarget]");
+                return 2;
+            }
+            return await VerifyInvocationAsync(
+                args[1], args[2],
+                args.Length > 3 ? args[3] : "read",
+                args.Length > 4 ? args[4] : Target);
 
         default:
             Console.Error.WriteLine($"Unknown command: {args[0]}");
@@ -150,6 +170,69 @@ async Task<int> VerifyAsync(string delegatedFile, string rootFile)
     return 1;
 }
 
+async Task<int> GenerateInvocationAsync(string vectorsDir)
+{
+    var provider = new DeterministicDidProvider();
+    var rootDid = provider.RegisterDeterministicDidKey(Seed(0x11));
+    var delegateDid = provider.RegisterDeterministicDidKey(Seed(0x22));
+    var signing = new SigningService(provider, provider);
+    var caps = new CapabilityService(signing);
+
+    var root = await caps.CreateRootCapabilityAsync(rootDid, Target);
+    provider.RegisterRoot(root);
+
+    // Root invocation: capability = root id string; signed by the ROOT controller.
+    var rootInvocation = await signing.SignCapabilityInvocationAsync(
+        InvocationCapability.FromId(root.Id), "read", Target, rootDid);
+
+    // Delegated invocation: capability = full embedded delegated zcap; signed by the DELEGATE.
+    var delegated = await caps.DelegateCapabilityAsync(root, delegateDid, new[] { "read" }, DateTime.UtcNow.AddDays(30));
+    var delegatedInvocation = await signing.SignCapabilityInvocationAsync(
+        InvocationCapability.FromCapability(delegated), "read", Target, delegateDid);
+
+    WriteNode(Path.Combine(vectorsDir, "dotnet-invocation-root.json"), rootInvocation);
+    WriteJson(Path.Combine(vectorsDir, "dotnet-invocation-root-zcap.json"), root);
+    WriteNode(Path.Combine(vectorsDir, "dotnet-invocation-delegated.json"), delegatedInvocation);
+    WriteJson(Path.Combine(vectorsDir, "dotnet-invocation-delegated-root.json"), root);
+
+    Console.WriteLine("GENERATED (DI invocations)");
+    Console.WriteLine($"  root invocation      -> dotnet-invocation-root.json (+ -root-zcap.json)");
+    Console.WriteLine($"  delegated invocation -> dotnet-invocation-delegated.json (+ -delegated-root.json)");
+    return 0;
+}
+
+async Task<int> VerifyInvocationAsync(string securedDocFile, string rootFile, string expectedAction, string expectedTarget)
+{
+    var secured = ReadNode(securedDocFile);
+    var root = ReadJson(rootFile);
+
+    var provider = new DeterministicDidProvider();
+    provider.RegisterRoot(root); // verifier dereferences the chain's root by id
+
+    var verifier = new VerificationService(
+        provider,
+        new CaveatProcessor(),
+        new RevocationService(new InMemoryRevocationStore()),
+        new InMemoryNonceStore());
+
+    // The relying party declares what it authorizes (expected action/target/root) — required, so a
+    // valid invocation over a different capability can't be replayed here. Pass the root explicitly so
+    // both a root invocation (capability = root id) and a delegated invocation (chain[0] = root id) resolve.
+    var result = await verifier.VerifyCapabilityInvocationDetailedAsync(
+        secured, expectedAction, new[] { expectedTarget },
+        expectedRootCapabilityIds: new[] { root.Id }, rootCapability: root, contextProperties: null);
+
+    if (result.IsValid)
+    {
+        Console.WriteLine("PASS");
+        return 0;
+    }
+
+    Console.WriteLine("FAIL");
+    Console.WriteLine($"{result.Outcome}: {result.Message}");
+    return 1;
+}
+
 static void WriteJson(string path, Capability capability)
 {
     Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
@@ -157,9 +240,22 @@ static void WriteJson(string path, Capability capability)
     File.WriteAllText(path, json);
 }
 
+static void WriteNode(string path, JsonObject node)
+{
+    Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
+    File.WriteAllText(path, node.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+}
+
 static Capability ReadJson(string path)
 {
     var json = File.ReadAllText(path);
     return JsonSerializer.Deserialize<Capability>(json, ZcapJsonOptions.Default)
         ?? throw new InvalidOperationException($"Could not deserialize capability from {path}");
+}
+
+static JsonObject ReadNode(string path)
+{
+    var json = File.ReadAllText(path);
+    return JsonNode.Parse(json)?.AsObject()
+        ?? throw new InvalidOperationException($"Could not parse a JSON object from {path}");
 }

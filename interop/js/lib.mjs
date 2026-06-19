@@ -16,7 +16,7 @@
 import {createRequire} from 'node:module';
 
 import jsigs from 'jsonld-signatures';
-import {CapabilityDelegation, constants as zcapConstants}
+import {CapabilityDelegation, CapabilityInvocation, constants as zcapConstants}
   from '@digitalbazaar/zcap';
 import {Ed25519Signature2020}
   from '@digitalbazaar/ed25519-signature-2020';
@@ -164,6 +164,144 @@ export async function verifyDelegation({delegated, root}) {
     suite,
     purpose: new CapabilityDelegation({
       expectedRootCapability: root.id,
+      suite
+    }),
+    documentLoader
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Data Integrity `capabilityInvocation` (Path A).
+// ---------------------------------------------------------------------------
+
+/*
+ * Wire-shape notes (the .NET side matches these byte-for-byte):
+ *
+ *  - The SECURED document is an *application document*: an arbitrary JSON-LD
+ *    object that carries a `capabilityInvocation` proof. The invocation
+ *    parameters (`capability` / `capabilityAction` / `invocationTarget`) live
+ *    ONLY inside the proof object -- they are NOT copied into the signed
+ *    document body (CapabilityInvocation.update() stamps them onto `proof`).
+ *
+ *  - The document body's `@context` MUST contain BOTH:
+ *      1. the ZCAP context (`https://w3id.org/zcap/v1`) -- the verifier's
+ *         `utils.checkProofContext` requires it to be present in the proof's
+ *         effective `@context`, and jsigs derives the proof's `@context` from
+ *         the *document's* `@context` at verify time (ProofSet `_getProofs`);
+ *         the signed proof object therefore carries NO `@context` of its own.
+ *      2. the ed25519-2020 suite context
+ *         (`https://w3id.org/security/suites/ed25519-2020/v1`) -- the
+ *         Ed25519Signature2020 suite's `matchProof` refuses any document that
+ *         does not include the suite context.
+ *    So the minimal application-document shape we use is exactly:
+ *      {"@context": [ZCAP_CONTEXT_URL, ED25519_2020_CONTEXT_URL]}
+ *    (any additional, context-defined fields would also be signed; we keep it
+ *    minimal so the .NET side has the smallest possible body to reproduce).
+ *
+ *  - Signing input (RDFC-1.0, via the suite's LinkedDataSignature base):
+ *      verifyData = SHA256(canonicalize(proofOptions))
+ *                || SHA256(canonicalize(applicationDocument))
+ *    i.e. the PROOF-OPTIONS hash comes FIRST, the document hash SECOND. The
+ *    proof-options object is canonicalized with the document's `@context`
+ *    spliced in front of it (so BOTH halves canonicalize under the same
+ *    `@context`), with `proofValue` stripped. Each half is canonicalized with
+ *    RDFC-1.0 (jsonld -> RDF dataset -> URDNA2015), NOT JCS.
+ */
+
+/**
+ * Create a Data Integrity `capabilityInvocation` proof over an application
+ * document, using the REAL @digitalbazaar/zcap CapabilityInvocation purpose.
+ *
+ * Per CapabilityInvocation's constructor, the create-proof params are
+ * `{capability, capabilityAction, invocationTarget}` and they MUST NOT be mixed
+ * with any verify-proof param (`expectedAction` / `expectedTarget` /
+ * `expectedRootCapability` / `suite` / `controller` / `date` /
+ * `inspectCapabilityChain`) -- doing so throws
+ * "Parameters for both creating and verifying a proof must not be provided
+ * together." `capability` MUST be a string for a ROOT invocation (the root id)
+ * and a full embedded object for a DELEGATED invocation.
+ *
+ * @param {object} options - Options.
+ * @param {object} options.applicationDocument - The JSON-LD document to secure
+ *   (its `@context` must include the zcap + ed25519-2020 contexts).
+ * @param {string|object} options.capability - Root id string (root invocation)
+ *   or the full embedded delegated zcap object (delegated invocation).
+ * @param {string} options.capabilityAction - The action being invoked, e.g.
+ *   `"read"`.
+ * @param {string} options.invocationTarget - The absolute-URI target.
+ * @param {object} options.key - The signing key (Ed25519VerificationKey2020
+ *   with private material) belonging to the controller authorized to invoke.
+ * @param {string|Date} [options.created] - Seconds-precision `created` to pin
+ *   onto the proof (passed to the suite as `date`).
+ * @param {object[]} [options.roots] - Root capabilities the documentLoader must
+ *   serve by id (the root for a delegated invocation's embedded chain).
+ * @returns {Promise<object>} The secured document (application document + a
+ *   top-level `proof` whose `proofPurpose` is `capabilityInvocation`).
+ */
+export async function signInvocation({
+  applicationDocument, capability, capabilityAction, invocationTarget, key,
+  created, roots = []
+}) {
+  const documentLoader = makeDocumentLoader({roots});
+
+  return jsigs.sign(applicationDocument, {
+    suite: new Ed25519Signature2020({key, date: created}),
+    // create-proof params ONLY (mixing in any verify param throws)
+    purpose: new CapabilityInvocation({
+      capability,
+      capabilityAction,
+      invocationTarget
+    }),
+    documentLoader
+  });
+}
+
+/**
+ * Verify a Data Integrity `capabilityInvocation` proof on a secured
+ * application document.
+ *
+ * Per CapabilityInvocation's constructor, the verify-proof params used here are
+ * `{expectedTarget, expectedAction, expectedRootCapability, suite}` -- a
+ * DISJOINT set from the create params. `expectedAction` (string) and
+ * `expectedTarget` (string|array) are required and validated; the proof's
+ * `capabilityAction`/`invocationTarget` must match them exactly (no target
+ * attenuation here). `expectedRootCapability` (validated by the base class,
+ * string|array of absolute URIs) is the root id the dereferenced chain's root
+ * MUST equal -- the documentLoader serves that root by id. The `suite` is used
+ * to verify each delegation proof along the chain.
+ *
+ * For a ROOT invocation, `proof.capability` is the root id string; the chain is
+ * just `[root]`. For a DELEGATED invocation, `proof.capability` is the full
+ * embedded delegated zcap; the verifier walks its `capabilityChain` (the
+ * embedded ancestors + the root referenced by id), so the documentLoader must
+ * serve the root by id and resolve every did:key controller in the chain.
+ *
+ * @param {object} options - Options.
+ * @param {object} options.securedDocument - The application document with its
+ *   `capabilityInvocation` proof.
+ * @param {string} options.expectedAction - The action the verifier requires.
+ * @param {string|string[]} options.expectedTarget - The absolute-URI target(s)
+ *   the verifier requires.
+ * @param {string|string[]} options.expectedRootCapability - The root id(s) the
+ *   chain's root must match.
+ * @param {object} options.root - The root capability JSON, served by the
+ *   documentLoader by its `id`.
+ * @returns {Promise<object>} The full jsigs.verify() result
+ *   (`{verified, results, error?}`).
+ */
+export async function verifyInvocation({
+  securedDocument, expectedAction, expectedTarget, expectedRootCapability, root
+}) {
+  const documentLoader = makeDocumentLoader({roots: [root]});
+  const suite = new Ed25519Signature2020();
+
+  return jsigs.verify(securedDocument, {
+    suite,
+    // verify-proof params ONLY (mixing in any create param throws)
+    purpose: new CapabilityInvocation({
+      expectedTarget,
+      expectedAction,
+      expectedRootCapability,
       suite
     }),
     documentLoader

@@ -1,5 +1,12 @@
 # Lessons Learned
 
+## 2026-06-19 — Run adversarial agents on GENERATED CODE before opening a PR (CLAUDE.md §2), not just on analyses
+- I shipped the new Path-A invocation verifier (#117/PR #120) with only a functional interop harness + happy-path unit tests + a passive PR reviewer. I had NOT run adversarial/exploit agents against the generated code, which CLAUDE.md §2 explicitly mandates ("Always use adversarial agents to attempt to exploit the code"). The user had to ask "did you run adversarial agents?".
+- When prompted, a red-team workflow found a **CRITICAL forgery** (no application-document `@context` validation → RDFC drops the unbound zcap/v1 auth terms → attacker rewrites `capabilityAction`/`invocationTarget` post-signing) and a **HIGH confused-deputy** (no relying-party `expected*` gate) — both execution-confirmed, both would have merged.
+- RULE: for any auth-bearing or wire-format code I generate, run the adversarial-exploit workflow (attack dimensions → per-finding refutation) BEFORE opening the PR, and treat the PR as not-ready until it is clean. Functional/interop tests prove it WORKS; they do not prove it can't be ABUSED.
+- RDFC-specific red flag: any field the verifier reads for an auth decision MUST be a context-defined term so it lands in the signed N-Quads; otherwise validate the document `@context` so undefined terms can't be silently dropped. (Same root cause as the revocation reason/metadata being informational.)
+- Mirror the reference implementation's *required verifier inputs*: `@digitalbazaar/zcap` requires `expectedAction`/`expectedTarget`/`expectedRootCapability`. A verify API that omits them (authorizing whatever the proof claims) is a confused-deputy footgun — don't ship the no-expectation overload.
+
 ## 2026-02-26 10:24:27
 - Verify repository identity (path + solution name) before running analysis or commands.
 - If multiple similarly named repos exist, confirm the target repo explicitly before proceeding.

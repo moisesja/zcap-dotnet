@@ -11,6 +11,26 @@ Delegates zcap's cryptography and canonicalization to the composable foundation 
 makes the wire format interoperable with the `@digitalbazaar/zcap` reference implementation.
 Includes everything in the (unreleased) 3.0.0 section below.
 
+### Added
+
+- **`@digitalbazaar/zcap`-compatible Data Integrity invocations ("Path A", #117).** New
+  `SigningService.SignCapabilityInvocationAsync(...)` produces a secured application document with a
+  `capabilityInvocation` proof whose proof object alone carries `capability`/`capabilityAction`/
+  `invocationTarget` (no self-contained envelope), and
+  `VerificationService.VerifyCapabilityInvocationAsync(securedDocument, expectedAction, expectedTargets[, …])`
+  verifies one (signature over the application document, then chain/attenuation/caveats/controller/
+  freshness/replay). The verifier has **two security gates** (added after an adversarial red-team of the
+  initial implementation): (a) the relying party MUST declare `expectedAction` + `expectedTargets` (and
+  may pin `expectedRootCapabilityIds`) — the verifier fails closed unless the proof matches, mirroring
+  `@digitalbazaar/zcap`'s required `expectedAction`/`expectedTarget`/`expectedRootCapability` and
+  preventing a confused-deputy replay of an invocation signed over a different capability; (b) the
+  application document's `@context` is validated (array, `[0]==zcap/v1`, includes the suite context)
+  before the signature is trusted, so the invocation terms are actually inside the signed RDFC N-Quads
+  (without it, stripping `zcap/v1` lets an attacker rewrite them — a forgery). Round-trips live against
+  the real `@digitalbazaar/zcap` `CapabilityInvocation` purpose — root **and** delegated, both
+  directions — in `interop/run-interop.sh` (checks 7–12). **Additive**: the self-contained `Invocation`
+  envelope (in-stack + revocation) is unchanged. HTTP-Signature invocations ("Path B") remain a follow-up (#119).
+
 ### Breaking Changes
 
 - **Canonicalization is RDFC-1.0 only — JCS support removed.** RDFC-1.0 (W3C RDF Dataset Canonicalization) is now the sole canonicalization, which is what makes proofs verify under `@digitalbazaar/zcap` (proven live by `interop/run-interop.sh`). `SigningService` and `VerificationService` no longer accept a `canonicalizationMethod` argument; the `AddZcapRdfcCanonicalization()` DI toggle and the `JcsDocumentCanonicalizer` / `JsonCanonicalizer` types are removed. **No backwards compatibility:** JCS-signed capabilities issued by ≤3.x do not verify and must be re-signed under RDFC-1.0. (See the revocation-integrity entry below for one behavioral consequence.)
@@ -19,7 +39,7 @@ Includes everything in the (unreleased) 3.0.0 section below.
 - **Root id encoding matches `encodeURIComponent` exactly.** The root capability id is `urn:zcap:root:{encodeURIComponent(invocationTarget)}`; the new `UriEncoding.EncodeUriComponent` un-escapes `! ' ( ) *` that `Uri.EscapeDataString` over-escapes, so for invocation targets containing those characters the id is now byte-identical to what `@digitalbazaar/zcap` derives (previously divergent). Plain http(s) targets were already identical.
 - **Verify-path `@context` and root-invariant enforcement (W3C MUST closeouts).** The crypto verification paths now enforce spec invariants the create path already checked but `VerificationService` never called: (a) a **root** `@context` MUST be the single string `https://w3id.org/zcap/v1`; (b) a **delegated** `@context` MUST be an array whose first entry is `https://w3id.org/zcap/v1` and which includes the signing suite context; (c) a **root** MUST NOT carry `expires`/`allowedAction`/`caveat` (rejected unconditionally on verify, matching `@digitalbazaar/zcap`, which rejects root `expires`). **Unknown/unmodeled** root fields (`Capability.AdditionalProperties`) are rejected only under the new opt-in `VerificationPolicy.RejectUnknownRootFields` (default `false`): `@digitalbazaar/zcap`'s `checkCapability` *ignores* unknown root fields and `AdditionalProperties` (`[JsonExtensionData]`) exists to round-trip them, so rejecting them by default would be stricter than the reference impl. Conformant capabilities (including everything zcap-dotnet's create path emits) are unaffected; only malformed/non-conformant documents that previously slipped through the crypto verify path are now rejected with `MalformedCapability`.
 
-- **Dependencies / source — crypto + canonicalization delegated to the shared stack.** `NetDid.Core` / `NetDid.Method.Key` move **1.3.1 → 2.0.1** (NetDid 2.0 relocated its cryptographic primitives to **NetCrypto**), `NetCrypto` **1.1.0** is added as a direct reference, the direct `dotNetRdf.Core` reference is replaced by **DataProofsDotnet.Core / .Rdfc / .Legacy 1.0.0** (which own dotNetRDF + the proof cryptosuites transitively), and **NetCid** rises to 1.6.0. Consumers **recompile**: the crypto types that lived under `NetDid.Core.Crypto` (`DefaultCryptoProvider`, `KeyType`, `EcdsaSignatureFormat`, `DefaultKeyGenerator`) are now `NetCrypto.*`. **The proof wire format is unchanged** (see below).
+- **Dependencies / source — crypto + canonicalization delegated to the shared stack.** `NetDid.Core` / `NetDid.Method.Key` move **1.3.1 → 2.0.1** (NetDid 2.0 relocated its cryptographic primitives to **NetCrypto**), `NetCrypto` **1.1.0** is added as a direct reference, the direct `dotNetRdf.Core` reference is replaced by **DataProofsDotnet.Core / .Rdfc / .Legacy 1.0.1** (which own dotNetRDF + the proof cryptosuites transitively), and **NetCid** rises to 1.6.0. Consumers **recompile**: the crypto types that lived under `NetDid.Core.Crypto` (`DefaultCryptoProvider`, `KeyType`, `EcdsaSignatureFormat`, `DefaultKeyGenerator`) are now `NetCrypto.*`. **The proof wire format is unchanged** (see below).
 - **API — the crypto-suite extension surface is removed.** `ICryptoSuite`, `ICryptoSuiteProvider`, `CryptoSuite`, `CryptoSuiteProvider`, `IDocumentCanonicalizerProvider`, `DocumentCanonicalizerProvider`, `SignatureVerifier`, and `AddZcapCryptoSuite<T>()` are all removed. zcap is no longer a crypto-extension point: it supports a fixed set of suites (`Ed25519Signature2020`, `EcdsaSecp256r1Signature2019`) via the internal `ZcapSuiteCatalog`, with sign/verify delegated to DataProofs' legacy cryptosuites. `SigningService` / `VerificationService` drop their suite-provider and canonicalizer-provider constructor parameters; canonicalization is RDFC-1.0 only (see the RDFC-only entry above — the earlier `canonicalizationMethod` / `AddZcapRdfcCanonicalization()` selection was itself removed). New curves are added in NetCrypto + DataProofs and wired into `ZcapSuiteCatalog`, never via a zcap API (see `docs/crypto-suite-extensibility-decision.md`). In-policy under SemVer (a major 4.0.0 bump).
 
 #### From the security + compliance scan remediation

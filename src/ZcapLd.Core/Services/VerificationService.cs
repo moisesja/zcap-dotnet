@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using NetCrypto;
@@ -501,6 +502,261 @@ public class VerificationService : IVerificationService
             throw new ArgumentNullException(nameof(rootCapability));
         return LogDenial(VerifyInvocationCoreAsync(invocation, capability, contextProperties, explicitRoot: rootCapability),
             "VerifyInvocation", invocation?.Id);
+    }
+
+    // ─── Path A: Data Integrity capabilityInvocation (@digitalbazaar/zcap-compatible) ───────────────
+
+    /// <summary>
+    /// Verifies a <c>@digitalbazaar/zcap</c>-compatible ("Path A") Data Integrity invocation: an
+    /// application document carrying a <c>capabilityInvocation</c> proof whose proof object alone holds
+    /// <c>capability</c>/<c>capabilityAction</c>/<c>invocationTarget</c>. The signature is verified over
+    /// the application document (<c>SHA-256(RDFC(proofOptions)) || SHA-256(RDFC(document))</c>); the
+    /// capability chain, attenuation, caveats, controller authorization, freshness and replay are then
+    /// enforced as for the self-contained <see cref="Invocation"/> envelope path.
+    /// <para>
+    /// SECURITY: the relying party MUST declare what it is willing to authorize via
+    /// <paramref name="expectedAction"/> and <paramref name="expectedTargets"/> (and optionally
+    /// <c>expectedRootCapabilityIds</c>) — exactly as the <c>@digitalbazaar/zcap</c> reference requires.
+    /// Without this binding, a valid invocation the attacker signed over a DIFFERENT capability it holds
+    /// could be replayed against this endpoint (confused deputy). The verifier also requires the
+    /// application document's <c>@context</c> to bind the invocation terms (see the core).
+    /// </para>
+    /// </summary>
+    /// <param name="expectedAction">The action the relying party authorizes; must equal the proof's
+    /// <c>capabilityAction</c> exactly.</param>
+    /// <param name="expectedTargets">The acceptable invocation target(s); the proof's
+    /// <c>invocationTarget</c> must be one of them (exact match).</param>
+    public async Task<bool> VerifyCapabilityInvocationAsync(
+        JsonObject securedDocument, string expectedAction, IReadOnlyCollection<string> expectedTargets)
+        => (await VerifyCapabilityInvocationDetailedAsync(securedDocument, expectedAction, expectedTargets)).IsValid;
+
+    /// <inheritdoc cref="VerifyCapabilityInvocationAsync(JsonObject, string, IReadOnlyCollection{string})"/>
+    public async Task<bool> VerifyCapabilityInvocationAsync(
+        JsonObject securedDocument, string expectedAction, IReadOnlyCollection<string> expectedTargets, Capability rootCapability)
+        => (await VerifyCapabilityInvocationDetailedAsync(
+            securedDocument, expectedAction, expectedTargets, rootCapability: rootCapability)).IsValid;
+
+    /// <summary>Single-expected-target convenience overload.</summary>
+    public Task<VerificationResult> VerifyCapabilityInvocationDetailedAsync(
+        JsonObject securedDocument, string expectedAction, string expectedTarget,
+        Capability? rootCapability = null, Dictionary<string, object>? contextProperties = null)
+        => VerifyCapabilityInvocationDetailedAsync(
+            securedDocument, expectedAction, new[] { expectedTarget }, expectedRootCapabilityIds: null,
+            rootCapability, contextProperties);
+
+    /// <inheritdoc cref="VerifyCapabilityInvocationAsync(JsonObject, string, IReadOnlyCollection{string})"/>
+    /// <param name="expectedRootCapabilityIds">Optional: if supplied, the dereferenced chain root id MUST
+    /// be one of these (defense in depth against a resolver serving an attacker-controlled root).</param>
+    public Task<VerificationResult> VerifyCapabilityInvocationDetailedAsync(
+        JsonObject securedDocument,
+        string expectedAction,
+        IReadOnlyCollection<string> expectedTargets,
+        IReadOnlyCollection<string>? expectedRootCapabilityIds = null,
+        Capability? rootCapability = null,
+        Dictionary<string, object>? contextProperties = null)
+    {
+        ArgumentNullException.ThrowIfNull(securedDocument);
+        if (string.IsNullOrEmpty(expectedAction))
+            throw new ArgumentException("An expected action is required.", nameof(expectedAction));
+        ArgumentNullException.ThrowIfNull(expectedTargets);
+        if (expectedTargets.Count == 0)
+            throw new ArgumentException("At least one expected target is required.", nameof(expectedTargets));
+
+        return LogDenial(
+            VerifyCapabilityInvocationCoreAsync(
+                securedDocument, expectedAction, expectedTargets, expectedRootCapabilityIds, rootCapability, contextProperties),
+            "VerifyCapabilityInvocation", TryGetDocId(securedDocument));
+    }
+
+    private static string? TryGetDocId(JsonObject? doc)
+        => doc is not null && doc.TryGetPropertyValue("id", out var node)
+           && node is JsonValue v && v.TryGetValue<string>(out var s) ? s : null;
+
+    /// <summary>The <c>@context</c> entries when a <see cref="JsonNode"/> is an array of strings, else null.</summary>
+    private static IReadOnlyList<string>? AsArrayContextNode(JsonNode? context)
+    {
+        if (context is not JsonArray arr)
+            return null;
+        var list = new List<string>(arr.Count);
+        foreach (var item in arr)
+        {
+            if (item is JsonValue v && v.TryGetValue<string>(out var s))
+                list.Add(s);
+            else
+                return null;
+        }
+        return list;
+    }
+
+    private async Task<VerificationResult> VerifyCapabilityInvocationCoreAsync(
+        JsonObject securedDocument,
+        string expectedAction,
+        IReadOnlyCollection<string> expectedTargets,
+        IReadOnlyCollection<string>? expectedRootCapabilityIds,
+        Capability? explicitRoot,
+        Dictionary<string, object>? contextProperties)
+    {
+        ArgumentNullException.ThrowIfNull(securedDocument);
+        try
+        {
+            // 1. Split the secured document into the signed application document and its proof.
+            if (!securedDocument.TryGetPropertyValue("proof", out var proofNode) || proofNode is null)
+                return VerificationResult.Fail(VerificationOutcome.MalformedCapability,
+                    "Secured invocation document is missing a proof.");
+
+            Proof? proof;
+            try { proof = proofNode.Deserialize<Proof>(ZcapJsonOptions.Default); }
+            catch (JsonException) { proof = null; }
+            if (proof is null)
+                return VerificationResult.Fail(VerificationOutcome.MalformedCapability,
+                    "Invocation proof could not be parsed.");
+
+            if (proof.ProofPurpose != Proof.CapabilityInvocationPurpose)
+                return VerificationResult.Fail(VerificationOutcome.MalformedCapability,
+                    "Proof does not have the capabilityInvocation proofPurpose.");
+
+            var applicationDocument = securedDocument.DeepClone()!.AsObject();
+            applicationDocument.Remove("proof");
+
+            // 1a. SECURITY (forgery defense): the proof's invocation terms (capability/capabilityAction/
+            // invocationTarget) are defined ONLY in the zcap/v1 context, and the proof options canonicalize
+            // under the DOCUMENT's @context. If the document @context omits zcap/v1 (or the suite context),
+            // RDFC-1.0 drops those terms from the signed N-Quads — they become unauthenticated and an
+            // attacker could rewrite them after signing without breaking the signature. Require the document
+            // @context to bind them (mirrors the chain R-CTX-2 check and @digitalbazaar/zcap's
+            // checkProofContext / suite matchProof).
+            var docContext = AsArrayContextNode(applicationDocument["@context"]);
+            var suiteContextUrl = ZcapSuiteCatalog.GetByProofType(proof.Type)?.ContextUrl;
+            if (docContext is null || docContext.Count == 0 || docContext[0] != ZcapV1Context ||
+                (suiteContextUrl is not null && !docContext.Contains(suiteContextUrl)))
+                return VerificationResult.Fail(VerificationOutcome.MalformedCapability,
+                    $"Invocation application document @context MUST be an array beginning with \"{ZcapV1Context}\" " +
+                    "and include the signing suite context, so the proof's invocation terms are signature-bound.");
+
+            // 2. Freshness (Issue #71): bound replay independently of nonce eviction; reuse the validated
+            // instant for time-based caveats.
+            var createdUtc = GetFreshProofCreatedUtc(proof);
+            if (createdUtc is null)
+                return VerificationResult.Fail(VerificationOutcome.StaleProof,
+                    "Invocation proof.created is missing, future-dated beyond clock skew, or older than the replay window.");
+
+            // 3. The invocation parameters live ONLY in the proof (Path A).
+            var proofCapability = proof.Capability;
+            if (proofCapability is null)
+                return VerificationResult.Fail(VerificationOutcome.MalformedCapability,
+                    "Invocation proof is missing capability.");
+            if (string.IsNullOrEmpty(proof.CapabilityAction))
+                return VerificationResult.Fail(VerificationOutcome.MalformedCapability,
+                    "Invocation proof is missing capabilityAction.");
+            if (string.IsNullOrEmpty(proof.InvocationTarget))
+                return VerificationResult.Fail(VerificationOutcome.MalformedCapability,
+                    "Invocation proof is missing invocationTarget.");
+
+            // 3a. SECURITY (confused-deputy defense): the relying party declared what it authorizes via
+            // expectedAction/expectedTargets. The proof's action/target MUST match exactly — otherwise a
+            // valid invocation the attacker signed over a DIFFERENT capability it holds could be replayed
+            // against this endpoint. Mirrors @digitalbazaar/zcap, which requires expectedAction + expectedTarget.
+            if (!string.Equals(proof.CapabilityAction, expectedAction, StringComparison.Ordinal))
+                return VerificationResult.Fail(VerificationOutcome.ActionNotAllowed,
+                    $"Invocation action '{proof.CapabilityAction}' does not match the expected action '{expectedAction}'.");
+            if (!expectedTargets.Contains(proof.InvocationTarget, StringComparer.Ordinal))
+                return VerificationResult.Fail(VerificationOutcome.InvalidTarget,
+                    $"Invocation target '{proof.InvocationTarget}' is not among the relying party's expected targets.");
+
+            // 4. Resolve the invoked capability from the proof's capability shape: a root id string is
+            // dereferenced to the trusted root; an embedded delegated zcap is used directly (its chain is
+            // verified in step 5). A delegated invocation supplying only an id string is rejected (Issue #51).
+            Capability capability;
+            if (proofCapability.IsRootReference)
+            {
+                if (string.IsNullOrEmpty(proofCapability.CapabilityId))
+                    return VerificationResult.Fail(VerificationOutcome.MalformedCapability,
+                        "Root invocation is missing the root capability id.");
+                capability = await ResolveRootCapabilityAsync(proofCapability.CapabilityId, explicitRoot);
+            }
+            else if (proofCapability.EmbeddedCapability is { } embedded)
+            {
+                capability = embedded;
+            }
+            else
+            {
+                return VerificationResult.Fail(VerificationOutcome.MalformedCapability,
+                    "Delegated invocation must embed the full delegated capability object.");
+            }
+
+            // 5. Verify the capability chain (delegation proofs, attenuation, @context, expiry, revocation).
+            var chain = await BuildCapabilityChainAsync(capability, explicitRoot);
+            var chainResult = await VerifyBuiltChainAsync(chain);
+            if (!chainResult.IsValid)
+                return chainResult;
+
+            // 5a. SECURITY (defense in depth): if the relying party pinned the acceptable root
+            // capabilities, the dereferenced chain root MUST be one of them — blocks an
+            // IRootCapabilityResolver that serves an attacker-controlled root over a broad/overlapping target.
+            if (expectedRootCapabilityIds is { Count: > 0 } &&
+                !expectedRootCapabilityIds.Contains(chain[0].Id, StringComparer.Ordinal))
+                return VerificationResult.Fail(VerificationOutcome.MalformedCapability,
+                    $"Resolved root capability '{chain[0].Id}' is not among the relying party's expected roots.");
+
+            // 6. invocationTarget must be permitted by the leaf capability's target.
+            if (!IsValidInvocationTarget(proof.InvocationTarget, capability.InvocationTarget))
+                return VerificationResult.Fail(VerificationOutcome.InvalidTarget,
+                    "Invocation target is not permitted by the capability's invocationTarget.");
+
+            // 7. capabilityAction must be allowed (null/empty allowedAction == unrestricted root).
+            if (capability.AllowedAction is { Length: > 0 } actions && !actions.Contains(proof.CapabilityAction))
+                return VerificationResult.Fail(VerificationOutcome.ActionNotAllowed,
+                    $"Action '{proof.CapabilityAction}' is not in the capability's allowedAction.");
+
+            // 8. Verify the signature over the APPLICATION DOCUMENT (Path A signs the application payload,
+            // not a self-contained invocation envelope). Bind the suite (from proof.Type) to the resolved
+            // key type (Issue #68) before trusting the signature.
+            var resolvedKey = await _didResolver.ResolvePublicKeyAsync(proof.VerificationMethod);
+            var suite = ZcapSuiteCatalog.GetByProofType(proof.Type);
+            if (suite is null || !KeyTypeMatches(suite, resolvedKey))
+                return VerificationResult.Fail(VerificationOutcome.InvalidSignature,
+                    "Invocation proof suite is unknown or does not match the resolved key type.");
+            if (!_legacyProofCrypto.Verify(applicationDocument, proof, resolvedKey))
+                return VerificationResult.Fail(VerificationOutcome.InvalidSignature,
+                    "Invocation proof signature did not verify.");
+
+            // 9. The invoker's verificationMethod must be authorized for capabilityInvocation by the
+            // invoked capability's controller.
+            if (!await IsControllerAuthorizedAsync(
+                    proof.VerificationMethod, capability, VerificationRelationship.CapabilityInvocation))
+                return VerificationResult.Fail(VerificationOutcome.UnauthorizedController,
+                    "Invoker is not authorized by the capability's controller for capabilityInvocation.");
+
+            // 10. Evaluate all caveats across the chain against the signed invocation time.
+            var context = new InvocationContext
+            {
+                InvocationTime = createdUtc.Value,
+                RequestedAction = proof.CapabilityAction,
+                TargetResource = proof.InvocationTarget,
+            };
+            if (contextProperties != null)
+                foreach (var kvp in contextProperties)
+                    context.Properties[kvp.Key] = kvp.Value;
+            if (!await _caveatProcessor.EvaluateCapabilityChainCaveatsAsync(chain.ToArray(), context))
+                return VerificationResult.Fail(VerificationOutcome.CaveatFailed,
+                    "A caveat in the capability chain was not satisfied.");
+
+            // 11. Replay protection keyed on the application document id (the spec's invocation id / nonce).
+            var nonce = TryGetDocId(securedDocument);
+            if (string.IsNullOrEmpty(nonce))
+                return VerificationResult.Fail(VerificationOutcome.MalformedCapability,
+                    "Secured invocation document is missing an id (required as the replay nonce).");
+            if (await _nonceStore.TryMarkAsUsedAsync(nonce, DateTime.UtcNow.Add(_nonceWindow)))
+                return VerificationResult.Fail(VerificationOutcome.Replayed,
+                    "Invocation nonce has already been used within the replay window.");
+
+            return VerificationResult.Valid;
+        }
+        catch (Exception ex)
+        {
+            LogFailedClosed(ex, "VerifyCapabilityInvocationAsync failed closed");
+            return VerificationResult.Fail(VerificationOutcome.CouldNotVerify, ex.Message);
+        }
     }
 
     private async Task<VerificationResult> VerifyInvocationCoreAsync(
