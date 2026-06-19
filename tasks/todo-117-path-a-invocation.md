@@ -47,3 +47,17 @@ both directions, + 2 tamper negatives). Suite: **460 Core + 33 AspNetCore green*
 - CLI: `gen-invocation` / `verify-invocation`. JS: `invoke-gen.mjs` / `invoke-verify.mjs` / lib.mjs.
 - Tests: `DataIntegrityInvocationTests` (root + delegated round-trip, tamper, action-not-allowed).
 - Additive: legacy `Invocation` envelope + revocation untouched. Path B (HTTP Sig) deferred → #119.
+
+## Adversarial security review (2026-06-19) — found + fixed 2 real issues
+Red-team workflow (16 agents) against the new verifier found, execution-confirmed:
+- **CRITICAL (forgery):** no application-document `@context` validation → RDFC drops the unbound
+  zcap/v1 auth terms → attacker rewrites `capabilityAction`/`invocationTarget` post-signing, still Valid.
+  FIX: validate doc `@context` (array, `[0]==zcap/v1`, includes suite ctx) before trusting the signature
+  (mirrors chain R-CTX-2). New `AsArrayContextNode` helper.
+- **HIGH (confused-deputy):** no relying-party `expected*` gate. FIX: `VerifyCapabilityInvocation*` now
+  REQUIRE `expectedAction` + `expectedTargets` (optional `expectedRootCapabilityIds`), fail closed on
+  mismatch; removed the no-expectation overloads; added the safe method to `IVerificationService`.
+- **LOW** (nonce/result not bound to action) — addressed by the expected* gate.
+- 6 attack classes held (signature binding, chain forgery, controller-auth, replay, etc.).
+Regression tests added: stripped-`@context` forgery, expected-target/action/root mismatch (all reject).
+Suite 464 Core + 33 AspNetCore green; interop 12/12.

@@ -509,45 +509,92 @@ public class VerificationService : IVerificationService
     /// <summary>
     /// Verifies a <c>@digitalbazaar/zcap</c>-compatible ("Path A") Data Integrity invocation: an
     /// application document carrying a <c>capabilityInvocation</c> proof whose proof object alone holds
-    /// <c>capability</c>/<c>capabilityAction</c>/<c>invocationTarget</c> (they are NOT duplicated into the
-    /// signed document body). The signature is verified over the application document
-    /// (<c>SHA-256(RDFC(proofOptions)) || SHA-256(RDFC(document))</c>); the capability chain, attenuation,
-    /// caveats, controller authorization, freshness and replay are then enforced exactly as for the
-    /// self-contained <see cref="Invocation"/> envelope path. For a DELEGATED invocation, supply the root
-    /// via the <c>rootCapability</c> overload (or register an <see cref="IRootCapabilityResolver"/>).
+    /// <c>capability</c>/<c>capabilityAction</c>/<c>invocationTarget</c>. The signature is verified over
+    /// the application document (<c>SHA-256(RDFC(proofOptions)) || SHA-256(RDFC(document))</c>); the
+    /// capability chain, attenuation, caveats, controller authorization, freshness and replay are then
+    /// enforced as for the self-contained <see cref="Invocation"/> envelope path.
+    /// <para>
+    /// SECURITY: the relying party MUST declare what it is willing to authorize via
+    /// <paramref name="expectedAction"/> and <paramref name="expectedTargets"/> (and optionally
+    /// <c>expectedRootCapabilityIds</c>) — exactly as the <c>@digitalbazaar/zcap</c> reference requires.
+    /// Without this binding, a valid invocation the attacker signed over a DIFFERENT capability it holds
+    /// could be replayed against this endpoint (confused deputy). The verifier also requires the
+    /// application document's <c>@context</c> to bind the invocation terms (see the core).
+    /// </para>
     /// </summary>
-    public async Task<bool> VerifyCapabilityInvocationAsync(JsonObject securedDocument)
-        => (await VerifyCapabilityInvocationDetailedAsync(securedDocument)).IsValid;
+    /// <param name="expectedAction">The action the relying party authorizes; must equal the proof's
+    /// <c>capabilityAction</c> exactly.</param>
+    /// <param name="expectedTargets">The acceptable invocation target(s); the proof's
+    /// <c>invocationTarget</c> must be one of them (exact match).</param>
+    public async Task<bool> VerifyCapabilityInvocationAsync(
+        JsonObject securedDocument, string expectedAction, IReadOnlyCollection<string> expectedTargets)
+        => (await VerifyCapabilityInvocationDetailedAsync(securedDocument, expectedAction, expectedTargets)).IsValid;
 
-    /// <inheritdoc cref="VerifyCapabilityInvocationAsync(JsonObject)"/>
-    public async Task<bool> VerifyCapabilityInvocationAsync(JsonObject securedDocument, Capability rootCapability)
-        => (await VerifyCapabilityInvocationDetailedAsync(securedDocument, rootCapability)).IsValid;
+    /// <inheritdoc cref="VerifyCapabilityInvocationAsync(JsonObject, string, IReadOnlyCollection{string})"/>
+    public async Task<bool> VerifyCapabilityInvocationAsync(
+        JsonObject securedDocument, string expectedAction, IReadOnlyCollection<string> expectedTargets, Capability rootCapability)
+        => (await VerifyCapabilityInvocationDetailedAsync(
+            securedDocument, expectedAction, expectedTargets, rootCapability: rootCapability)).IsValid;
 
-    /// <inheritdoc cref="VerifyCapabilityInvocationAsync(JsonObject)"/>
-    public Task<VerificationResult> VerifyCapabilityInvocationDetailedAsync(JsonObject securedDocument)
-        => LogDenial(VerifyCapabilityInvocationCoreAsync(securedDocument, explicitRoot: null, contextProperties: null),
-            "VerifyCapabilityInvocation", TryGetDocId(securedDocument));
+    /// <summary>Single-expected-target convenience overload.</summary>
+    public Task<VerificationResult> VerifyCapabilityInvocationDetailedAsync(
+        JsonObject securedDocument, string expectedAction, string expectedTarget,
+        Capability? rootCapability = null, Dictionary<string, object>? contextProperties = null)
+        => VerifyCapabilityInvocationDetailedAsync(
+            securedDocument, expectedAction, new[] { expectedTarget }, expectedRootCapabilityIds: null,
+            rootCapability, contextProperties);
 
-    /// <inheritdoc cref="VerifyCapabilityInvocationAsync(JsonObject)"/>
-    public Task<VerificationResult> VerifyCapabilityInvocationDetailedAsync(JsonObject securedDocument, Capability rootCapability)
+    /// <inheritdoc cref="VerifyCapabilityInvocationAsync(JsonObject, string, IReadOnlyCollection{string})"/>
+    /// <param name="expectedRootCapabilityIds">Optional: if supplied, the dereferenced chain root id MUST
+    /// be one of these (defense in depth against a resolver serving an attacker-controlled root).</param>
+    public Task<VerificationResult> VerifyCapabilityInvocationDetailedAsync(
+        JsonObject securedDocument,
+        string expectedAction,
+        IReadOnlyCollection<string> expectedTargets,
+        IReadOnlyCollection<string>? expectedRootCapabilityIds = null,
+        Capability? rootCapability = null,
+        Dictionary<string, object>? contextProperties = null)
     {
-        ArgumentNullException.ThrowIfNull(rootCapability);
-        return LogDenial(VerifyCapabilityInvocationCoreAsync(securedDocument, explicitRoot: rootCapability, contextProperties: null),
+        ArgumentNullException.ThrowIfNull(securedDocument);
+        if (string.IsNullOrEmpty(expectedAction))
+            throw new ArgumentException("An expected action is required.", nameof(expectedAction));
+        ArgumentNullException.ThrowIfNull(expectedTargets);
+        if (expectedTargets.Count == 0)
+            throw new ArgumentException("At least one expected target is required.", nameof(expectedTargets));
+
+        return LogDenial(
+            VerifyCapabilityInvocationCoreAsync(
+                securedDocument, expectedAction, expectedTargets, expectedRootCapabilityIds, rootCapability, contextProperties),
             "VerifyCapabilityInvocation", TryGetDocId(securedDocument));
     }
-
-    /// <inheritdoc cref="VerifyCapabilityInvocationAsync(JsonObject)"/>
-    public Task<VerificationResult> VerifyCapabilityInvocationDetailedAsync(
-        JsonObject securedDocument, Capability? rootCapability, Dictionary<string, object>? contextProperties)
-        => LogDenial(VerifyCapabilityInvocationCoreAsync(securedDocument, rootCapability, contextProperties),
-            "VerifyCapabilityInvocation", TryGetDocId(securedDocument));
 
     private static string? TryGetDocId(JsonObject? doc)
         => doc is not null && doc.TryGetPropertyValue("id", out var node)
            && node is JsonValue v && v.TryGetValue<string>(out var s) ? s : null;
 
+    /// <summary>The <c>@context</c> entries when a <see cref="JsonNode"/> is an array of strings, else null.</summary>
+    private static IReadOnlyList<string>? AsArrayContextNode(JsonNode? context)
+    {
+        if (context is not JsonArray arr)
+            return null;
+        var list = new List<string>(arr.Count);
+        foreach (var item in arr)
+        {
+            if (item is JsonValue v && v.TryGetValue<string>(out var s))
+                list.Add(s);
+            else
+                return null;
+        }
+        return list;
+    }
+
     private async Task<VerificationResult> VerifyCapabilityInvocationCoreAsync(
-        JsonObject securedDocument, Capability? explicitRoot, Dictionary<string, object>? contextProperties)
+        JsonObject securedDocument,
+        string expectedAction,
+        IReadOnlyCollection<string> expectedTargets,
+        IReadOnlyCollection<string>? expectedRootCapabilityIds,
+        Capability? explicitRoot,
+        Dictionary<string, object>? contextProperties)
     {
         ArgumentNullException.ThrowIfNull(securedDocument);
         try
@@ -571,6 +618,21 @@ public class VerificationService : IVerificationService
             var applicationDocument = securedDocument.DeepClone()!.AsObject();
             applicationDocument.Remove("proof");
 
+            // 1a. SECURITY (forgery defense): the proof's invocation terms (capability/capabilityAction/
+            // invocationTarget) are defined ONLY in the zcap/v1 context, and the proof options canonicalize
+            // under the DOCUMENT's @context. If the document @context omits zcap/v1 (or the suite context),
+            // RDFC-1.0 drops those terms from the signed N-Quads — they become unauthenticated and an
+            // attacker could rewrite them after signing without breaking the signature. Require the document
+            // @context to bind them (mirrors the chain R-CTX-2 check and @digitalbazaar/zcap's
+            // checkProofContext / suite matchProof).
+            var docContext = AsArrayContextNode(applicationDocument["@context"]);
+            var suiteContextUrl = ZcapSuiteCatalog.GetByProofType(proof.Type)?.ContextUrl;
+            if (docContext is null || docContext.Count == 0 || docContext[0] != ZcapV1Context ||
+                (suiteContextUrl is not null && !docContext.Contains(suiteContextUrl)))
+                return VerificationResult.Fail(VerificationOutcome.MalformedCapability,
+                    $"Invocation application document @context MUST be an array beginning with \"{ZcapV1Context}\" " +
+                    "and include the signing suite context, so the proof's invocation terms are signature-bound.");
+
             // 2. Freshness (Issue #71): bound replay independently of nonce eviction; reuse the validated
             // instant for time-based caveats.
             var createdUtc = GetFreshProofCreatedUtc(proof);
@@ -589,6 +651,17 @@ public class VerificationService : IVerificationService
             if (string.IsNullOrEmpty(proof.InvocationTarget))
                 return VerificationResult.Fail(VerificationOutcome.MalformedCapability,
                     "Invocation proof is missing invocationTarget.");
+
+            // 3a. SECURITY (confused-deputy defense): the relying party declared what it authorizes via
+            // expectedAction/expectedTargets. The proof's action/target MUST match exactly — otherwise a
+            // valid invocation the attacker signed over a DIFFERENT capability it holds could be replayed
+            // against this endpoint. Mirrors @digitalbazaar/zcap, which requires expectedAction + expectedTarget.
+            if (!string.Equals(proof.CapabilityAction, expectedAction, StringComparison.Ordinal))
+                return VerificationResult.Fail(VerificationOutcome.ActionNotAllowed,
+                    $"Invocation action '{proof.CapabilityAction}' does not match the expected action '{expectedAction}'.");
+            if (!expectedTargets.Contains(proof.InvocationTarget, StringComparer.Ordinal))
+                return VerificationResult.Fail(VerificationOutcome.InvalidTarget,
+                    $"Invocation target '{proof.InvocationTarget}' is not among the relying party's expected targets.");
 
             // 4. Resolve the invoked capability from the proof's capability shape: a root id string is
             // dereferenced to the trusted root; an embedded delegated zcap is used directly (its chain is
@@ -616,6 +689,14 @@ public class VerificationService : IVerificationService
             var chainResult = await VerifyBuiltChainAsync(chain);
             if (!chainResult.IsValid)
                 return chainResult;
+
+            // 5a. SECURITY (defense in depth): if the relying party pinned the acceptable root
+            // capabilities, the dereferenced chain root MUST be one of them — blocks an
+            // IRootCapabilityResolver that serves an attacker-controlled root over a broad/overlapping target.
+            if (expectedRootCapabilityIds is { Count: > 0 } &&
+                !expectedRootCapabilityIds.Contains(chain[0].Id, StringComparer.Ordinal))
+                return VerificationResult.Fail(VerificationOutcome.MalformedCapability,
+                    $"Resolved root capability '{chain[0].Id}' is not among the relying party's expected roots.");
 
             // 6. invocationTarget must be permitted by the leaf capability's target.
             if (!IsValidInvocationTarget(proof.InvocationTarget, capability.InvocationTarget))

@@ -32,7 +32,10 @@ hashes. This harness replaces inference with an actual `@digitalbazaar/zcap`
   signed application document whose proof alone carries `capability`/`capabilityAction`/
   `invocationTarget`. zcap-dotnet's `SignCapabilityInvocationAsync` / `VerifyCapabilityInvocationAsync`
   round-trip against the real `@digitalbazaar/zcap` `CapabilityInvocation` purpose, root + delegated.
-  The legacy self-contained `Invocation` envelope remains for in-stack use + revocation.
+  The verifier requires the relying party to supply `expectedAction` + `expectedTargets` (as the
+  reference impl does) and validates the application document's `@context` — both are security gates an
+  adversarial review added (confused-deputy + RDFC term-dropping forgery defenses). The legacy
+  self-contained `Invocation` envelope remains for in-stack use + revocation.
 - **Not yet covered:** HTTP-Signature invocations (the deployed `ezcap` transport — Path B). The
   whole stack is **RDFC-1.0 only** (JCS was removed in 4.0.0); RDFC-1.0 is the interop format.
 

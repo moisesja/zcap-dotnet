@@ -16,12 +16,20 @@ Includes everything in the (unreleased) 3.0.0 section below.
 - **`@digitalbazaar/zcap`-compatible Data Integrity invocations ("Path A", #117).** New
   `SigningService.SignCapabilityInvocationAsync(...)` produces a secured application document with a
   `capabilityInvocation` proof whose proof object alone carries `capability`/`capabilityAction`/
-  `invocationTarget` (no self-contained envelope), and `VerificationService.VerifyCapabilityInvocationAsync(...)`
+  `invocationTarget` (no self-contained envelope), and
+  `VerificationService.VerifyCapabilityInvocationAsync(securedDocument, expectedAction, expectedTargets[, …])`
   verifies one (signature over the application document, then chain/attenuation/caveats/controller/
-  freshness/replay). Round-trips live against the real `@digitalbazaar/zcap` `CapabilityInvocation`
-  purpose — root **and** delegated, both directions — in `interop/run-interop.sh` (checks 7–12). This is
-  **additive**: the existing self-contained `Invocation` envelope (used in-stack and for revocation) is
-  unchanged. HTTP-Signature invocations (the `ezcap` transport, "Path B") remain a follow-up (#119).
+  freshness/replay). The verifier has **two security gates** (added after an adversarial red-team of the
+  initial implementation): (a) the relying party MUST declare `expectedAction` + `expectedTargets` (and
+  may pin `expectedRootCapabilityIds`) — the verifier fails closed unless the proof matches, mirroring
+  `@digitalbazaar/zcap`'s required `expectedAction`/`expectedTarget`/`expectedRootCapability` and
+  preventing a confused-deputy replay of an invocation signed over a different capability; (b) the
+  application document's `@context` is validated (array, `[0]==zcap/v1`, includes the suite context)
+  before the signature is trusted, so the invocation terms are actually inside the signed RDFC N-Quads
+  (without it, stripping `zcap/v1` lets an attacker rewrite them — a forgery). Round-trips live against
+  the real `@digitalbazaar/zcap` `CapabilityInvocation` purpose — root **and** delegated, both
+  directions — in `interop/run-interop.sh` (checks 7–12). **Additive**: the self-contained `Invocation`
+  envelope (in-stack + revocation) is unchanged. HTTP-Signature invocations ("Path B") remain a follow-up (#119).
 
 ### Breaking Changes
 

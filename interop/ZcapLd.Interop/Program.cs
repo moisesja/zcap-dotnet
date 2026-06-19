@@ -62,12 +62,15 @@ try
             return await GenerateInvocationAsync(args[1]);
 
         case "verify-invocation":
-            if (args.Length != 3)
+            if (args.Length is < 3 or > 5)
             {
-                Console.Error.WriteLine("Usage: ZcapLd.Interop verify-invocation <securedDocFile> <rootFile>");
+                Console.Error.WriteLine("Usage: ZcapLd.Interop verify-invocation <securedDocFile> <rootFile> [expectedAction] [expectedTarget]");
                 return 2;
             }
-            return await VerifyInvocationAsync(args[1], args[2]);
+            return await VerifyInvocationAsync(
+                args[1], args[2],
+                args.Length > 3 ? args[3] : "read",
+                args.Length > 4 ? args[4] : Target);
 
         default:
             Console.Error.WriteLine($"Unknown command: {args[0]}");
@@ -198,7 +201,7 @@ async Task<int> GenerateInvocationAsync(string vectorsDir)
     return 0;
 }
 
-async Task<int> VerifyInvocationAsync(string securedDocFile, string rootFile)
+async Task<int> VerifyInvocationAsync(string securedDocFile, string rootFile, string expectedAction, string expectedTarget)
 {
     var secured = ReadNode(securedDocFile);
     var root = ReadJson(rootFile);
@@ -212,9 +215,12 @@ async Task<int> VerifyInvocationAsync(string securedDocFile, string rootFile)
         new RevocationService(new InMemoryRevocationStore()),
         new InMemoryNonceStore());
 
-    // Pass the root explicitly so both a root invocation (capability = root id) and a delegated
-    // invocation (chain[0] = root id) can resolve it.
-    var result = await verifier.VerifyCapabilityInvocationDetailedAsync(secured, root, contextProperties: null);
+    // The relying party declares what it authorizes (expected action/target/root) — required, so a
+    // valid invocation over a different capability can't be replayed here. Pass the root explicitly so
+    // both a root invocation (capability = root id) and a delegated invocation (chain[0] = root id) resolve.
+    var result = await verifier.VerifyCapabilityInvocationDetailedAsync(
+        secured, expectedAction, new[] { expectedTarget },
+        expectedRootCapabilityIds: new[] { root.Id }, rootCapability: root, contextProperties: null);
 
     if (result.IsValid)
     {
