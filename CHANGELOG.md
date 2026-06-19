@@ -11,6 +11,18 @@ Delegates zcap's cryptography and canonicalization to the composable foundation 
 makes the wire format interoperable with the `@digitalbazaar/zcap` reference implementation.
 Includes everything in the (unreleased) 3.0.0 section below.
 
+### Added
+
+- **`@digitalbazaar/zcap`-compatible Data Integrity invocations ("Path A", #117).** New
+  `SigningService.SignCapabilityInvocationAsync(...)` produces a secured application document with a
+  `capabilityInvocation` proof whose proof object alone carries `capability`/`capabilityAction`/
+  `invocationTarget` (no self-contained envelope), and `VerificationService.VerifyCapabilityInvocationAsync(...)`
+  verifies one (signature over the application document, then chain/attenuation/caveats/controller/
+  freshness/replay). Round-trips live against the real `@digitalbazaar/zcap` `CapabilityInvocation`
+  purpose — root **and** delegated, both directions — in `interop/run-interop.sh` (checks 7–12). This is
+  **additive**: the existing self-contained `Invocation` envelope (used in-stack and for revocation) is
+  unchanged. HTTP-Signature invocations (the `ezcap` transport, "Path B") remain a follow-up (#119).
+
 ### Breaking Changes
 
 - **Canonicalization is RDFC-1.0 only — JCS support removed.** RDFC-1.0 (W3C RDF Dataset Canonicalization) is now the sole canonicalization, which is what makes proofs verify under `@digitalbazaar/zcap` (proven live by `interop/run-interop.sh`). `SigningService` and `VerificationService` no longer accept a `canonicalizationMethod` argument; the `AddZcapRdfcCanonicalization()` DI toggle and the `JcsDocumentCanonicalizer` / `JsonCanonicalizer` types are removed. **No backwards compatibility:** JCS-signed capabilities issued by ≤3.x do not verify and must be re-signed under RDFC-1.0. (See the revocation-integrity entry below for one behavioral consequence.)

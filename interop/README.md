@@ -2,9 +2,9 @@
 
 This harness **proves at runtime** that zcap-dotnet's RDFC-1.0 path is wire-compatible
 with the [`@digitalbazaar/zcap`](https://github.com/digitalbazaar/zcap) v9 reference
-implementation (the spec authors' library) for **capability delegation proofs** — by
-signing a real capability on one stack and verifying it on the other, in both
-directions, including a tamper-detection negative control and a two-level chain.
+implementation (the spec authors' library) for **capability delegation AND Data Integrity
+invocation** — by signing a real capability/invocation on one stack and verifying it on the
+other, in both directions, including tamper-detection negative controls and a two-level chain.
 
 It is the empirical counterpart to [`docs/ZCAP-LD-INTEROP-COMPATIBILITY-ANALYSIS.md`](../docs/ZCAP-LD-INTEROP-COMPATIBILITY-ANALYSIS.md),
 which inferred RDFC byte-compatibility from decompiled internals + golden-vector
@@ -21,20 +21,20 @@ hashes. This harness replaces inference with an actual `@digitalbazaar/zcap`
 | 4 | **Negative (inbound)** — tampered `allowedAction` on a db zcap → dotnet rejects | FAIL |
 | 5 | **Multi-level outbound** — dotnet 2-level chain `[rootId, {parent}]` → db verifies | PASS |
 | 6 | **Multi-level inbound** — db 2-level chain → dotnet verifies | PASS |
+| 7–10 | **Invocation** (DI `capabilityInvocation`) — root + delegated, both directions | PASS |
+| 11–12 | **Invocation negatives** — tampered `capabilityAction`, both directions | FAIL |
 
 ## Scope
 
-- **In scope:** capability **delegation** proofs (`proofPurpose: capabilityDelegation`),
-  Ed25519Signature2020 over RDFC-1.0, did:key controllers. This is the dominant
-  interop path (the canonicalization blocker, #1 in the analysis report).
-- **Out of scope:** **invocations**. zcap-dotnet signs a self-contained
-  `{id, capability, capabilityAction, invocationTarget}` envelope as the document,
-  whereas digitalbazaar signs an arbitrary application payload with the invocation
-  metadata only in the proof — a structural mismatch (blocker #2) independent of
-  canonicalization. Not exercised here.
-- The default zcap-dotnet canonicalization is **JCS**, which is *not* interoperable;
-  this harness explicitly uses **RDFC-1.0** on both the signer and verifier. The
-  takeaway: RDFC-1.0 is the interop mode.
+- **Delegation** proofs (`proofPurpose: capabilityDelegation`), Ed25519Signature2020 over
+  RDFC-1.0, did:key controllers — the canonicalization path (#1 in the analysis report).
+- **Invocation** via **Data Integrity `capabilityInvocation` proofs** ("Path A", #117): a
+  signed application document whose proof alone carries `capability`/`capabilityAction`/
+  `invocationTarget`. zcap-dotnet's `SignCapabilityInvocationAsync` / `VerifyCapabilityInvocationAsync`
+  round-trip against the real `@digitalbazaar/zcap` `CapabilityInvocation` purpose, root + delegated.
+  The legacy self-contained `Invocation` envelope remains for in-stack use + revocation.
+- **Not yet covered:** HTTP-Signature invocations (the deployed `ezcap` transport — Path B). The
+  whole stack is **RDFC-1.0 only** (JCS was removed in 4.0.0); RDFC-1.0 is the interop format.
 
 ## Run it
 

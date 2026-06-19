@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
 #
-# Live cross-stack RDFC interop harness for ZCAP-LD capability DELEGATION proofs.
+# Live cross-stack RDFC interop harness for ZCAP-LD: capability DELEGATION + Data
+# Integrity INVOCATION proofs.
 #
 # Proves, end-to-end and at runtime, that zcap-dotnet's RDFC-1.0 path is wire-
-# compatible with the @digitalbazaar/zcap v9 reference implementation:
+# compatible with the @digitalbazaar/zcap v9 reference implementation, both ways:
 #
-#   1. OUTBOUND  dotnet signs (RDFC) -> @digitalbazaar/zcap verifies        (must PASS)
-#   2. INBOUND   @digitalbazaar/zcap signs -> dotnet verifies (RDFC)        (must PASS)
-#   3. NEG out   tamper dotnet zcap -> @digitalbazaar/zcap rejects          (must FAIL)
-#   4. NEG in    tamper db zcap -> dotnet rejects                           (must FAIL)
+#   delegation (1-6): dotnet<->db verify single + 2-level chains, + tamper rejects.
+#   invocation (7-12): dotnet<->db verify root + delegated DI capabilityInvocation,
+#                      + tamper rejects.
 #
-# Scope: delegation proofs only (the canonicalization interop path). Invocation
-# interop is a separate envelope concern, out of scope. See
+# Scope: delegation + DI invocation. HTTP-Signature invocations (the deployed ezcap
+# transport, "Path B") are not covered. See docs/ZCAP-LD-ROADMAP.md and
 # docs/ZCAP-LD-INTEROP-COMPATIBILITY-ANALYSIS.md.
 #
 # Usage:  interop/run-interop.sh
@@ -49,6 +49,7 @@ expect() {
 
 dotnet_cli() { dotnet "$DLL" "$@"; }
 js_verify()  { ( cd "$JS" && node verify.mjs "$@" ); }
+js_invoke_verify() { ( cd "$JS" && node invoke-verify.mjs "$@" ); }
 
 cyan "== Setup =="
 echo "-- building .NET harness (Release) --"
@@ -63,9 +64,11 @@ cyan "== Generate fresh vectors (both stacks) =="
 dotnet_cli gen "$VEC/dotnet-root.json" "$VEC/dotnet-delegated.json" || { red "dotnet gen failed"; exit 1; }
 dotnet_cli gen-multi "$VEC/dotnet-multi-root.json" "$VEC/dotnet-multi-l1.json" "$VEC/dotnet-multi-l2.json" \
   || { red "dotnet gen-multi failed"; exit 1; }
+dotnet_cli gen-invocation "$VEC" || { red "dotnet gen-invocation failed"; exit 1; }
 ( cd "$JS" && node gen.mjs ) >/dev/null || { red "js gen failed"; exit 1; }
 ( cd "$JS" && node gen-multi.mjs ) >/dev/null || { red "js gen-multi failed"; exit 1; }
-echo "  wrote single- and multi-level dotnet-*.json and js-*.json under interop/vectors/"
+( cd "$JS" && node invoke-gen.mjs ) >/dev/null || { red "js invoke-gen failed"; exit 1; }
+echo "  wrote delegation + invocation, dotnet-*.json and js-*.json under interop/vectors/"
 
 cyan "== 1. OUTBOUND: @digitalbazaar/zcap verifies the dotnet RDFC capability =="
 js_verify "$VEC/dotnet-delegated.json" "$VEC/dotnet-root.json"
@@ -93,11 +96,41 @@ cyan "== 6. MULTI-LEVEL inbound: zcap-dotnet verifies the db 2-level chain =="
 dotnet_cli verify "$VEC/js-multi-l2.json" "$VEC/js-multi-root.json"
 expect "db -> dotnet   (depth-2 chain verifies locally)" PASS $?
 
-rm -f "$VEC/dotnet-delegated.tampered.json" "$VEC/js-delegated.tampered.json"
+# ── Invocation (Data Integrity capabilityInvocation, Path A) ──
+T=https://example.com/api/items
+
+cyan "== 7. INVOCATION outbound (root): db verifies the dotnet DI invocation =="
+js_invoke_verify "$VEC/dotnet-invocation-root.json" "$VEC/dotnet-invocation-root-zcap.json" read "$T"
+expect "dotnet -> db   (root invocation verifies upstream)" PASS $?
+
+cyan "== 8. INVOCATION inbound (root): zcap-dotnet verifies the db DI invocation =="
+dotnet_cli verify-invocation "$VEC/js-invocation-root.json" "$VEC/js-invocation-root-zcap.json"
+expect "db -> dotnet   (root invocation verifies locally)" PASS $?
+
+cyan "== 9. INVOCATION outbound (delegated): db verifies the dotnet DI invocation =="
+js_invoke_verify "$VEC/dotnet-invocation-delegated.json" "$VEC/dotnet-invocation-delegated-root.json" read "$T"
+expect "dotnet -> db   (delegated invocation verifies upstream)" PASS $?
+
+cyan "== 10. INVOCATION inbound (delegated): zcap-dotnet verifies the db DI invocation =="
+dotnet_cli verify-invocation "$VEC/js-invocation-delegated.json" "$VEC/js-invocation-delegated-root.json"
+expect "db -> dotnet   (delegated invocation verifies locally)" PASS $?
+
+cyan "== 11. INVOCATION negative (outbound): tampered action must be rejected by db =="
+jq '.proof.capabilityAction="write"' "$VEC/dotnet-invocation-root.json" > "$VEC/dotnet-invocation-root.tampered.json"
+js_invoke_verify "$VEC/dotnet-invocation-root.tampered.json" "$VEC/dotnet-invocation-root-zcap.json" write "$T"
+expect "dotnet(tampered invocation) -> db   (rejected)" FAIL $?
+
+cyan "== 12. INVOCATION negative (inbound): tampered action must be rejected by dotnet =="
+jq '.proof.capabilityAction="write"' "$VEC/js-invocation-root.json" > "$VEC/js-invocation-root.tampered.json"
+dotnet_cli verify-invocation "$VEC/js-invocation-root.tampered.json" "$VEC/js-invocation-root-zcap.json"
+expect "db(tampered invocation) -> dotnet   (rejected)" FAIL $?
+
+rm -f "$VEC/dotnet-delegated.tampered.json" "$VEC/js-delegated.tampered.json" \
+      "$VEC/dotnet-invocation-root.tampered.json" "$VEC/js-invocation-root.tampered.json"
 
 echo
 if [[ "$FAIL_COUNT" -eq 0 ]]; then
-  grn "ALL $PASS_COUNT CHECKS PASSED — RDFC delegation interop with @digitalbazaar/zcap proven end-to-end."
+  grn "ALL $PASS_COUNT CHECKS PASSED — RDFC delegation + invocation interop with @digitalbazaar/zcap proven end-to-end."
   exit 0
 else
   red "$FAIL_COUNT check(s) failed, $PASS_COUNT passed."
