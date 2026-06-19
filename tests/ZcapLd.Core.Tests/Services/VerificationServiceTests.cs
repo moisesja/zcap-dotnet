@@ -101,6 +101,79 @@ public class VerificationServiceTests
     }
 
     [Fact]
+    public async Task VerifyChain_ResolvedRootWithAllowedAction_ReturnsFalse()
+    {
+        // R-ROOT-NOEXTRA: allowedAction is a spec MUST-NOT on a root (rejected unconditionally).
+        const string c0 = "did:key:z6MkRootActionOwner";
+        const string c1 = "did:key:z6MkRootActionChild";
+        _didProvider.GenerateAndRegisterKeyPair(c0);
+        _didProvider.GenerateAndRegisterKeyPair(c1);
+
+        var root = await CreateAndRegisterRootAsync(c0, "https://example.com/root-action", new[] { "read" });
+        var delegated = await _capabilityService.DelegateCapabilityAsync(
+            root, c1, new[] { "read" }, DateTime.UtcNow.AddDays(30));
+
+        root.AllowedAction = new[] { "read" };
+
+        (await _verificationService.VerifyCapabilityChainAsync(delegated)).Should().BeFalse(
+            "a resolved root that carries allowedAction violates the root MUST-NOT-extra-fields invariant");
+    }
+
+    [Fact]
+    public async Task VerifyChain_ResolvedRootWithCaveat_ReturnsFalse()
+    {
+        // R-ROOT-NOEXTRA: caveat is a spec MUST-NOT on a root (rejected unconditionally).
+        const string c0 = "did:key:z6MkRootCaveatOwner";
+        const string c1 = "did:key:z6MkRootCaveatChild";
+        _didProvider.GenerateAndRegisterKeyPair(c0);
+        _didProvider.GenerateAndRegisterKeyPair(c1);
+
+        var root = await CreateAndRegisterRootAsync(c0, "https://example.com/root-caveat", new[] { "read" });
+        var delegated = await _capabilityService.DelegateCapabilityAsync(
+            root, c1, new[] { "read" }, DateTime.UtcNow.AddDays(30));
+
+        root.Caveat = new Caveat[] { new ExpirationCaveat { Expires = DateTime.UtcNow.AddDays(1) } };
+
+        (await _verificationService.VerifyCapabilityChainAsync(delegated)).Should().BeFalse(
+            "a resolved root that carries caveat violates the root MUST-NOT-extra-fields invariant");
+    }
+
+    [Fact]
+    public async Task VerifyChain_ResolvedRootWithUnknownFields_RejectedOnlyUnderStrictPolicy()
+    {
+        // Unknown root fields (AdditionalProperties / [JsonExtensionData]) are IGNORED by default —
+        // matching @digitalbazaar/zcap's checkCapability, which ignores unknown root fields — and
+        // rejected only under the opt-in VerificationPolicy.RejectUnknownRootFields.
+        const string c0 = "did:key:z6MkRootExtraOwner";
+        const string c1 = "did:key:z6MkRootExtraChild";
+        _didProvider.GenerateAndRegisterKeyPair(c0);
+        _didProvider.GenerateAndRegisterKeyPair(c1);
+
+        var root = await CreateAndRegisterRootAsync(c0, "https://example.com/root-extra", new[] { "read" });
+        var delegated = await _capabilityService.DelegateCapabilityAsync(
+            root, c1, new[] { "read" }, DateTime.UtcNow.AddDays(30));
+
+        root.AdditionalProperties = new Dictionary<string, JsonElement>
+        {
+            ["x-custom"] = JsonSerializer.SerializeToElement("value"),
+        };
+
+        // Default policy: unknown root fields are tolerated → chain still verifies.
+        (await _verificationService.VerifyCapabilityChainAsync(delegated)).Should().BeTrue(
+            "the default verifier ignores unknown root fields (parity with @digitalbazaar/zcap)");
+
+        // Strict policy: unknown root fields are rejected.
+        var strictVerifier = new VerificationService(
+            _didProvider, _caveatProcessor,
+            new RevocationService(new InMemoryRevocationStore()),
+            new InMemoryNonceStore(),
+            policy: new VerificationPolicy { RejectUnknownRootFields = true });
+
+        (await strictVerifier.VerifyCapabilityChainAsync(delegated)).Should().BeFalse(
+            "RejectUnknownRootFields makes the verifier reject a root carrying unmodeled fields");
+    }
+
+    [Fact]
     public async Task VerifyChain_ResolvedRootWithWrongContext_ReturnsFalse()
     {
         // R-CTX-1 (MUST) on the verify path: a root @context that is not the single string
@@ -144,8 +217,12 @@ public class VerificationServiceTests
             "https://w3id.org/zcap/v1",
         };
 
-        (await _verificationService.VerifyCapabilityChainAsync(delegated)).Should().BeFalse(
-            "a delegated capability whose @context does not begin with the zcap/v1 context must be rejected");
+        // Assert the OUTCOME, not just falsity: the @context gate runs before the signature gate, so a
+        // bad context surfaces as MalformedCapability — not InvalidSignature (which would also fire,
+        // since @context is part of the RDFC-signed N-Quads). Asserting the outcome proves the ordering.
+        var result = await _verificationService.VerifyCapabilityChainDetailedAsync(delegated);
+        result.Outcome.Should().Be(VerificationOutcome.MalformedCapability,
+            "the @context gate must reject a non-zcap-first context before the signature gate runs");
     }
 
     #region Capability Proof Verification Tests

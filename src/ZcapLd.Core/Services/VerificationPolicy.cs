@@ -71,6 +71,23 @@ public sealed record VerificationPolicy
     /// </summary>
     public bool RequireDelegationProofCreated { get; init; }
 
+    /// <summary>
+    /// When <see langword="true"/>, the verifier rejects a resolved root capability that carries any
+    /// field beyond <c>@context</c>/<c>id</c>/<c>controller</c>/<c>invocationTarget</c> — i.e. unknown
+    /// extension fields captured in <c>Capability.AdditionalProperties</c>. The unambiguous root
+    /// MUST-NOT fields (<c>expires</c>/<c>allowedAction</c>/<c>caveat</c>/<c>parentCapability</c>/
+    /// <c>proof</c>) are <b>always</b> rejected; this flag governs only arbitrary unmodeled fields.
+    /// <para>
+    /// Default <see langword="false"/>: <c>@digitalbazaar/zcap</c>'s <c>checkCapability</c> rejects a
+    /// root only for <c>expires</c> — it <b>ignores</b> unknown root fields rather than rejecting them
+    /// — and <c>Capability.AdditionalProperties</c> (<c>[JsonExtensionData]</c>) exists to round-trip
+    /// such unmodeled fields. Hard-rejecting them by default would be stricter than the reference impl
+    /// and could reject a root a deployment legitimately extends. Roots are dereferenced from a trusted
+    /// resolver, so the strict-conformance check is opt-in for verifiers that want it.
+    /// </para>
+    /// </summary>
+    public bool RejectUnknownRootFields { get; init; }
+
     /// <summary>The default policy: no opt-in SHOULD checks enforced.</summary>
     public static VerificationPolicy Default { get; } = new();
 }

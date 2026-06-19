@@ -897,6 +897,9 @@ public class VerificationService : IVerificationService
                     return VerificationResult.Fail(VerificationOutcome.MalformedCapability,
                         $"Delegated capability '{child.Id}' @context MUST be an array beginning with \"{ZcapV1Context}\".");
 
+                // An unknown/absent proof type yields a null suite context — skip the suite-context
+                // assertion deliberately (the signature gate below rejects an unknown suite anyway);
+                // the check only applies when we know which suite context the proof terms require.
                 var suiteContextUrl = ZcapSuiteCatalog.GetByProofType(
                     child.Proof?.FirstDelegationProof()?.Type)?.ContextUrl;
                 if (suiteContextUrl is not null && !childContext.Contains(suiteContextUrl))
@@ -1100,7 +1103,7 @@ public class VerificationService : IVerificationService
 
         // Structural root invariants (shared with the standalone proof path); also covers a direct-root
         // verification, where the leaf IS the root and ResolveRootCapabilityAsync is never reached.
-        ValidateRootCapabilityInvariants(root);
+        ValidateRootCapabilityInvariants(root, _policy.RejectUnknownRootFields);
 
         return chain;
     }
@@ -1433,7 +1436,7 @@ public class VerificationService : IVerificationService
 
         // Enforce the structural root invariants on the standalone proof path too, so it rejects a
         // malformed root identically to the chain-walk path (which validates chain[0] below).
-        ValidateRootCapabilityInvariants(root);
+        ValidateRootCapabilityInvariants(root, _policy.RejectUnknownRootFields);
         return root;
     }
 
@@ -1449,7 +1452,7 @@ public class VerificationService : IVerificationService
     /// malformed root identically. Mirrors the create-time checks in
     /// <c>CapabilityService.ValidateCapabilityAsync</c>, which the crypto verify paths never call.
     /// </summary>
-    private static void ValidateRootCapabilityInvariants(Capability root)
+    private static void ValidateRootCapabilityInvariants(Capability root, bool rejectUnknownRootFields)
     {
         // R-CTX-1 (MUST): a root @context is the single string "https://w3id.org/zcap/v1".
         if (AsStringContext(root.Context) != ZcapV1Context)
@@ -1469,9 +1472,9 @@ public class VerificationService : IVerificationService
         }
 
         // R-ROOT-NOEXTRA (MUST NOT): a root carries ONLY @context/id/controller/invocationTarget.
-        // db's checkCapability rejects a root that carries expires; the spec MUST NOT extends to
-        // allowedAction/caveat/extension fields. The root is dereferenced from a trusted resolver,
-        // so a strict check here is safe and matches the create-time validator.
+        // The unambiguous forbidden fields are rejected unconditionally: db's checkCapability rejects a
+        // root that carries `expires`, and `allowedAction`/`caveat` are spec MUST-NOTs that are
+        // meaningless on a root (zcap's own create path never emits them).
         if (root.Expires != null)
         {
             throw new CapabilityValidationException("Root capability MUST NOT have expires.");
@@ -1484,7 +1487,13 @@ public class VerificationService : IVerificationService
         {
             throw new CapabilityValidationException("Root capability MUST NOT have caveat.");
         }
-        if (root.AdditionalProperties is { Count: > 0 })
+
+        // Arbitrary unmodeled fields are rejected ONLY under the opt-in policy: db's checkCapability
+        // IGNORES (does not reject) unknown root fields, and Capability.AdditionalProperties
+        // ([JsonExtensionData]) exists to round-trip such fields — so rejecting them by default would
+        // be stricter than the reference impl and fight that design. Verifiers that want strict
+        // spec conformance enable VerificationPolicy.RejectUnknownRootFields.
+        if (rejectUnknownRootFields && root.AdditionalProperties is { Count: > 0 })
         {
             throw new CapabilityValidationException(
                 "Root capability MUST NOT carry fields other than @context, id, controller, invocationTarget.");
