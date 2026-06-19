@@ -36,6 +36,7 @@ public class VerificationService : IVerificationService
     private readonly VerificationPolicy _policy;
     private const int MaxChainLength = 10; // Per spec: SHOULD limit to 10
     private const string RootIdPrefix = "urn:zcap:root:";
+    private const string ZcapV1Context = "https://w3id.org/zcap/v1";
 
     /// <summary>
     /// Default window during which invocation nonces are tracked for replay protection. Also serves as
@@ -885,6 +886,27 @@ public class VerificationService : IVerificationService
                 var parent = chain[i - 1];
                 var child = chain[i];
 
+                // R-CTX-2 (MUST): a delegated zcap's @context is an array whose FIRST entry is the
+                // zcap-ld context, and which includes the signing suite's context so the proof terms
+                // (type/proofValue/proofPurpose) JSON-LD-expand to the same RDF terms the spec
+                // reference impl produces. Checked before the signature so a malformed context
+                // surfaces as MalformedCapability rather than InvalidSignature. (Under RDFC the
+                // @context is part of the signed N-Quads, so this is also defense-in-depth.)
+                var childContext = AsArrayContext(child.Context);
+                if (childContext is null || childContext.Count == 0 || childContext[0] != ZcapV1Context)
+                    return VerificationResult.Fail(VerificationOutcome.MalformedCapability,
+                        $"Delegated capability '{child.Id}' @context MUST be an array beginning with \"{ZcapV1Context}\".");
+
+                // An unknown/absent proof type yields a null suite context — skip the suite-context
+                // assertion deliberately (the signature gate below rejects an unknown suite anyway);
+                // the check only applies when we know which suite context the proof terms require.
+                var suiteContextUrl = ZcapSuiteCatalog.GetByProofType(
+                    child.Proof?.FirstDelegationProof()?.Type)?.ContextUrl;
+                if (suiteContextUrl is not null && !childContext.Contains(suiteContextUrl))
+                    return VerificationResult.Fail(VerificationOutcome.MalformedCapability,
+                        $"Delegated capability '{child.Id}' @context MUST include the signing suite context " +
+                        $"'{suiteContextUrl}'.");
+
                 // Verify delegation proof — propagate its specific reason (signature / authorization /
                 // attenuation / expiry) so a broken link surfaces precisely (Issue #70).
                 var linkResult = await VerifyDelegationProofAsync(
@@ -1081,7 +1103,7 @@ public class VerificationService : IVerificationService
 
         // Structural root invariants (shared with the standalone proof path); also covers a direct-root
         // verification, where the leaf IS the root and ResolveRootCapabilityAsync is never reached.
-        ValidateRootCapabilityInvariants(root);
+        ValidateRootCapabilityInvariants(root, _policy.RejectUnknownRootFields);
 
         return chain;
     }
@@ -1414,19 +1436,31 @@ public class VerificationService : IVerificationService
 
         // Enforce the structural root invariants on the standalone proof path too, so it rejects a
         // malformed root identically to the chain-walk path (which validates chain[0] below).
-        ValidateRootCapabilityInvariants(root);
+        ValidateRootCapabilityInvariants(root, _policy.RejectUnknownRootFields);
         return root;
     }
 
     /// <summary>
-    /// Enforces the structural invariants every root capability MUST satisfy: no <c>parentCapability</c>,
-    /// no delegation <c>proof</c> (a root is an unsigned trust anchor), a non-empty <c>controller</c>,
-    /// and a valid absolute <c>invocationTarget</c>. Applied wherever a root is obtained — the resolved
-    /// root on the standalone proof path (<see cref="ResolveRootCapabilityAsync"/>) and the <c>chain[0]</c>
-    /// root on the chain-walk path — so both verifier entry points reject a malformed root identically.
+    /// Enforces the structural invariants every root capability MUST satisfy per W3C ZCAP-LD v0.3:
+    /// its <c>@context</c> is the single string <c>https://w3id.org/zcap/v1</c>; it has no
+    /// <c>parentCapability</c>, no delegation <c>proof</c> (a root is an unsigned trust anchor), and
+    /// no other fields beyond <c>@context</c>/<c>id</c>/<c>controller</c>/<c>invocationTarget</c> (so
+    /// no <c>expires</c>/<c>allowedAction</c>/<c>caveat</c>/extension fields); a non-empty
+    /// <c>controller</c>; and a valid absolute <c>invocationTarget</c>. Applied wherever a root is
+    /// obtained — the resolved root on the standalone proof path (<see cref="ResolveRootCapabilityAsync"/>)
+    /// and the <c>chain[0]</c> root on the chain-walk path — so both verifier entry points reject a
+    /// malformed root identically. Mirrors the create-time checks in
+    /// <c>CapabilityService.ValidateCapabilityAsync</c>, which the crypto verify paths never call.
     /// </summary>
-    private static void ValidateRootCapabilityInvariants(Capability root)
+    private static void ValidateRootCapabilityInvariants(Capability root, bool rejectUnknownRootFields)
     {
+        // R-CTX-1 (MUST): a root @context is the single string "https://w3id.org/zcap/v1".
+        if (AsStringContext(root.Context) != ZcapV1Context)
+        {
+            throw new CapabilityValidationException(
+                $"Root capability @context MUST be the string \"{ZcapV1Context}\".");
+        }
+
         if (!string.IsNullOrEmpty(root.ParentCapability))
         {
             throw new CapabilityValidationException("Root capability MUST NOT have parentCapability.");
@@ -1435,6 +1469,34 @@ public class VerificationService : IVerificationService
         if (root.Proof != null)
         {
             throw new CapabilityValidationException("Root capability MUST NOT include a delegation proof.");
+        }
+
+        // R-ROOT-NOEXTRA (MUST NOT): a root carries ONLY @context/id/controller/invocationTarget.
+        // The unambiguous forbidden fields are rejected unconditionally: db's checkCapability rejects a
+        // root that carries `expires`, and `allowedAction`/`caveat` are spec MUST-NOTs that are
+        // meaningless on a root (zcap's own create path never emits them).
+        if (root.Expires != null)
+        {
+            throw new CapabilityValidationException("Root capability MUST NOT have expires.");
+        }
+        if (root.AllowedAction != null)
+        {
+            throw new CapabilityValidationException("Root capability MUST NOT have allowedAction.");
+        }
+        if (root.Caveat != null)
+        {
+            throw new CapabilityValidationException("Root capability MUST NOT have caveat.");
+        }
+
+        // Arbitrary unmodeled fields are rejected ONLY under the opt-in policy: db's checkCapability
+        // IGNORES (does not reject) unknown root fields, and Capability.AdditionalProperties
+        // ([JsonExtensionData]) exists to round-trip such fields — so rejecting them by default would
+        // be stricter than the reference impl and fight that design. Verifiers that want strict
+        // spec conformance enable VerificationPolicy.RejectUnknownRootFields.
+        if (rejectUnknownRootFields && root.AdditionalProperties is { Count: > 0 })
+        {
+            throw new CapabilityValidationException(
+                "Root capability MUST NOT carry fields other than @context, id, controller, invocationTarget.");
         }
 
         if (root.Controller is null || root.Controller.IsEmpty)
@@ -1446,6 +1508,51 @@ public class VerificationService : IVerificationService
             !Uri.IsWellFormedUriString(root.InvocationTarget, UriKind.Absolute))
         {
             throw new CapabilityValidationException("Root capability MUST include a valid absolute invocationTarget URI.");
+        }
+    }
+
+    /// <summary>The <c>@context</c> as a single string (native or deserialized JsonElement), else null.</summary>
+    private static string? AsStringContext(object? context) => context switch
+    {
+        string s => s,
+        JsonElement { ValueKind: JsonValueKind.String } e => e.GetString(),
+        _ => null,
+    };
+
+    /// <summary>The <c>@context</c> entries when it is an array of strings (native or JsonElement), else null.</summary>
+    private static IReadOnlyList<string>? AsArrayContext(object? context)
+    {
+        static string? AsStr(object? x) => x switch
+        {
+            string s => s,
+            JsonElement { ValueKind: JsonValueKind.String } e => e.GetString(),
+            _ => null,
+        };
+
+        switch (context)
+        {
+            case object[] arr:
+            {
+                var list = new List<string>(arr.Length);
+                foreach (var x in arr)
+                {
+                    if (AsStr(x) is not { } s) return null;
+                    list.Add(s);
+                }
+                return list;
+            }
+            case JsonElement { ValueKind: JsonValueKind.Array } e:
+            {
+                var list = new List<string>();
+                foreach (var item in e.EnumerateArray())
+                {
+                    if (item.ValueKind != JsonValueKind.String) return null;
+                    list.Add(item.GetString()!);
+                }
+                return list;
+            }
+            default:
+                return null;
         }
     }
 

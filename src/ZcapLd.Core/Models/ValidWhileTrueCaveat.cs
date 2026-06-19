@@ -10,6 +10,10 @@ namespace ZcapLd.Core.Models;
 /// requires an async HTTP check handled by <see cref="Services.CaveatProcessor"/> via
 /// <see cref="Services.IValidWhileTrueHandler"/>. Without a handler configured, this
 /// caveat always denies access.
+///
+/// CROSS-STACK: <c>@digitalbazaar/zcap</c> has no generic caveat engine, so a capability whose
+/// security depends on this caveat verifies there with the caveat <b>silently un-enforced</b>. For
+/// cross-stack security guarantees, rely only on <c>expires</c>/<c>allowedAction</c>/<c>invocationTarget</c>.
 /// </summary>
 public class ValidWhileTrueCaveat : Caveat
 {

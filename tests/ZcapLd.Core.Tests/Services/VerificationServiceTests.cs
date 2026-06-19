@@ -78,6 +78,153 @@ public class VerificationServiceTests
             "a validly-signed child that omits allowedAction under a restricting parent must be rejected (omit-to-widen)");
     }
 
+    [Fact]
+    public async Task VerifyChain_ResolvedRootWithExpires_ReturnsFalse()
+    {
+        // R-ROOT-NOEXTRA (MUST NOT) on the verify path: a resolved root carrying `expires` (or any
+        // field beyond @context/id/controller/invocationTarget) must be rejected. The create path
+        // already enforces this; the crypto verify path did not until this change.
+        const string c0 = "did:key:z6MkRootExpiresOwner";
+        const string c1 = "did:key:z6MkRootExpiresChild";
+        _didProvider.GenerateAndRegisterKeyPair(c0);
+        _didProvider.GenerateAndRegisterKeyPair(c1);
+
+        var root = await CreateAndRegisterRootAsync(c0, "https://example.com/root-expires", new[] { "read" });
+        var delegated = await _capabilityService.DelegateCapabilityAsync(
+            root, c1, new[] { "read" }, DateTime.UtcNow.AddDays(30));
+
+        // Tamper the (registered, resolver-returned) root so it carries a forbidden field.
+        root.Expires = ZcapTimestamps.Format(DateTime.UtcNow.AddDays(99));
+
+        (await _verificationService.VerifyCapabilityChainAsync(delegated)).Should().BeFalse(
+            "a resolved root that carries expires violates the root MUST-NOT-extra-fields invariant");
+    }
+
+    [Fact]
+    public async Task VerifyChain_ResolvedRootWithAllowedAction_ReturnsFalse()
+    {
+        // R-ROOT-NOEXTRA: allowedAction is a spec MUST-NOT on a root (rejected unconditionally).
+        const string c0 = "did:key:z6MkRootActionOwner";
+        const string c1 = "did:key:z6MkRootActionChild";
+        _didProvider.GenerateAndRegisterKeyPair(c0);
+        _didProvider.GenerateAndRegisterKeyPair(c1);
+
+        var root = await CreateAndRegisterRootAsync(c0, "https://example.com/root-action", new[] { "read" });
+        var delegated = await _capabilityService.DelegateCapabilityAsync(
+            root, c1, new[] { "read" }, DateTime.UtcNow.AddDays(30));
+
+        root.AllowedAction = new[] { "read" };
+
+        (await _verificationService.VerifyCapabilityChainAsync(delegated)).Should().BeFalse(
+            "a resolved root that carries allowedAction violates the root MUST-NOT-extra-fields invariant");
+    }
+
+    [Fact]
+    public async Task VerifyChain_ResolvedRootWithCaveat_ReturnsFalse()
+    {
+        // R-ROOT-NOEXTRA: caveat is a spec MUST-NOT on a root (rejected unconditionally).
+        const string c0 = "did:key:z6MkRootCaveatOwner";
+        const string c1 = "did:key:z6MkRootCaveatChild";
+        _didProvider.GenerateAndRegisterKeyPair(c0);
+        _didProvider.GenerateAndRegisterKeyPair(c1);
+
+        var root = await CreateAndRegisterRootAsync(c0, "https://example.com/root-caveat", new[] { "read" });
+        var delegated = await _capabilityService.DelegateCapabilityAsync(
+            root, c1, new[] { "read" }, DateTime.UtcNow.AddDays(30));
+
+        root.Caveat = new Caveat[] { new ExpirationCaveat { Expires = DateTime.UtcNow.AddDays(1) } };
+
+        (await _verificationService.VerifyCapabilityChainAsync(delegated)).Should().BeFalse(
+            "a resolved root that carries caveat violates the root MUST-NOT-extra-fields invariant");
+    }
+
+    [Fact]
+    public async Task VerifyChain_ResolvedRootWithUnknownFields_RejectedOnlyUnderStrictPolicy()
+    {
+        // Unknown root fields (AdditionalProperties / [JsonExtensionData]) are IGNORED by default —
+        // matching @digitalbazaar/zcap's checkCapability, which ignores unknown root fields — and
+        // rejected only under the opt-in VerificationPolicy.RejectUnknownRootFields.
+        const string c0 = "did:key:z6MkRootExtraOwner";
+        const string c1 = "did:key:z6MkRootExtraChild";
+        _didProvider.GenerateAndRegisterKeyPair(c0);
+        _didProvider.GenerateAndRegisterKeyPair(c1);
+
+        var root = await CreateAndRegisterRootAsync(c0, "https://example.com/root-extra", new[] { "read" });
+        var delegated = await _capabilityService.DelegateCapabilityAsync(
+            root, c1, new[] { "read" }, DateTime.UtcNow.AddDays(30));
+
+        root.AdditionalProperties = new Dictionary<string, JsonElement>
+        {
+            ["x-custom"] = JsonSerializer.SerializeToElement("value"),
+        };
+
+        // Default policy: unknown root fields are tolerated → chain still verifies.
+        (await _verificationService.VerifyCapabilityChainAsync(delegated)).Should().BeTrue(
+            "the default verifier ignores unknown root fields (parity with @digitalbazaar/zcap)");
+
+        // Strict policy: unknown root fields are rejected.
+        var strictVerifier = new VerificationService(
+            _didProvider, _caveatProcessor,
+            new RevocationService(new InMemoryRevocationStore()),
+            new InMemoryNonceStore(),
+            policy: new VerificationPolicy { RejectUnknownRootFields = true });
+
+        (await strictVerifier.VerifyCapabilityChainAsync(delegated)).Should().BeFalse(
+            "RejectUnknownRootFields makes the verifier reject a root carrying unmodeled fields");
+    }
+
+    [Fact]
+    public async Task VerifyChain_ResolvedRootWithWrongContext_ReturnsFalse()
+    {
+        // R-CTX-1 (MUST) on the verify path: a root @context that is not the single string
+        // "https://w3id.org/zcap/v1" must be rejected.
+        const string c0 = "did:key:z6MkRootCtxOwner";
+        const string c1 = "did:key:z6MkRootCtxChild";
+        _didProvider.GenerateAndRegisterKeyPair(c0);
+        _didProvider.GenerateAndRegisterKeyPair(c1);
+
+        var root = await CreateAndRegisterRootAsync(c0, "https://example.com/root-ctx", new[] { "read" });
+        var delegated = await _capabilityService.DelegateCapabilityAsync(
+            root, c1, new[] { "read" }, DateTime.UtcNow.AddDays(30));
+
+        root.Context = new object[] { "https://example.com/not-zcap" };
+
+        (await _verificationService.VerifyCapabilityChainAsync(delegated)).Should().BeFalse(
+            "a resolved root whose @context is not the zcap/v1 string must be rejected");
+    }
+
+    [Fact]
+    public async Task VerifyChain_DelegatedWithWrongContextFirstEntry_ReturnsFalse()
+    {
+        // R-CTX-2 (MUST) on the verify path: a delegated zcap's @context MUST be an array beginning
+        // with "https://w3id.org/zcap/v1". Sign a valid delegated cap, then reorder its @context so
+        // the zcap-ld context is no longer first (both entries are known contexts, so this isolates
+        // the order check, not a load failure). The context gate runs before the signature gate, so
+        // it surfaces as MalformedCapability.
+        const string c0 = "did:key:z6MkDelegCtxOwner";
+        const string c1 = "did:key:z6MkDelegCtxChild";
+        _didProvider.GenerateAndRegisterKeyPair(c0);
+        _didProvider.GenerateAndRegisterKeyPair(c1);
+
+        var root = await CreateAndRegisterRootAsync(c0, "https://example.com/deleg-ctx", new[] { "read" });
+        var delegated = await _capabilityService.DelegateCapabilityAsync(
+            root, c1, new[] { "read" }, DateTime.UtcNow.AddDays(20));
+
+        // Reorder so the suite context is first and zcap/v1 is second — violates "[0] == zcap/v1".
+        delegated.Context = new object[]
+        {
+            "https://w3id.org/security/suites/ed25519-2020/v1",
+            "https://w3id.org/zcap/v1",
+        };
+
+        // Assert the OUTCOME, not just falsity: the @context gate runs before the signature gate, so a
+        // bad context surfaces as MalformedCapability — not InvalidSignature (which would also fire,
+        // since @context is part of the RDFC-signed N-Quads). Asserting the outcome proves the ordering.
+        var result = await _verificationService.VerifyCapabilityChainDetailedAsync(delegated);
+        result.Outcome.Should().Be(VerificationOutcome.MalformedCapability,
+            "the @context gate must reject a non-zcap-first context before the signature gate runs");
+    }
+
     #region Capability Proof Verification Tests
 
     [Fact]
