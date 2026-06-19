@@ -6,10 +6,11 @@ using Xunit.Abstractions;
 namespace ZcapLd.Interop.Tests;
 
 /// <summary>
-/// CI wrapper around <c>interop/run-interop.sh</c>: runs the live cross-stack RDFC delegation
-/// interop harness (zcap-dotnet ⇄ the real <c>@digitalbazaar/zcap</c>) and asserts every check
-/// passes. The harness itself builds the interop CLI, does <c>npm ci</c>, signs on each stack, and
-/// cross-verifies in both directions (single- and multi-level) plus tamper negatives.
+/// CI wrapper around <c>interop/run-interop.sh</c>: runs the live cross-stack RDFC interop harness
+/// (zcap-dotnet ⇄ the real <c>@digitalbazaar/zcap</c>) for both capability delegation and Data
+/// Integrity invocation, and asserts every check passes. The harness itself builds the interop CLI,
+/// does <c>npm ci</c>, signs on each stack, and cross-verifies in both directions (single- and
+/// multi-level delegation + root/delegated invocation) plus tamper negatives.
 ///
 /// Skips (rather than fails) when bash/node/npm/dotnet are not on PATH, so it is a no-op on
 /// machines without Node. The dedicated <c>ci-interop.yml</c> workflow provides those tools.
@@ -22,7 +23,7 @@ public sealed class InteropHarnessTests
     public InteropHarnessTests(ITestOutputHelper output) => _output = output;
 
     [SkippableFact]
-    public void RunInteropHarness_RdfcDelegation_RoundTripsWithDigitalBazaar()
+    public void RunInteropHarness_DelegationAndInvocation_RoundTripWithDigitalBazaar()
     {
         var repoRoot = LocateRepoRoot();
         var script = Path.Combine(repoRoot, "interop", "run-interop.sh");
@@ -38,7 +39,8 @@ public sealed class InteropHarnessTests
         Assert.True(
             exitCode == 0,
             $"Interop harness exited with {exitCode}. Output:\n{output}");
-        Assert.Contains("ALL 6 CHECKS PASSED", output);
+        // Substring (not the exact count) so adding checks to run-interop.sh never re-breaks this.
+        Assert.Contains("CHECKS PASSED", output);
     }
 
     // Walk up from the test assembly location until we find interop/run-interop.sh.

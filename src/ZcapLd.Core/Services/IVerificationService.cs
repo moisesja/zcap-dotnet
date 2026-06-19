@@ -243,4 +243,13 @@ public interface IVerificationService
         IReadOnlyCollection<string>? expectedRootCapabilityIds = null,
         Capability? rootCapability = null,
         Dictionary<string, object>? contextProperties = null);
+
+    /// <summary>Single-expected-target convenience overload of
+    /// <see cref="VerifyCapabilityInvocationDetailedAsync(JsonObject, string, IReadOnlyCollection{string}, IReadOnlyCollection{string}, Capability, Dictionary{string, object})"/>.</summary>
+    Task<VerificationResult> VerifyCapabilityInvocationDetailedAsync(
+        JsonObject securedDocument,
+        string expectedAction,
+        string expectedTarget,
+        Capability? rootCapability = null,
+        Dictionary<string, object>? contextProperties = null);
 }
