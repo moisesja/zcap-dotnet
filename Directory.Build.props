@@ -5,7 +5,10 @@
          (via NetDid 2.0.0), DataProofs.Rdfc, and NetCid JCS. Source-breaking (consumers
          recompile; NetDid.Core.Crypto types moved to NetCrypto) but WIRE-COMPATIBLE — the
          Ed25519Signature2020 / EcdsaSecp256r1Signature2019 proof bytes are unchanged, so
-         capabilities issued by 3.x still verify. -->
-    <ZcapLdVersion>4.0.0</ZcapLdVersion>
+         capabilities issued by 3.x still verify.
+         4.1.0 (#127): foundation pin bump only — NetDid.* 2.0.1 → 2.2.0 and NetCrypto
+         1.1.0 → 1.2.0 (additive; downstream convergence for net-wallet-sdk 0.2.0). No
+         source or wire changes. -->
+    <ZcapLdVersion>4.1.0</ZcapLdVersion>
   </PropertyGroup>
 </Project>

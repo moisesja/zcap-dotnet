@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [4.1.0] - 2026-07-13
+
+Foundation-pin bump only (issue #127) so a consumer graph can converge cleanly at net-did 2.2.0 /
+NetCrypto 1.2.0 — required for `net-wallet-sdk` 0.2.0's identity document-update / key-rotation
+integrity contract (FR-ID-10), which depends on net-did 2.2.0's `DidUpdateResult` evidence. No source,
+API, or wire changes; capabilities issued by 4.0.0 verify unchanged.
+
+### Changed
+
+- **Dependencies — foundation pins bumped (additive).** `NetDid.Core` / `NetDid.Method.Key`
+  **2.0.1 → 2.2.0** and `NetCrypto` **1.1.0 → 1.2.0**. The surfaces ZcapLd uses (DID resolution,
+  `did:key`) are unchanged; net-did 2.2.0's new `DidUpdateResult` members are nullable additions.
+  Restore is clean (no `NU1605` downgrade) and the full suite (464 Core + 33 AspNetCore) is green.
+
 ## [4.0.0] - 2026-06-19
 
 Delegates zcap's cryptography and canonicalization to the composable foundation (issue #108) and
