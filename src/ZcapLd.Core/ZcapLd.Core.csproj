@@ -56,7 +56,7 @@
          clarity. See LegacyProofCrypto.cs. -->
     <PackageReference Include="DataProofsDotnet.Core" Version="1.1.0" />
     <PackageReference Include="DataProofsDotnet.Rdfc" Version="1.1.0" />
-    <PackageReference Include="DataProofsDotnet.Legacy" Version="1.0.1" />
+    <PackageReference Include="DataProofsDotnet.Legacy" Version="1.1.0" />
     <!-- W3C DID Core and did:key method (DID resolution; crypto via NetCrypto). -->
     <PackageReference Include="NetDid.Core" Version="2.2.0" />
     <PackageReference Include="NetDid.Method.Key" Version="2.2.0" />
