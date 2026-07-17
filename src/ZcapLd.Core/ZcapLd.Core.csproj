@@ -64,7 +64,7 @@
     <!-- Logging abstraction only: lets the verifier emit a diagnostic when it fails closed,
          so a misconfiguration/transient fault is distinguishable from an invalid capability
          (Issue #64). Defaults to NullLogger when no ILogger is supplied. -->
-    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.9" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.10" />
 
     <!-- Embed source and commit metadata for debugging/open-source distribution -->
     <PackageReference Include="Microsoft.SourceLink.GitHub" Version="10.0.300" PrivateAssets="All" />
