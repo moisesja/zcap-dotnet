@@ -18,7 +18,7 @@
   <ItemGroup>
     <ProjectReference Include="../../src/ZcapLd.Core/ZcapLd.Core.csproj" />
     <!-- Direct refs for the in-harness deterministic DID provider (mirrors the test helper). -->
-    <PackageReference Include="NetCrypto" Version="1.2.0" />
+    <PackageReference Include="NetCrypto" Version="1.4.0" />
     <PackageReference Include="NetDid.Core" Version="2.2.0" />
   </ItemGroup>
 

@@ -8,7 +8,11 @@
          capabilities issued by 3.x still verify.
          4.1.0 (#127): foundation pin bump only — NetDid.* 2.0.1 → 2.2.0 and NetCrypto
          1.1.0 → 1.2.0 (additive; downstream convergence for net-wallet-sdk 0.2.0). No
-         source or wire changes. -->
-    <ZcapLdVersion>4.1.0</ZcapLdVersion>
+         source or wire changes.
+         4.1.1: dependency bump — DataProofsDotnet.* Core/Rdfc 1.1.0 → 1.1.1, Legacy
+         1.0.1 → 1.1.1, and NetCrypto 1.2.0 → 1.4.0 (NetDid stays 2.2.0 pending the
+         NetDid 3.0.0 line). Dependency-only; proof/canonicalization wire bytes unchanged
+         (pinned by the golden-vector suite). -->
+    <ZcapLdVersion>4.1.1</ZcapLdVersion>
   </PropertyGroup>
 </Project>

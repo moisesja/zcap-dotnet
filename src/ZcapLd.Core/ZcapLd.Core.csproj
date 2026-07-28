@@ -48,15 +48,15 @@
          for raw sign/verify in CryptoSuite. NetCrypto's ECDSA Sign/Verify default to DER, but the
          W3C `ecdsa-2019` suite requires IEEE P1363 (fixed-width r||s), so CryptoSuite calls the
          format-aware overloads with EcdsaSignatureFormat.IeeeP1363. See CryptoSuite.cs. -->
-    <PackageReference Include="NetCrypto" Version="1.2.0" />
+    <PackageReference Include="NetCrypto" Version="1.4.0" />
     <!-- Data Integrity proof machinery: RDFC-1.0 / JSON-LD canonicalization (DataProofsDotnet.Rdfc)
          and the legacy Linked-Data-Signature cryptosuites — Ed25519Signature2020 /
          EcdsaSecp256r1Signature2019 — that sign/verify zcap's 2020-era wire convention
          (DataProofsDotnet.Legacy). DataProofsDotnet.Core arrives transitively but is listed for
          clarity. See LegacyProofCrypto.cs. -->
-    <PackageReference Include="DataProofsDotnet.Core" Version="1.1.0" />
-    <PackageReference Include="DataProofsDotnet.Rdfc" Version="1.1.0" />
-    <PackageReference Include="DataProofsDotnet.Legacy" Version="1.0.1" />
+    <PackageReference Include="DataProofsDotnet.Core" Version="1.1.1" />
+    <PackageReference Include="DataProofsDotnet.Rdfc" Version="1.1.1" />
+    <PackageReference Include="DataProofsDotnet.Legacy" Version="1.1.1" />
     <!-- W3C DID Core and did:key method (DID resolution; crypto via NetCrypto). -->
     <PackageReference Include="NetDid.Core" Version="2.2.0" />
     <PackageReference Include="NetDid.Method.Key" Version="2.2.0" />
