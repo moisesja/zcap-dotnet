@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [4.2.0] - 2026-07-28
+
+Foundation bump to NetDid 3.0.0 (adds `did:ethr` support upstream). Shipped as a **minor**, not a major:
+NetDid 3.0.0 is source-compatible with 2.x for consumers, zcap's own public API compiles identically,
+and the golden-vector proof + canonicalization suites confirm the `Ed25519Signature2020` /
+`EcdsaSecp256r1Signature2019` proof bytes are byte-identical — capabilities issued by 4.1.x verify
+unchanged.
+
+### Changed
+
+- **Dependencies — NetDid bumped to 3.0.0.** `NetDid.Core` / `NetDid.Method.Key` **2.2.0 → 3.0.0**
+  (upstream adds `did:ethr` and pulls in its supporting deps — e.g. `Microsoft.IdentityModel.Tokens` —
+  transitively). NetDid 3.0.0's `NetCrypto` floor is **1.4.0**, which zcap already pins (from 4.1.1), so
+  there is no `NetCrypto` change and no `NU1605` downgrade. The surfaces zcap uses (DID resolution,
+  `did:key`, `IVerificationRelationshipResolver`) are unchanged; `did:ethr` is a new method zcap does
+  not itself consume. Resolved graph: NetDid.* 3.0.0, NetCrypto 1.4.0, DataProofs 1.1.1. Restore clean,
+  full suite green (464 Core + 33 AspNetCore).
+
 ## [4.1.1] - 2026-07-27
 
 Dependency bump only. No source, API, or wire changes — the golden-vector proof and canonicalization

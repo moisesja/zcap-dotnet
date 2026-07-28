@@ -12,7 +12,11 @@
          4.1.1: dependency bump — DataProofsDotnet.* Core/Rdfc 1.1.0 → 1.1.1, Legacy
          1.0.1 → 1.1.1, and NetCrypto 1.2.0 → 1.4.0 (NetDid stays 2.2.0 pending the
          NetDid 3.0.0 line). Dependency-only; proof/canonicalization wire bytes unchanged
-         (pinned by the golden-vector suite). -->
-    <ZcapLdVersion>4.1.1</ZcapLdVersion>
+         (pinned by the golden-vector suite).
+         4.2.0: NetDid.* 2.2.0 → 3.0.0 (adds did:ethr support; NetCrypto floor stays
+         1.4.0, already pinned). Minor, not major — NetDid 3.0.0 is source-compatible
+         with 2.x for consumers; zcap's own public API compiles identically and the
+         proof/canonicalization wire bytes are unchanged. -->
+    <ZcapLdVersion>4.2.0</ZcapLdVersion>
   </PropertyGroup>
 </Project>
