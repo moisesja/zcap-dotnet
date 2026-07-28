@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [4.1.1] - 2026-07-27
+
+Dependency bump only. No source, API, or wire changes — the golden-vector proof and canonicalization
+suites confirm the `Ed25519Signature2020` / `EcdsaSecp256r1Signature2019` proof bytes are
+byte-identical, so capabilities issued by 4.1.0 verify unchanged.
+
+### Changed
+
+- **Dependencies — DataProofs and NetCrypto bumped.** `DataProofsDotnet.Core` / `DataProofsDotnet.Rdfc`
+  **1.1.0 → 1.1.1**, `DataProofsDotnet.Legacy` **1.0.1 → 1.1.1**, and `NetCrypto` **1.2.0 → 1.4.0**.
+  Restore is clean (no `NU1605` downgrade), the resolved graph converges (DataProofs 1.1.1, NetCrypto
+  1.4.0), and the full suite (464 Core + 33 AspNetCore) is green. `NetDid.*` stays at **2.2.0** (the
+  #127 convergence pin) pending the NetDid 3.0.0 line; NetDid 2.2.0 remains compatible with NetCrypto
+  1.4.0.
+
 ## [4.1.0] - 2026-07-13
 
 Foundation-pin bump only (issue #127) so a consumer graph can converge cleanly at net-did 2.2.0 /
