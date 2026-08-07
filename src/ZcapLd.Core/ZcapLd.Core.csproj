@@ -54,7 +54,7 @@
          EcdsaSecp256r1Signature2019 — that sign/verify zcap's 2020-era wire convention
          (DataProofsDotnet.Legacy). DataProofsDotnet.Core arrives transitively but is listed for
          clarity. See LegacyProofCrypto.cs. -->
-    <PackageReference Include="DataProofsDotnet.Core" Version="1.1.1" />
+    <PackageReference Include="DataProofsDotnet.Core" Version="1.3.0" />
     <PackageReference Include="DataProofsDotnet.Rdfc" Version="1.1.1" />
     <PackageReference Include="DataProofsDotnet.Legacy" Version="1.1.1" />
     <!-- W3C DID Core and did:key method (DID resolution; crypto via NetCrypto). -->
