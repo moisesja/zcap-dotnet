@@ -58,8 +58,8 @@
     <PackageReference Include="DataProofsDotnet.Rdfc" Version="1.1.1" />
     <PackageReference Include="DataProofsDotnet.Legacy" Version="1.1.1" />
     <!-- W3C DID Core and did:key method (DID resolution; crypto via NetCrypto). -->
-    <PackageReference Include="NetDid.Core" Version="3.0.0" />
-    <PackageReference Include="NetDid.Method.Key" Version="3.0.0" />
+    <PackageReference Include="NetDid.Core" Version="3.1.0" />
+    <PackageReference Include="NetDid.Method.Key" Version="3.1.0" />
 
     <!-- Logging abstraction only: lets the verifier emit a diagnostic when it fails closed,
          so a misconfiguration/transient fault is distinguishable from an invalid capability
