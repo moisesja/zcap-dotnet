@@ -194,7 +194,10 @@ Full developer guide: [`docs/REVOCATION-INTEGRATION.md`](docs/REVOCATION-INTEGRA
 The supported [ZCAP v0.4.0 profile](https://w3c-ccg.github.io/zcap-spec/v0.4.0/)
 uses `expires`, `allowedAction`, and `invocationTarget` to restrict delegated authority.
 Vocabulary-based `caveat` fields are rejected, including unknown types, empty arrays,
-and null values, throughout embedded chains. There is no custom caveat registry or
+and null values, throughout embedded chains. Equivalent absolute-IRI/prefixed keys
+and nested restriction nodes are rejected too. Capability/proof contexts are limited
+to zcap/v1 and supported proof-suite contexts; inline aliases are unsupported.
+There is no custom caveat registry or
 remote `ValidWhileTrue` handler.
 
 ```csharp

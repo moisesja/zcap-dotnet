@@ -26,6 +26,9 @@ and target. The root is referenced by ID; a delegated invocation embeds the zcap
 Version 5 removes all typed caveat APIs and invocation-context property overloads.
 Incoming `caveat` fields are rejected even when null or empty. Use `expires`,
 `allowedAction`, and an optional delegation `invocationTarget` instead.
+Equivalent IRI/prefixed keys and nested restrictions are rejected throughout
+capability/proof JSON. Their contexts must be zcap/v1 or a supported proof-suite
+context; inline aliases and unrelated vocabularies are unsupported.
 `VerificationPolicy.AllowTargetAttenuation` defaults to false; explicitly enable
 it for path/query narrowing. The target API must enforce parameter semantics.
 

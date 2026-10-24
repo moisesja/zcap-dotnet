@@ -35,6 +35,10 @@ internal static class ZcapSuiteCatalog
 
     private static readonly ZcapSuiteInfo[] All = [Ed25519, P256];
 
+    /// <summary>Only contexts defining the supported proof suites belong in a capability.</summary>
+    internal static bool IsSupportedContext(string? contextUrl)
+        => All.Any(s => string.Equals(s.ContextUrl, contextUrl, StringComparison.Ordinal));
+
     /// <summary>The suite whose key type equals the resolved verification-method key type, or <c>null</c>.</summary>
     public static ZcapSuiteInfo? GetByKeyType(string? keyType)
         => string.IsNullOrEmpty(keyType)

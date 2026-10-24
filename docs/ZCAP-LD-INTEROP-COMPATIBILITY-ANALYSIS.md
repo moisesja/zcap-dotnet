@@ -17,16 +17,24 @@ and `Ed25519Signature2020` 5.4.0 in `interop/js/package.json`.
 | 7–10 | Root and delegated application-document DI invocation, both directions |
 | 11–12 | Tampered invocation action rejected, both directions |
 
-`interop/js/profile.mjs` adds 109 assertions, signing independent target variants in each
+`interop/js/profile.mjs` adds a profile matrix, signing independent target variants in each
 stack and tests exact targets, `/`, `?`, `&`, sibling-prefix errors and wrong
 query delimiters. Both verifier policy settings are exercised for delegation,
 root invocation and delegated invocation. Negative CLI checks require a validation
 outcome rather than treating any process crash as successful rejection.
 
-The profile matrix also verifies that built-in typed caveats are refused by stock
-JS safe-mode signing/verification and by .NET verification. .NET additionally
-rejects empty/null/custom caveat fields by presence. Unit tests cover nested
-ancestors, secondary proofs, both invocation forms and signing rejection.
+The profile matrix separates three behaviors. Stock JS signing rejects legacy
+`UsageCount` because `maxUses` is undefined, and `ValidWhileTrue` / `Expiration`
+because their type values are relative references. Assertions check the exact
+JSON-LD validation event. Recognized caveat nodes can instead be signed and verified
+by JS without enforcing their meaning; independently signed compact, absolute-IRI
+and `@nest` fixtures are accepted by JS and refused by .NET. Editing a signed node
+is a separate signature-tampering test with an explicit `Invalid signature` assertion.
+
+.NET also rejects empty/null/custom caveats by presence. Unit tests cover nested
+ancestors, secondary proofs, both invocation forms, signing rejection and equivalent
+JSON-LD representations. Capability/proof contexts are restricted to zcap/v1 and
+the supported proof suites, preventing arbitrary vocabulary aliases.
 
 ## Issue #149 and correction to #144
 
@@ -39,8 +47,10 @@ caveats while ignoring their meaning. Both generalizations were incorrect:
 - `Expiration.expires` is signed because the context defines `expires`. The
   expiration-only experiment in [#144](https://github.com/moisesja/zcap-dotnet/issues/144)
   did not establish integrity of other types. The broader conclusion is withdrawn.
-- Stock `jsonld-signatures` safe mode rejects these built-in type values. They
-  never formed a working interoperable caveat vocabulary with this harness.
+- Stock `jsonld-signatures` safe mode rejects the legacy shapes for the specific
+  vocabulary errors above. It does accept recognized caveat nodes; verification
+  does not establish enforcement of the restriction. Neither observation provides
+  interoperable semantics for the removed .NET caveat types.
 
 Version 5 removes the caveat API and rejects all capability `caveat` fields.
 It does not offer an extension-context or passthrough acceptance mode. The custom

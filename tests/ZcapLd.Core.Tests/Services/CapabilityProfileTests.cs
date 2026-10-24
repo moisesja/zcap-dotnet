@@ -39,8 +39,8 @@ public class CapabilityProfileTests
 
     private static Capability Copy(Capability cap) => JsonSerializer.Deserialize<Capability>(
         JsonSerializer.Serialize(cap, ZcapJsonOptions.Default), ZcapJsonOptions.Default)!;
-    private static void Caveat(Capability cap, string json) =>
-        (cap.AdditionalProperties ??= new())["caveat"] = JsonDocument.Parse(json).RootElement.Clone();
+    private static void Caveat(Capability cap, string json, string key = "caveat") =>
+        (cap.AdditionalProperties ??= new())[key] = JsonDocument.Parse(json).RootElement.Clone();
 
     // Construct legacy signed fixtures below the public signing boundary. Otherwise a regression
     // in verification could be masked by SignCapabilityAsync's issuance rejection.
@@ -52,25 +52,35 @@ public class CapabilityProfileTests
         proof.ProofValue = MultibaseCodec.Encode((await _dids.SignAsync(signer, bytes)).Signature);
     }
 
-    public static TheoryData<string> Caveats => new()
+    public static TheoryData<string, string> Caveats
     {
-        "null", "[]", "{}",
-        "[{\"type\":\"Expiration\",\"expires\":\"2099-01-01T00:00:00Z\"}]",
-        "[{\"type\":\"UsageCount\",\"maxUses\":1}]",
-        "[{\"type\":\"ValidWhileTrue\",\"uri\":\"https://issuer.example/status\"}]",
-        "[{\"type\":\"UnknownRestriction\",\"value\":1}]"
-    };
+        get
+        {
+            var cases = new TheoryData<string, string>();
+            foreach (var key in new[] { "caveat", "https://w3id.org/security#caveat" })
+            foreach (var value in new[]
+            {
+                "null", "[]", "{}",
+                "[{\"id\":\"urn:restriction:usage-limit-1\"}]",
+                "[{\"type\":\"Expiration\",\"expires\":\"2099-01-01T00:00:00Z\"}]",
+                "[{\"type\":\"UsageCount\",\"maxUses\":1}]",
+                "[{\"type\":\"ValidWhileTrue\",\"uri\":\"https://issuer.example/status\"}]",
+                "[{\"type\":\"UnknownRestriction\",\"value\":1}]"
+            }) cases.Add(key, value);
+            return cases;
+        }
+    }
 
     [Theory]
     [MemberData(nameof(Caveats))]
-    public async Task EveryCaveatShape_IsRejectedAtIssuanceAndVerification(string caveat)
+    public async Task EveryCaveatShape_IsRejectedAtIssuanceAndVerification(string key, string caveat)
     {
         var (root, leaf) = await Chain();
         (await Verifier().VerifyCapabilityChainAsync(leaf, root)).Should().BeTrue();
-        Caveat(leaf, caveat);
+        Caveat(leaf, caveat, key);
         await ResignLegacy(leaf, _owner);
         var received = Copy(leaf);
-        received.AdditionalProperties.Should().ContainKey("caveat");
+        received.AdditionalProperties.Should().ContainKey(key);
         (await Verifier().VerifyCapabilityProofDetailedAsync(received, root)).Outcome.Should().Be(VerificationOutcome.MalformedCapability);
         (await Verifier().VerifyCapabilityChainDetailedAsync(received, root)).Outcome.Should().Be(VerificationOutcome.MalformedCapability);
         (await _caps.ValidateCapabilityAsync(received)).Should().BeFalse();
@@ -105,16 +115,18 @@ public class CapabilityProfileTests
     }
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task EmbeddedGrandparent_AndSecondaryProof_AreInspected(bool secondaryProof)
+    [InlineData(false, "caveat")]
+    [InlineData(true, "caveat")]
+    [InlineData(false, "https://w3id.org/security#caveat")]
+    [InlineData(true, "https://w3id.org/security#caveat")]
+    public async Task EmbeddedGrandparent_AndSecondaryProof_AreInspected(bool secondaryProof, string key)
     {
         var (root, first) = await Chain();
         var middle = await _caps.DelegateCapabilityAsync(first, _holder, ["read"]);
         var leaf = await _caps.DelegateCapabilityAsync(middle, _holder, ["read"]);
         (await Verifier().VerifyCapabilityProofAsync(leaf, root)).Should().BeTrue();
         var legacy = Copy(first);
-        Caveat(legacy, "[]");
+        Caveat(legacy, "[]", key);
         if (secondaryProof)
         {
             leaf.Proof = new[] { leaf.Proof!.Primary, new Proof { ProofPurpose = "assertionMethod", CapabilityChain = [root.Id, legacy] } };
@@ -130,10 +142,13 @@ public class CapabilityProfileTests
     }
 
     [Theory]
-    [InlineData("argument")]
-    [InlineData("body")]
-    [InlineData("proof")]
-    public async Task EnvelopeChecksAllThreeCapabilityRepresentations(string location)
+    [InlineData("argument", "caveat")]
+    [InlineData("body", "caveat")]
+    [InlineData("proof", "caveat")]
+    [InlineData("argument", "https://w3id.org/security#caveat")]
+    [InlineData("body", "https://w3id.org/security#caveat")]
+    [InlineData("proof", "https://w3id.org/security#caveat")]
+    public async Task EnvelopeChecksAllThreeCapabilityRepresentations(string location, string key)
     {
         var (root, leaf) = await Chain();
         var invocation = _caps.CreateInvocation(Copy(leaf), "read");
@@ -141,12 +156,14 @@ public class CapabilityProfileTests
         invocation.Proof.Capability = InvocationCapability.FromCapability(Copy(leaf));
         (await Verifier().VerifyInvocationAsync(invocation, leaf, root)).Should().BeTrue();
         var target = location switch { "argument" => leaf, "body" => invocation.Capability.EmbeddedCapability!, _ => invocation.Proof.Capability.EmbeddedCapability! };
-        Caveat(target, "null");
+        Caveat(target, "null", key);
         (await Verifier().VerifyInvocationDetailedAsync(invocation, leaf, root)).Outcome.Should().Be(VerificationOutcome.MalformedCapability);
     }
 
-    [Fact]
-    public async Task DiInvocation_RejectsEmbeddedCaveat_WithoutRejectingApplicationFields()
+    [Theory]
+    [InlineData("caveat")]
+    [InlineData("https://w3id.org/security#caveat")]
+    public async Task DiInvocation_RejectsEmbeddedCaveat_WithoutRejectingApplicationFields(string key)
     {
         var (root, leaf) = await Chain();
         var app = new JsonObject
@@ -157,7 +174,7 @@ public class CapabilityProfileTests
         };
         var doc = await _signing.SignCapabilityInvocationAsync(InvocationCapability.FromCapability(leaf), "read", leaf.InvocationTarget, _holder, app);
         (await Verifier().VerifyCapabilityInvocationAsync(doc, "read", [leaf.InvocationTarget], root)).Should().BeTrue();
-        doc["proof"]!["capability"]!["caveat"] = new JsonArray();
+        doc["proof"]!["capability"]![key] = new JsonArray();
         (await Verifier().VerifyCapabilityInvocationDetailedAsync(doc, "read", [leaf.InvocationTarget], rootCapability: root)).Outcome.Should().Be(VerificationOutcome.MalformedCapability);
     }
 
@@ -172,11 +189,15 @@ public class CapabilityProfileTests
     }
 
     [Theory]
-    [InlineData("argument")]
-    [InlineData("root")]
-    [InlineData("body")]
-    [InlineData("proof")]
-    public async Task RevocationChecksAllCapabilityRepresentations_BeforeRecording(string location)
+    [InlineData("argument", "caveat")]
+    [InlineData("root", "caveat")]
+    [InlineData("body", "caveat")]
+    [InlineData("proof", "caveat")]
+    [InlineData("argument", "https://w3id.org/security#caveat")]
+    [InlineData("root", "https://w3id.org/security#caveat")]
+    [InlineData("body", "https://w3id.org/security#caveat")]
+    [InlineData("proof", "https://w3id.org/security#caveat")]
+    public async Task RevocationChecksAllCapabilityRepresentations_BeforeRecording(string location, string key)
     {
         var (root, leaf) = await Chain();
         var store = new InMemoryRevocationStore();
@@ -185,14 +206,14 @@ public class CapabilityProfileTests
         var embedded = Copy(leaf);
         switch (location)
         {
-            case "argument": Caveat(leaf, "null"); break;
-            case "root": Caveat(root, "null"); break;
+            case "argument": Caveat(leaf, "null", key); break;
+            case "root": Caveat(root, "null", key); break;
             case "body":
-                Caveat(embedded, "null");
+                Caveat(embedded, "null", key);
                 request.Capability = InvocationCapability.FromCapability(embedded);
                 break;
             case "proof":
-                Caveat(embedded, "null");
+                Caveat(embedded, "null", key);
                 request.Proof!.Capability = InvocationCapability.FromCapability(embedded);
                 break;
         }
@@ -203,8 +224,8 @@ public class CapabilityProfileTests
         (await verifier.RevokeCapabilityAsync(leaf, request, root)).Should().BeFalse();
         (await store.GetByCapabilityIdAsync(leaf.Id)).Should().BeNull();
 
-        leaf.AdditionalProperties?.Remove("caveat");
-        root.AdditionalProperties?.Remove("caveat");
+        leaf.AdditionalProperties?.Remove(key);
+        root.AdditionalProperties?.Remove(key);
         var clean = await _signing.SignRevocationAsync(leaf.Id, _owner, leaf.InvocationTarget);
         (await verifier.RevokeCapabilityAsync(leaf, clean, root)).Should().BeTrue();
         (await store.GetByCapabilityIdAsync(leaf.Id)).Should().NotBeNull();
@@ -230,6 +251,96 @@ public class CapabilityProfileTests
         var cap = new Capability();
         cap.Proof = new Proof { CapabilityChain = [cap] };
         CapabilityProfile.IsSupported(cap).Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData("inline-alias")]
+    [InlineData("scoped-prefix")]
+    [InlineData("@nest")]
+    [InlineData("@graph")]
+    [InlineData("@included")]
+    [InlineData("same-id")]
+    [InlineData("proof-context")]
+    public async Task EquivalentJsonLdRestrictions_AreRejected(string representation)
+    {
+        var (root, leaf) = await Chain();
+        const string iri = "https://w3id.org/security#caveat";
+        var node = JsonSerializer.SerializeToNode(leaf, ZcapJsonOptions.Default)!;
+        var restriction = new JsonArray(new JsonObject { ["id"] = "urn:restriction:usage-limit-1" });
+        switch (representation)
+        {
+            case "inline-alias":
+                node["@context"]!.AsArray().Add(new JsonObject { ["restriction"] = iri });
+                node["restriction"] = restriction;
+                break;
+            case "scoped-prefix":
+                node["@context"]!.AsArray().Add("https://www.w3.org/2018/credentials/v1");
+                node["type"] = "VerifiableCredential";
+                node["sec:caveat"] = restriction;
+                break;
+            case "proof-context":
+                node["proof"]!["@context"] = new JsonObject { ["restriction"] = iri };
+                node["proof"]!["restriction"] = restriction;
+                break;
+            case "@nest":
+                node["@nest"] = new JsonObject { ["caveat"] = restriction };
+                break;
+            default:
+                node[representation == "same-id" ? "https://example.com/note" : representation] =
+                    new JsonObject { ["id"] = leaf.Id, [iri] = restriction };
+                break;
+        }
+        leaf = node.Deserialize<Capability>(ZcapJsonOptions.Default)!;
+        await ResignLegacy(leaf, _owner);
+        // Independent legacy signing ensures rejection is tested below the public issuance gate.
+        (await Verifier().VerifyCapabilityProofDetailedAsync(Copy(leaf), root)).Outcome.Should().Be(VerificationOutcome.MalformedCapability);
+        (await Verifier().VerifyCapabilityChainDetailedAsync(Copy(leaf), root)).Outcome.Should().Be(VerificationOutcome.MalformedCapability);
+        await Assert.ThrowsAsync<CapabilityValidationException>(() => _signing.SignCapabilityAsync(leaf, _owner, "capabilityDelegation"));
+        await Assert.ThrowsAsync<CapabilityValidationException>(() => _signing.SignCapabilityInvocationAsync(
+            InvocationCapability.FromCapability(leaf), "read", leaf.InvocationTarget, _holder));
+    }
+
+    [Theory]
+    [InlineData(null, "parentCapability")]
+    [InlineData("https://example.com/has space", "invocationTarget")]
+    public async Task InvalidTarget_IdentifiesTheSuppliedArgument(string? target, string expectedParameter)
+    {
+        var (root, _) = await Chain();
+        root.InvocationTarget = "https://example.com/has space";
+        var error = await Assert.ThrowsAsync<ArgumentException>(() => _caps.DelegateCapabilityAsync(
+            root, _holder, ["read"], DateTime.UtcNow.AddDays(1), invocationTarget: target));
+        error.ParamName.Should().Be(expectedParameter);
+    }
+
+    [Theory]
+    [InlineData("caveat")]
+    [InlineData("@context")]
+    public async Task GeneratedRevocationProof_MustMeetVerifierProfile(string reservedKey)
+    {
+        var (_, leaf) = await Chain();
+        await Assert.ThrowsAsync<CapabilityValidationException>(() => _signing.SignRevocationAsync(
+            leaf.Id, _owner, leaf.InvocationTarget, metadata: new Dictionary<string, string> { [reservedKey] = "unsupported" }));
+    }
+
+    [Fact]
+    public async Task InvocationAndRevocationProofContexts_RejectInlineAliases()
+    {
+        var (root, leaf) = await Chain();
+        using var aliases = JsonDocument.Parse("{\"restriction\":\"https://w3id.org/security#caveat\"}");
+        var envelope = _caps.CreateInvocation(leaf, "read");
+        envelope.Proof = await _signing.SignInvocationAsync(envelope, _holder);
+        envelope.Proof.AdditionalProperties = new() { ["@context"] = aliases.RootElement.Clone() };
+        (await Verifier().VerifyInvocationDetailedAsync(envelope, leaf, root)).Outcome.Should().Be(VerificationOutcome.MalformedCapability);
+
+        var secured = await _signing.SignCapabilityInvocationAsync(
+            InvocationCapability.FromCapability(leaf), "read", leaf.InvocationTarget, _holder);
+        secured["proof"]!["@context"] = JsonNode.Parse(aliases.RootElement.GetRawText());
+        (await Verifier().VerifyCapabilityInvocationDetailedAsync(secured, "read", [leaf.InvocationTarget], rootCapability: root))
+            .Outcome.Should().Be(VerificationOutcome.MalformedCapability);
+
+        var request = await _signing.SignRevocationAsync(leaf.Id, _owner, leaf.InvocationTarget);
+        request.Proof!.AdditionalProperties = new() { ["@context"] = aliases.RootElement.Clone() };
+        (await Verifier().RevokeCapabilityAsync(leaf, request, root)).Should().BeFalse();
     }
 
     [Theory]

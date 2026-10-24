@@ -9,7 +9,15 @@ namespace ZcapLd.Core.Services;
 internal static class CapabilityProfile
 {
     internal const string RejectionMessage =
-        "Vocabulary-based caveats are not supported. Use expires, allowedAction and invocationTarget attenuation.";
+        "Unsupported caveat vocabulary or capability/proof context. Use expires, allowedAction and invocationTarget attenuation with the supported suite contexts.";
+
+    private static readonly HashSet<string> CaveatKeys = new(StringComparer.Ordinal)
+    {
+        "caveat", "https://w3id.org/security#caveat", "sec:caveat"
+    };
+
+    internal static bool IsSupportedProof(Proof? proof)
+        => proof is null || IsSupported(new Capability { Proof = proof });
 
     internal static void EnsureSupported(Capability? capability, object[]? chain = null)
     {
@@ -17,8 +25,9 @@ internal static class CapabilityProfile
             throw new CapabilityValidationException(RejectionMessage);
     }
 
-    // Walk only capability locations, not arbitrary application payload properties. All proof-set
-    // members are inspected, including ancestors not selected by the cryptographic verifier.
+    // Inspect capability/proof JSON, including extension data: @nest/@graph or a nested object
+    // with the capability's id can add RDF properties to that same capability. Application
+    // document bodies are outside this scan. Restrict contexts to prevent alternate aliases.
     // Bounds also reject cycles in programmatically constructed capability graphs.
     internal static bool IsSupported(Capability? capability, object[]? chain = null)
     {
@@ -38,30 +47,42 @@ internal static class CapabilityProfile
             if (value is null or string) return true;
             if (value is Capability cap)
             {
-                if (cap.AdditionalProperties?.ContainsKey("caveat") == true) return false;
+                if (!CheckContext(cap.Context) ||
+                    cap.AdditionalProperties?.ContainsKey("@context") == true ||
+                    !CheckProperties(cap.AdditionalProperties, depth)) return false;
                 return cap.Proof == null || cap.Proof.Values.All(proof =>
+                    CheckProperties(proof.AdditionalProperties, depth + 1) &&
                     (proof.CapabilityChain == null || proof.CapabilityChain.All(entry => Check(entry, depth + 1))) &&
                     Check(proof.Capability?.EmbeddedCapability, depth + 1));
             }
 
             var json = value is JsonElement element ? element :
                 JsonSerializer.SerializeToElement(value, ZcapJsonOptions.Default);
-            if (json.ValueKind != JsonValueKind.Object) return true;
-            if (json.TryGetProperty("caveat", out _)) return false;
-            if (!json.TryGetProperty("proof", out var proofs)) return true;
-            return proofs.ValueKind == JsonValueKind.Array
-                ? proofs.EnumerateArray().All(proof => CheckProof(proof, depth + 1))
-                : CheckProof(proofs, depth + 1);
+            if (json.ValueKind == JsonValueKind.Array)
+                return json.EnumerateArray().All(entry => Check(entry, depth + 1));
+            return json.ValueKind != JsonValueKind.Object || json.EnumerateObject().All(property =>
+                CheckProperty(property.Name, property.Value, depth));
         }
 
-        bool CheckProof(JsonElement proof, int depth)
+        bool CheckProperties(Dictionary<string, JsonElement>? properties, int depth)
+            => properties == null || properties.All(property => CheckProperty(property.Key, property.Value, depth));
+
+        bool CheckProperty(string name, JsonElement value, int depth)
         {
-            if (--remaining < 0 || depth > 32) return false;
-            if (proof.ValueKind != JsonValueKind.Object) return true;
-            if (proof.TryGetProperty("capabilityChain", out var ancestors) &&
-                ancestors.ValueKind == JsonValueKind.Array &&
-                !ancestors.EnumerateArray().All(entry => Check(entry, depth + 1))) return false;
-            return !proof.TryGetProperty("capability", out var embedded) || Check(embedded, depth + 1);
+            if (CaveatKeys.Contains(name)) return false;
+            return name == "@context" ? CheckContext(value) : Check(value, depth + 1);
+        }
+
+        bool CheckContext(object? context)
+        {
+            bool Known(string? url) => url == "https://w3id.org/zcap/v1" || ZcapSuiteCatalog.IsSupportedContext(url);
+            if (context is string url) return Known(url);
+            var json = context is JsonElement element ? element : JsonSerializer.SerializeToElement(context);
+            if (json.ValueKind == JsonValueKind.String) return Known(json.GetString());
+            // No inline definitions, scoped aliases, or unrelated offline vocabulary. This is
+            // intentionally a supported-profile restriction, not a second JSON-LD expander.
+            return json.ValueKind == JsonValueKind.Array && json.GetArrayLength() is > 0 and <= 32 &&
+                json.EnumerateArray().All(entry => entry.ValueKind == JsonValueKind.String && Known(entry.GetString()));
         }
     }
 }

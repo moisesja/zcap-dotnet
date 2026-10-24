@@ -10,7 +10,7 @@
 
 See [requirements](ZCAP-LD-SPECIFICATION-REQUIREMENTS.md),
 [compatibility evidence](ZCAP-LD-INTEROP-COMPATIBILITY-ANALYSIS.md), and
-[the implementation checklist](../tasks/todo20261024-149.md).
+[the implementation checklist](../tasks/plan20261024-149.md).
 
 ## Remaining work
 

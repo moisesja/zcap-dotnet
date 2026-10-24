@@ -87,6 +87,14 @@ representation in an envelope invocation or signed revocation request. Signing a
 unsupported profile. Arbitrary application-document properties are not treated
 as capability policy.
 
+Equivalent keys `https://w3id.org/security#caveat` and `sec:caveat` are also rejected.
+The bounded scan includes capability/proof extension JSON: `@nest`, `@graph`,
+`@included` and objects sharing the capability ID can otherwise add the same RDF
+predicate. Capability and proof contexts are limited to zcap/v1 and supported suite
+contexts; inline aliases and unrelated offline vocabularies are refused even by
+signing and standalone proof verification. This is a deliberate profile restriction.
+Reserved caveat/context keys inside proof extensions are screened at signing too.
+
 `UsageCount.maxUses` and `ValidWhileTrue.uri` were not covered by the old RDFC
 signature. Changing either could leave verification valid. `Expiration.expires`
 was covered because the context defines `expires`; that did not prove integrity
@@ -111,6 +119,8 @@ unsupported-caveat rejection. See `VerificationServicePolicyTests`,
 
 The existing 12 JS/.NET interop assertions retain their expected results. The
 extended matrix covers target attenuation with both settings in both directions
-and stock-JS rejection of built-in typed caveats. Tests of a peer implementation
+and distinct JS vocabulary-validation, authentic restriction and signature-tampering
+cases. JS accepts correctly signed recognized caveat nodes without enforcing their
+meaning; .NET refuses them. Tests of a peer implementation
 are evidence for these cases, not proof of complete v0.4 compliance or distributed
 revocation interoperability. See [the compatibility report](ZCAP-LD-INTEROP-COMPATIBILITY-ANALYSIS.md).

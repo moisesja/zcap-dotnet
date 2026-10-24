@@ -60,16 +60,53 @@ public interface IVerificationService
     /// <returns>A <see cref="VerificationResult"/> describing the outcome.</returns>
     Task<VerificationResult> VerifyCapabilityProofDetailedAsync(Capability capability, Capability rootCapability);
 
-    /// <summary>Verifies a signed invocation envelope.</summary>
+    /// <summary>
+    /// Verifies a signed invocation envelope, including the full delegation chain, signature,
+    /// controller authorization, allowed action, target policy, expiration, revocation, proof
+    /// freshness and nonce replay protection. Delegated invocations embed the complete capability;
+    /// root invocations reference its ID. Resolve the chain's root through an
+    /// <see cref="IRootCapabilityResolver"/> or use the explicit-root overload.
+    /// </summary>
+    /// <param name="invocation">The signed invocation to verify; its ID is the replay nonce.</param>
+    /// <param name="capability">The capability being invoked.</param>
+    /// <returns>True only if the invocation and its authority are valid.</returns>
+    /// <exception cref="ArgumentNullException">Invocation or capability is null.</exception>
     Task<bool> VerifyInvocationAsync(Invocation invocation, Capability capability);
 
-    /// <summary>Verifies a signed invocation with an explicit root trust anchor.</summary>
+    /// <summary>
+    /// Verifies an invocation with an explicit trusted root, using the same checks as
+    /// <see cref="VerifyInvocationAsync(Invocation, Capability)"/>. Use this overload when
+    /// the caller knows the root and no root resolver is configured.
+    /// </summary>
+    /// <param name="invocation">The signed invocation to verify.</param>
+    /// <param name="capability">The capability being invoked.</param>
+    /// <param name="rootCapability">The trusted root referenced by the delegation chain.</param>
+    /// <returns>True only if the invocation and its authority are valid.</returns>
+    /// <exception cref="ArgumentNullException">Any argument is null.</exception>
     Task<bool> VerifyInvocationAsync(Invocation invocation, Capability capability, Capability rootCapability);
 
-    /// <summary>Returns the detailed invocation verification result.</summary>
+    /// <summary>
+    /// Structured-result sibling of <see cref="VerifyInvocationAsync(Invocation, Capability)"/>.
+    /// Identifies failures such as <see cref="VerificationOutcome.Replayed"/>,
+    /// <see cref="VerificationOutcome.ActionNotAllowed"/> or
+    /// <see cref="VerificationOutcome.UnauthorizedController"/>. Infrastructure failures yield
+    /// <see cref="VerificationOutcome.CouldNotVerify"/>; the bool API returns this result's IsValid.
+    /// </summary>
+    /// <param name="invocation">The signed invocation to verify.</param>
+    /// <param name="capability">The capability being invoked.</param>
+    /// <returns>The detailed verification outcome.</returns>
+    /// <exception cref="ArgumentNullException">Invocation or capability is null.</exception>
     Task<VerificationResult> VerifyInvocationDetailedAsync(Invocation invocation, Capability capability);
 
-    /// <summary>Returns the detailed invocation result with an explicit root trust anchor.</summary>
+    /// <summary>
+    /// Structured-result sibling of <see cref="VerifyInvocationAsync(Invocation, Capability, Capability)"/>.
+    /// See <see cref="VerifyInvocationDetailedAsync(Invocation, Capability)"/> for outcome semantics.
+    /// </summary>
+    /// <param name="invocation">The signed invocation to verify.</param>
+    /// <param name="capability">The capability being invoked.</param>
+    /// <param name="rootCapability">The trusted root referenced by the delegation chain.</param>
+    /// <returns>The detailed verification outcome.</returns>
+    /// <exception cref="ArgumentNullException">Any argument is null.</exception>
     Task<VerificationResult> VerifyInvocationDetailedAsync(Invocation invocation, Capability capability, Capability rootCapability);
 
     /// <summary>
@@ -131,14 +168,36 @@ public interface IVerificationService
     /// wrong capability binding, body/proof inconsistency), an invalid signature, an unauthorized
     /// signer, a replayed request, or any infrastructure error (DID resolution, network, crypto)
     /// returns <c>false</c>. Unsupported caveats remain rejected on this path.
+    /// The recorded <c>RevokedBy</c> is the authenticated verification method's bare DID,
+    /// never a caller-asserted identity. Reason and metadata are informational under RDFC.
+    /// Replay protection keys on the request's <c>id</c>; mint a fresh ID for each request.
+    /// Storage precedes nonce consumption so a failed store write can be retried. A false
+    /// result from the subsequent replay check does not roll back a completed write.
+    /// <para>
+    /// Authorization still requires a valid chain: a capability that is already expired,
+    /// revoked, or has a revoked ancestor is already inert and cannot be explicitly re-revoked.
+    /// This is by design; callers building audit trails must not expect a new record for it.
+    /// Revocation exempts expiration ceilings, delegation-created checks and missing delegated
+    /// expiration, but never unsupported vocabulary. Only null arguments throw; other failures
+    /// return false.
+    /// </para>
     /// </remarks>
+    /// <param name="capability">The capability to revoke, with its full delegation chain.</param>
+    /// <param name="signedRevocation">The signed request from <see cref="ISigningService.SignRevocationAsync"/>.</param>
+    /// <returns>True if authenticated, authorized, fresh, recorded and not replayed; otherwise false.</returns>
+    /// <exception cref="ArgumentNullException">Capability or signedRevocation is null.</exception>
     Task<bool> RevokeCapabilityAsync(Capability capability, Invocation signedRevocation);
 
-    /// <summary>Revokes a capability using an explicit root trust anchor.</summary>
+    /// <summary>
+    /// Revokes a capability using an explicit trusted root when no root resolver is configured.
+    /// The chain references this root by ID. All authentication, authorization, replay and audit
+    /// semantics of <see cref="RevokeCapabilityAsync(Capability, Invocation)"/> apply.
+    /// </summary>
     /// <param name="capability">The capability to revoke, with its full delegation chain (for authorization).</param>
     /// <param name="signedRevocation">The signed revocation request (from <see cref="ISigningService.SignRevocationAsync"/>).</param>
     /// <param name="rootCapability">The root capability the chain references by id</param>
     /// <returns>True if authenticated, authorized, fresh, and recorded; otherwise false.</returns>
+    /// <exception cref="ArgumentNullException">Any argument is null.</exception>
     Task<bool> RevokeCapabilityAsync(Capability capability, Invocation signedRevocation, Capability rootCapability);
 
     /// <summary>

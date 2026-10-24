@@ -107,8 +107,10 @@ public class CapabilityService : ICapabilityService
 
         CapabilityProfile.EnsureSupported(parentCapability);
         var target = invocationTarget ?? parentCapability.InvocationTarget;
-        if (!Uri.IsWellFormedUriString(target, UriKind.Absolute) ||
-            !InvocationTargetPolicy.IsValid(target, parentCapability.InvocationTarget, allowAttenuation: true))
+        if (!Uri.IsWellFormedUriString(target, UriKind.Absolute))
+            throw new ArgumentException("Delegated target must be a well-formed absolute URI.",
+                invocationTarget is null ? nameof(parentCapability) : nameof(invocationTarget));
+        if (!InvocationTargetPolicy.IsValid(target, parentCapability.InvocationTarget, allowAttenuation: true))
             throw new ArgumentException("Delegated target must match or narrow the parent target.", nameof(invocationTarget));
 
         // Resolve the signer's crypto suite context URL dynamically

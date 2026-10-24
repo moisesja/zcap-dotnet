@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using ZcapLd.Core.Cryptography;
+using CapabilityValidationException = ZcapLd.Core.Exceptions.CapabilityValidationException;
 using ZcapLd.Core.Models;
 
 namespace ZcapLd.Core.Services;
@@ -303,12 +304,15 @@ public class SigningService : ISigningService
             CapabilityAction = invocation.CapabilityAction
         };
 
-        // Signed extension fields (e.g. revocation reason/metadata) ride in the proof's
-        // [JsonExtensionData] and are included in the canonical bytes, so they are tamper-evident.
+        // Preserve extension fields on the wire. Free-form revocation reason/metadata are
+        // informational: undefined terms do not become tamper-evident merely by serialization.
         if (additionalProperties is { Count: > 0 })
         {
             proof.AdditionalProperties = new Dictionary<string, JsonElement>(additionalProperties, StringComparer.Ordinal);
         }
+
+        if (!CapabilityProfile.IsSupportedProof(proof))
+            throw new CapabilityValidationException(CapabilityProfile.RejectionMessage);
 
         var didSigner = CreateLegacySigner(signerDid, resolvedKey, proofType);
         proof.ProofValue = await _legacyProofCrypto.CreateProofValueAsync(

@@ -55,8 +55,12 @@ embedded chain. Root resolution is an explicit trust boundary.
 
 `CapabilityProfile` walks capability locations before signing or trusting authority.
 It inspects every proof-set member and embedded ancestor, handles typed models and
-wire JSON, and bounds depth/work to reject cycles. It rejects the presence of any
-`caveat` key, including null/empty values. Standalone proof verification applies the
+wire JSON, and bounds depth/work to reject cycles. Extension JSON is scanned too:
+JSON-LD nesting or a nested object sharing the capability ID can contribute the
+same restricted RDF property. Compact, absolute-IRI and `sec:caveat` keys are rejected,
+including null/empty values. Contexts on capabilities/proofs must be zcap/v1 or a
+supported proof suite; inline aliases and unrelated vocabularies are refused.
+Generated proofs pass the same profile gate before signing. Standalone proof verification applies the
 guard before its proofless-root shortcut. Envelope invocation checks its separate
 capability argument, body capability and proof capability independently. Signed revocation
 also checks these representations and its explicit root before recording state. The DI

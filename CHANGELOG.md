@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Reject all capability `caveat` fields, including null/empty/custom values and embedded
   ancestors, at issuance and verification. `UsageCount.maxUses` and `ValidWhileTrue.uri`
   were not signature-bound; holders could alter restrictions without the delegator key.
+- Reject equivalent absolute-IRI/prefixed keys and nested JSON-LD restriction nodes.
+  Scan capability/proof extension JSON and restrict their contexts to zcap/v1 and
+  supported proof suites, including on signing and standalone verification paths.
 - Add `VerificationPolicy.AllowTargetAttenuation` (default false, matching JavaScript).
   Enable explicitly for delegated/invoked path or query suffixes. Add the optional
   `invocationTarget` delegation parameter, checked against the parent before signing.
@@ -23,7 +26,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   cryptosuites do not require changing the library's interoperable proof format.
 - Replace remote-caveat examples with native restrictions and verifier-owned revocation.
   Document query interpretation and multi-verifier revocation distribution obligations.
-- Align interop dependency pins and add cross-stack target-policy and caveat-rejection tests.
+- Align interop dependency pins and add target-policy, exact JS vocabulary-error,
+  authentic restriction rejection by .NET, and signature-tampering interop tests.
 
 ### Migration
 

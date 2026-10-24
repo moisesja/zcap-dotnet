@@ -76,26 +76,52 @@ try {
         check(dotnet('verify-invocation', path(kind + '-invocation'), path('root'), 'read', target, String(mode)), expected,
           `JS → .NET ${kind} invocation ${target}, ${mode}`);
     }
-    // Stock JS rejects built-in caveat vocabulary; .NET rejects the field even when empty/null.
+    // Distinguish JSON-LD safe-mode failures from validly signed but unenforced restrictions.
     if(suffix === '' && baseSuffix === '') {
-      for(const caveat of [
-        [{type: 'UsageCount', maxUses: 1000000}],
-        [{type: 'ValidWhileTrue', uri: 'https://holder.example/always-valid'}],
-        [{type: 'Expiration', expires: '2099-01-01T00:00:00Z'}]
+      const sign = unsigned => jsigs.sign(unsigned, {
+        suite: new Ed25519Signature2020({key: owner.key}),
+        purpose: new CapabilityDelegation({parentCapability: root.id}), documentLoader: loader});
+      for(const [caveat, code, field, value] of [
+        [[{type: 'UsageCount', maxUses: 1000000}], 'invalid property', 'property', 'maxUses'],
+        [[{type: 'ValidWhileTrue', uri: 'https://holder.example/always-valid'}], 'relative @type reference', 'type', 'ValidWhileTrue'],
+        [[{type: 'Expiration', expires: '2099-01-01T00:00:00Z'}], 'relative @type reference', 'type', 'Expiration']
       ]) {
         const received = {...delegated, caveat};
-        check((await verifyDelegation({delegated: received, root})).verified, false, 'JS caveat rejection');
         write('legacy', received);
         check(dotnet('verify', path('legacy'), path('root')), false, '.NET caveat rejection');
         const unsigned = {...received}; delete unsigned.proof;
-        await assert.rejects(() => jsigs.sign(unsigned, {suite: new Ed25519Signature2020({key: owner.key}),
-          purpose: new CapabilityDelegation({parentCapability: root.id}), documentLoader: loader}), /./);
+        await assert.rejects(() => sign(unsigned), error => {
+          assert.equal(error.name, 'jsonld.ValidationError');
+          assert.equal(error.details.event.code, code);
+          assert.equal(error.details.event.details[field], value);
+          return true;
+        });
         assertions++;
       }
-      for(const caveat of [null, [], {}, [{type: 'Unknown', value: 1}]]) {
-        write('legacy', {...delegated, caveat});
-        check(dotnet('verify', path('legacy'), path('root')), false, '.NET forbidden caveat shape');
+      for(const key of ['caveat', 'https://w3id.org/security#caveat']) {
+        for(const caveat of [null, [], {}, [{type: 'Unknown', value: 1}]]) {
+          write('legacy', {...delegated, [key]: caveat});
+          check(dotnet('verify', path('legacy'), path('root')), false, `.NET forbidden ${key} shape`);
+        }
+        // This node is valid JSON-LD. JS signs and verifies it without enforcing its meaning;
+        // .NET must refuse the capability even though its signature is authentic.
+        const unsigned = {...delegated, [key]: [{id: 'urn:restriction:usage-limit-1'}]};
+        delete unsigned.proof;
+        const signed = await sign(unsigned);
+        check((await verifyDelegation({delegated: signed, root})).verified, true, `JS signed ${key} node`);
+        write('legacy', signed);
+        check(dotnet('verify', path('legacy'), path('root')), false, `.NET signed ${key} rejection`);
+        signed[key][0].id = 'urn:restriction:altered';
+        const tampered = await verifyDelegation({delegated: signed, root});
+        check(tampered.verified, false, 'post-signature restriction tamper rejected');
+        assert.equal(tampered.error.errors[0].message, 'Invalid signature.');
       }
+      const nested = {...delegated, '@nest': {caveat: [{id: 'urn:restriction:usage-limit-1'}]}};
+      delete nested.proof;
+      const signedNested = await sign(nested);
+      check((await verifyDelegation({delegated: signedNested, root})).verified, true, 'JS signed @nest restriction');
+      write('legacy', signedNested);
+      check(dotnet('verify', path('legacy'), path('root')), false, '.NET signed @nest restriction rejection');
     }
   }
   console.log(`ALL ${assertions} PROFILE CHECKS PASSED — target policies and caveat rejection.`);

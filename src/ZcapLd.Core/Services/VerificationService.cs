@@ -583,6 +583,9 @@ public class VerificationService : IVerificationService
                 return VerificationResult.Fail(VerificationOutcome.MalformedCapability,
                     "Invocation proof could not be parsed.");
 
+            if (!CapabilityProfile.IsSupportedProof(proof))
+                return VerificationResult.Fail(VerificationOutcome.MalformedCapability, CapabilityProfile.RejectionMessage);
+
             if (proof.ProofPurpose != Proof.CapabilityInvocationPurpose)
                 return VerificationResult.Fail(VerificationOutcome.MalformedCapability,
                     "Proof does not have the capabilityInvocation proofPurpose.");
@@ -732,7 +735,7 @@ public class VerificationService : IVerificationService
         try
         {
             if (!CapabilityProfile.IsSupported(invocation.Capability?.EmbeddedCapability) ||
-                !CapabilityProfile.IsSupported(invocation.Proof?.Capability?.EmbeddedCapability))
+                !CapabilityProfile.IsSupportedProof(invocation.Proof))
                 return VerificationResult.Fail(VerificationOutcome.MalformedCapability, CapabilityProfile.RejectionMessage);
 
             if (string.IsNullOrWhiteSpace(invocation.Id))
@@ -1797,11 +1800,19 @@ public class VerificationService : IVerificationService
     /// Fail-closed: structural, signature, authorization, replay or infrastructure failures
     /// return false. Unsupported vocabulary caveats are rejected in all capability representations.
     /// Authorization requires a valid chain, with expiration-ceiling and delegation-created
-    /// policy exceptions. Already-expired or revoked chains cannot be revoked again.
+    /// policy exceptions. Already-expired capabilities or chains with a revoked ancestor are
+    /// already inert and cannot be explicitly re-revoked; by design, audit callers must not expect
+    /// a new record for them. Unsupported vocabulary is never exempted.
+    /// The recorded RevokedBy is the authenticated verification method's bare DID. Replay keys
+    /// on the request ID, so clients must mint a fresh ID for each request. Storage precedes nonce
+    /// consumption to permit retries after store failures; a later replay denial does not undo a
+    /// completed write. Only null arguments throw; other failures return false.
+    /// COMPLIANCE: MUST-21, SHOULD-07.
     /// </remarks>
     /// <param name="capability">The capability to revoke, with its full delegation chain (for authorization).</param>
     /// <param name="signedRevocation">The signed revocation request (see <see cref="ISigningService.SignRevocationAsync"/>).</param>
     /// <returns>True if authenticated, authorized, fresh, and recorded; otherwise false.</returns>
+    /// <exception cref="ArgumentNullException">Capability or signedRevocation is null.</exception>
     public Task<bool> RevokeCapabilityAsync(Capability capability, Invocation signedRevocation)
         => RevokeCapabilityInternalAsync(capability, signedRevocation, explicitRoot: null);
 
@@ -1825,7 +1836,7 @@ public class VerificationService : IVerificationService
         {
             if (!CapabilityProfile.IsSupported(capability) || !CapabilityProfile.IsSupported(explicitRoot) ||
                 !CapabilityProfile.IsSupported(signedRevocation.Capability?.EmbeddedCapability) ||
-                !CapabilityProfile.IsSupported(signedRevocation.Proof?.Capability?.EmbeddedCapability))
+                !CapabilityProfile.IsSupportedProof(signedRevocation.Proof))
                 return false;
 
             if (string.IsNullOrWhiteSpace(signedRevocation.Id))
