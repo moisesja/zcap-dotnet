@@ -70,7 +70,7 @@ Examples:
 
 - `fix: enforce capability chain root-id validation`
 - `docs: add NuGet release workflow instructions`
-- `test: cover delegated caveat inheritance path`
+- `test: reject unsupported restrictions in embedded ancestors`
 
 ## Release Process (Maintainers)
 

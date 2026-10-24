@@ -156,7 +156,7 @@ export function makeDocumentLoader({roots = []} = {}) {
  * @returns {Promise<object>} The full jsigs.verify() result object
  *   (`{verified, results, error?}`).
  */
-export async function verifyDelegation({delegated, root}) {
+export async function verifyDelegation({delegated, root, allowTargetAttenuation = false}) {
   const documentLoader = makeDocumentLoader({roots: [root]});
   const suite = new Ed25519Signature2020();
 
@@ -164,6 +164,7 @@ export async function verifyDelegation({delegated, root}) {
     suite,
     purpose: new CapabilityDelegation({
       expectedRootCapability: root.id,
+      allowTargetAttenuation,
       suite
     }),
     documentLoader
@@ -290,7 +291,7 @@ export async function signInvocation({
  *   (`{verified, results, error?}`).
  */
 export async function verifyInvocation({
-  securedDocument, expectedAction, expectedTarget, expectedRootCapability, root
+  securedDocument, expectedAction, expectedTarget, expectedRootCapability, root, allowTargetAttenuation = false
 }) {
   const documentLoader = makeDocumentLoader({roots: [root]});
   const suite = new Ed25519Signature2020();
@@ -302,6 +303,7 @@ export async function verifyInvocation({
       expectedTarget,
       expectedAction,
       expectedRootCapability,
+      allowTargetAttenuation,
       suite
     }),
     documentLoader

@@ -28,8 +28,7 @@ public class CapabilityService : ICapabilityService
         ControllerSet controller,
         string invocationTarget,
         string[]? allowedActions = null,
-        DateTime? expires = null,
-        Caveat[]? caveats = null)
+        DateTime? expires = null)
     {
         if (controller is null || controller.IsEmpty)
         {
@@ -58,22 +57,22 @@ public class CapabilityService : ICapabilityService
             Id = rootId,
             Controller = controller,
             InvocationTarget = invocationTarget,
-            // AllowedAction, Caveat, Expires, ParentCapability, Proof intentionally unset.
+            // AllowedAction, Expires, ParentCapability, Proof intentionally unset.
         };
 
         return Task.FromResult(capability);
     }
 
     /// <summary>
-    /// Delegates a capability to a new controller with proper attenuation and caveat inheritance
+    /// Delegates a capability to a new controller with action, expiration and target attenuation
     /// </summary>
     public async Task<Capability> DelegateCapabilityAsync(
         Capability parentCapability,
         ControllerSet newController,
         string[] allowedActions,
         DateTime? expires = null,
-        Caveat[]? caveats = null,
-        string? signerDid = null)
+        string? signerDid = null,
+        string? invocationTarget = null)
     {
         if (parentCapability == null)
         {
@@ -106,10 +105,11 @@ public class CapabilityService : ICapabilityService
         // Validate attenuation rules (delegated capability must be more restrictive)
         ValidateAttenuation(parentCapability, allowedActions, expires);
 
-        // Inherit parent caveats (children inherit ALL parent caveats).
-        // Returns null when neither parent nor child supplies any — keeps the field
-        // off the wire so cross-language parsers see absence, not an empty array.
-        var inheritedCaveats = InheritCaveats(parentCapability.Caveat, caveats);
+        CapabilityProfile.EnsureSupported(parentCapability);
+        var target = invocationTarget ?? parentCapability.InvocationTarget;
+        if (!Uri.IsWellFormedUriString(target, UriKind.Absolute) ||
+            !InvocationTargetPolicy.IsValid(target, parentCapability.InvocationTarget, allowAttenuation: true))
+            throw new ArgumentException("Delegated target must match or narrow the parent target.", nameof(invocationTarget));
 
         // Resolve the signer's crypto suite context URL dynamically
         var suiteContextUrl = await _signingService.ResolveSuiteContextUrlAsync(effectiveSigner);
@@ -124,13 +124,12 @@ public class CapabilityService : ICapabilityService
             },
             Id = $"urn:uuid:{Guid.NewGuid()}",
             Controller = newController,
-            InvocationTarget = parentCapability.InvocationTarget,
+            InvocationTarget = target,
             AllowedAction = allowedActions,
             // Use parent's verbatim Expires string if caller didn't specify one;
             // format the caller-supplied DateTime canonically otherwise.
             Expires = expires.HasValue ? ZcapTimestamps.Format(expires.Value) : parentCapability.Expires,
-            ParentCapability = parentCapability.Id,
-            Caveat = inheritedCaveats
+            ParentCapability = parentCapability.Id
         };
 
         // Build capability chain for the proof
@@ -152,6 +151,7 @@ public class CapabilityService : ICapabilityService
     public Invocation CreateInvocation(Capability capability, string capabilityAction, string? invocationTarget = null)
     {
         ArgumentNullException.ThrowIfNull(capability);
+        CapabilityProfile.EnsureSupported(capability);
         if (string.IsNullOrEmpty(capability.Id))
         {
             throw new ArgumentException("Capability must have an id.", nameof(capability));
@@ -215,6 +215,8 @@ public class CapabilityService : ICapabilityService
     {
         try
         {
+            if (!CapabilityProfile.IsSupported(capability)) return Task.FromResult(false);
+
             // Basic required fields
             if (string.IsNullOrEmpty(capability.Id))
             {
@@ -256,15 +258,14 @@ public class CapabilityService : ICapabilityService
                 }
 
                 // Root zcaps MUST contain only @context, id, controller, invocationTarget.
-                // "A root zcap MUST NOT have any other fields." (W3C CCG ZCAP-LD v0.3, Root Capability)
-                // Strict policy: allowedAction/caveat must be absent (null), not empty — the spec
+                // "A root zcap MUST NOT have any other fields." (W3C CCG ZCAP-LD v0.4.0, Root Capability)
+                // Strict policy: allowedAction must be absent (null), not empty — the spec
                 // omits them on roots and CreateRootCapabilityAsync leaves them null, so no real
                 // producer emits empty arrays. Unknown extension fields land in AdditionalProperties.
                 if (capability.Proof != null ||
                     capability.Expires != null ||
                     capability.ParentCapability != null ||
                     capability.AllowedAction != null ||
-                    capability.Caveat != null ||
                     capability.AdditionalProperties is { Count: > 0 })
                 {
                     return Task.FromResult(false);
@@ -357,30 +358,6 @@ public class CapabilityService : ICapabilityService
         // mislocated the check (wrong actor, wrong time). The ceiling now lives on the verify path
         // behind a policy flag (Issue #73). Attenuation (child ≤ parent expiry) is still enforced
         // above.
-    }
-
-    /// <summary>
-    /// Inherits caveats from parent and merges with new caveats.
-    /// Per spec: children inherit ALL parent caveats and MAY add new ones.
-    /// Returns null when neither side supplies any caveats so the field stays
-    /// off the wire (vs. emitting an empty array, which strict cross-language
-    /// parsers reject).
-    /// </summary>
-    private Caveat[]? InheritCaveats(Caveat[]? parentCaveats, Caveat[]? newCaveats)
-    {
-        var allCaveats = new List<Caveat>();
-
-        if (parentCaveats != null && parentCaveats.Length > 0)
-        {
-            allCaveats.AddRange(parentCaveats);
-        }
-
-        if (newCaveats != null && newCaveats.Length > 0)
-        {
-            allCaveats.AddRange(newCaveats);
-        }
-
-        return allCaveats.Count == 0 ? null : allCaveats.ToArray();
     }
 
     /// <summary>

@@ -26,11 +26,10 @@ public class RdfcEndToEndTests
 
         _signingService = new SigningService(_didProvider, _didProvider);
 
-        var caveatProcessor = new CaveatProcessor();
         _verificationService = new VerificationService(
-            _didProvider, caveatProcessor,
+            _didProvider,
             new RevocationService(new InMemoryRevocationStore()),
-            new InMemoryNonceStore());
+            new InMemoryNonceStore(), policy: new VerificationPolicy { AllowTargetAttenuation = true });
 
         _capabilityService = new CapabilityService(_signingService);
     }
@@ -42,10 +41,9 @@ public class RdfcEndToEndTests
         ControllerSet controller,
         string invocationTarget,
         string[]? allowedActions = null,
-        DateTime? expires = null,
-        Caveat[]? caveats = null)
+        DateTime? expires = null)
         => TestRoots.CreateAndRegisterRootAsync(
-            _capabilityService, _didProvider, controller, invocationTarget, allowedActions, expires, caveats);
+            _capabilityService, _didProvider, controller, invocationTarget, allowedActions, expires);
 
     [Fact]
     public async Task CreateRootAndInvoke_WithRdfc_ShouldSucceed()

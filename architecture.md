@@ -1,295 +1,124 @@
 # Architecture
 
-## Overview
-
-`zcap-dotnet` is organized as a layered library focused on capability lifecycle operations:
-
-1. Create root capabilities
-2. Delegate capabilities with attenuation
-3. Sign invocation requests
-4. Verify delegation chains and invocation proofs
-5. Evaluate caveats across the chain
-
-Primary assembly: `src/ZcapLd.Core`.
-
-## Component Map
-
-### Models (`src/ZcapLd.Core/Models`)
-
-- `Capability`: root/delegated capability representation
-- `Proof`: delegation/invocation proof representation
-- `Invocation`: invocation request representation
-- `InvocationCapability`: union of the two spec-defined `capability` wire shapes — a root zcap **id
-  string** or the **full embedded delegated zcap object** — used by both `Invocation.Capability` and
-  the invocation `Proof.Capability`; preserves the wire shape via `InvocationCapabilityJsonConverter`
-  (Issue #51)
-- `Caveat` + derived types:
-  - `ExpirationCaveat`
-  - `UsageCountCaveat`
-  - `ValidWhileTrueCaveat` (remote revocation via URI check)
-- `InvocationContext`: runtime context for caveat evaluation
-
-### Service Interfaces (`src/ZcapLd.Core/Services`)
-
-- `ICapabilityService`: create/delegate/validate capabilities
-- `ISigningService`: sign capability and invocation documents
-- `IVerificationService`: verify proof/chain/invocation, resolve keys, revocation API. Each verify
-  method has a `...DetailedAsync` sibling returning a structured `VerificationResult`
-  (`VerificationOutcome` enum + optional message) so callers can distinguish failure modes
-  programmatically; the `Task<bool>` methods are thin wrappers over `(await ...DetailedAsync(...)).IsValid` (Issue #70)
-- `IDidResolver`: resolve DIDs to public keys (returns `ResolvedKey` with key type); implementations: `DidKeyResolver` (wraps NetDid's `DidKeyMethod`), `CompositeDidResolver`
-- `IDidSigner`: sign data using a DID's private key; no default implementation in core — consumers provide their own
-- `IRootCapabilityResolver`: resolve a root capability by id so the verifier can authorize a spec-exact delegation chain (which references the root by id only — Issue #50); implementations: `InMemoryRootCapabilityResolver` (dev). No default in core — the resource owner resolves roots from its own store. A `VerificationService` also accepts an explicit root on its verify/revoke overloads, and auto-detects an `IDidResolver` that additionally implements this interface.
-- `ICaveatProcessor`: caveat merge/compatibility/evaluation
-- `INonceStore`: pluggable persistence contract for invocation nonce tracking (replay protection); implementations: `InMemoryNonceStore`, `NullNonceStore` (no-op)
-- `IRevocationStore`: pluggable persistence contract for revocation records
-- `IRevocationService`: revocation orchestration (record + lookup + expiry pruning on read)
-- `IValidWhileTrueHandler`: async handler for evaluating ValidWhileTrue caveat URIs; no default in core — `HttpValidWhileTrueHandler` provided by `ZcapLd.AspNetCore`
-
-### Service Implementations (`src/ZcapLd.Core/Services`)
-
-- `CapabilityService`
-  - Creates root capabilities
-  - Creates delegated capabilities
-  - Applies attenuation checks during delegation
-  - Builds proof `capabilityChain` payload
-- `SigningService`
-  - Canonicalizes documents and delegates signing to `IDidSigner`
-  - Produces delegation and invocation proofs
-  - Resolves verification method URIs via `IDidResolver`
-  - Resolves per-suite JSON-LD context URLs via `ZcapSuiteCatalog`
-- `VerificationService`
-  - Verifies delegation proofs, delegating canonicalization + signature checks to DataProofs' legacy cryptosuites via `LegacyProofCrypto`
-  - Verifies capability chains, strictly validating the spec-exact `capabilityChain` shape and rejecting
-    non-spec forms (embedded root, duplicated ids, parent referenced both by id and embedded, wrong/missing
-    embedded parent) — Issue #50
-  - Obtains the root (referenced by id only) via an explicit-root overload, else an
-    `IRootCapabilityResolver`, else fails closed
-  - Verifies invocation proof + action/target + caveats
-  - Enforces invocation replay protection via `INonceStore`
-  - Resolves public keys via `IDidResolver` and revocation checks
-  - Authorizes the proof's verification method against the controller's DID document via
-    `IVerificationRelationshipResolver` (`capabilityInvocation` for invocations,
-    `capabilityDelegation` for delegations) — Issue #65
-  - Applies an optional, opt-in `VerificationPolicy` (off by default): when
-    `EnforceMaxDelegationExpiration` is set, rejects a delegated zcap whose `expires` is more than
-    `MaxDelegationExpirationMonths` (default 3) in the future, measured at verification time — the
-    W3C verifier-side SHOULD (Issue #73). Enforced on the invocation/chain paths only; the
-    revocation-authorization path bypasses it so a long-lived delegation stays revocable
-  - Checks each delegation proof's `created` for temporal soundness (Issue #99): a future-dated
-    (beyond the clock-skew tolerance) or unparseable `created` is always rejected, and a missing
-    `created` is rejected only under the opt-in `VerificationPolicy.RequireDelegationProofCreated`.
-    Unlike the invocation freshness check (Issue #71) there is no staleness lower-bound — a durable
-    delegation signed long ago verifies until it `expires`. Detailed reason `InvalidProofTime`; like
-    the expiration ceiling it is bypassed on the revocation-authorization path
-- `RevocationService`
-  - Persists revocation records via `IRevocationStore`
-  - Applies retention/expiry behavior for revocation lookups
-- `InMemoryRevocationStore`
-  - Default development/testing revocation persistence
-- `CaveatProcessor`
-  - Evaluates caveat predicates (including async ValidWhileTrue via optional `IValidWhileTrueHandler`)
-  - Merges inherited caveats across chain
-  - Checks caveat compatibility (ValidWhileTrue enforces URI immutability across delegations)
-
-### Crypto (`src/ZcapLd.Core/Cryptography`)
-
-- `ZcapSuiteCatalog`: internal, fixed metadata for the supported suites (proof type, the #68 key-type binding, context URL). zcap is **not** a crypto-extension point — new curves are added in NetCrypto + DataProofs (see `docs/crypto-suite-extensibility-decision.md`). The sign/verify crypto is delegated to DataProofs' legacy cryptosuites via `LegacyProofCrypto`; canonicalization is **RDFC-1.0 only** — the sole canonicalization (the `@digitalbazaar/zcap` interop format).
-- `IDocumentCanonicalizer`: canonicalization abstraction with a single implementation (`RdfcDocumentCanonicalizer`), used by `ProofSigningPayloadBuilder`'s reference oracle
-- `RdfcDocumentCanonicalizer`: W3C RDFC-1.0 RDF Dataset Canonicalization — a thin adapter over `DataProofsDotnet.Rdfc.RdfcDocumentCanonicalizer` (the stack's single dotNetRDF home), with `RdfcContextDocumentLoader` serving zcap's embedded JSON-LD contexts offline
-- `MultibaseCodec`: algorithm-agnostic multibase encoding/decoding (delegates to NetCid)
-- `UriEncoding`: `encodeURIComponent`-exact percent-encoding so the root id `urn:zcap:root:{encodeURIComponent(invocationTarget)}` is byte-identical to @digitalbazaar/zcap (un-escapes `! ' ( ) *` that `Uri.EscapeDataString` over-escapes)
-- `LegacyProofCrypto`: bridges signing/verification to DataProofs' legacy cryptosuites (`Ed25519Signature2020` / `EcdsaSecp256r1Signature2019`) — the byte-compatible implementations of zcap's 2020-era embedded-proof convention; `DidSignerAdapter` exposes the consumer's `IDidSigner` as a `NetCrypto.ISigner`, `ResolvedKeyTypeMap` maps the resolved key type to NetCrypto's
-- `ProofSigningPayloadBuilder`: clone-without-proof helpers (production) and the reference RDFC-1.0 signing-payload oracle the Compliance golden vectors assert against (`SHA-256(RDFC(proofOptions)) || SHA-256(RDFC(document))`)
-- `CaveatJsonConverter`: polymorphic `JsonConverter<Caveat>` — writes via runtime concrete type, reads via discriminator lookup against `CaveatTypeRegistry`. Required for cross-language interop (sign-time vs. wire-time bytes match).
-- `ZcapJsonOptions.Default`: shared `JsonSerializerOptions` used by both sign-time canonicalization and verifier-time chain deserialization. Single source of truth for the encoder, null-handling, and the caveat converter.
-
-### Models — registries (`src/ZcapLd.Core/Models`)
-
-- `CaveatTypeRegistry.Default`: process-wide singleton mapping `Caveat.Type` discriminator strings to concrete CLR types. Pre-populated with `ExpirationCaveat`, `UsageCountCaveat`, `ValidWhileTrueCaveat`. Third-party caveat libraries register their derived types here at startup.
-
-### Exceptions (`src/ZcapLd.Core/Exceptions`)
-
-- Domain exceptions for capability, invocation, caveat, and crypto failures
-
-## Data/Trust Flow
-
-### Delegation Flow
-
-1. Caller creates root capability via `CapabilityService.CreateRootCapabilityAsync`.
-2. Caller delegates to child controller via `DelegateCapabilityAsync`.
-3. `CapabilityService` validates attenuation and caveat inheritance.
-4. `SigningService.SignCapabilityAsync` signs the delegated capability payload.
-5. Delegated `Proof` includes a `capabilityChain` rooted at the root ID.
-
-### Invocation Flow
-
-1. Controller creates `Invocation` with the invoked capability, action, and target. Per ZCAP-LD v0.3
-   the `capability` shape depends on what is invoked: a **root** invocation carries the root zcap **id
-   string** (`Capability = root.Id`); a **delegated** DI invocation MUST embed the **full delegated
-   zcap object** (`Capability = InvocationCapability.FromCapability(delegated)`) so the verifier has the
-   authority chain without dereferencing it by id (Issue #51).
-2. `SigningService.SignInvocationAsync` creates invocation proof; the `capability` (id string or full
-   embedded object) is part of the signed canonical payload.
-3. `VerificationService.VerifyInvocationAsync` checks:
-   - capability chain validity (including the opt-in 3-month delegated-expiration ceiling when
-     `VerificationPolicy.EnforceMaxDelegationExpiration` is enabled — Issue #73)
-   - invocation proof purpose and signature
-   - **invocation `capability` shape (strict)**: a root invocation MUST use the root id string, a
-     delegated invocation MUST embed the full zcap whose id matches the verified capability — a
-     delegated invocation supplying only an id string is rejected (Issue #51)
-   - action and target constraints
-   - controller authorization — resolves the controller's DID document and confirms the
-     verification method is in the `capabilityInvocation` relationship (delegations use
-     `capabilityDelegation`); honors cross-DID references and per-purpose key separation
-   - all caveats across root→leaf chain
-
-### Structured verification results (Issue #70)
-
-Every verify method returns a bare `Task<bool>` **and** has a `...DetailedAsync` sibling returning a
-`VerificationResult` — a `VerificationOutcome` (e.g. `Revoked`, `Expired`, `InvalidSignature`,
-`UnauthorizedController`, `InvalidDelegation`, `AttenuationViolation`, `ChainTooLong`, `CaveatFailed`,
-`Replayed`, `InvalidTarget`, `ActionNotAllowed`, `StaleProof`, `ExpirationTooFarInFuture`,
-`InvalidProofTime`, `MalformedCapability`, `CouldNotVerify`) plus an
-optional diagnostic message. This lets a caller tell *why* a capability was denied — e.g. `Revoked`
-vs a broken chain — without re-deriving it. `CouldNotVerify` is the explicit "couldn't check"
-(config/transient/infrastructure fault) outcome, distinct from a capability that is provably invalid
-(the M7 / Issue #64 distinction surfaced at the API). Verification stays **fail-closed**: any
-non-`Valid` outcome denies, and the bool methods return `IsValid`. Denials are now logged on **all**
-paths (a single Debug-severity choke point on the public boundary), not just the exception path —
-attacker-drivable denials log at Debug so a hostile client cannot flood the operator's Warning channel.
-
-## Capability Chain Semantics
-
-- Root capability is the trust anchor (`proof == null`), referenced in `capabilityChain` **by id only**
-  and never embedded.
-- First-level delegation chain is **exactly** `[rootId]`.
-- Deeper delegations carry the root id first, then each ancestor **by id**, and embed **only** the
-  immediate parent capability object as the last entry (e.g. `[rootId, firstId, {parent}]`).
-- Generation (`CapabilityService.BuildCapabilityChain`) emits this minimal shape; verification
-  (`VerificationService`) strictly validates it and **rejects** non-spec forms — an embedded root,
-  duplicated ids, a parent referenced both by id and embedded, or a wrong/missing embedded parent
-  (Issue #50).
-- Because the root is by-reference, verification obtains it via an explicit-root overload or an
-  `IRootCapabilityResolver` (else fails closed), then traverses the chain root→leaf and enforces
-  attenuation, expiry, caveats, and revocation at each hop.
-
-## Key Management Model
-
-`SigningService` delegates all signing to a user-provided `IDidSigner` and all key resolution to `IDidResolver`. No default signer ships in the core package.
-
-Production recommendation:
-
-- Implement `IDidSigner` backed by your HSM/KMS/Key Vault
-- Use `DidKeyResolver` (or `CompositeDidResolver`) for public key resolution
-- Avoid plaintext key material — `InMemoryDidProvider` is for tests/examples only
-
-## Extensibility Points
-
-### Custom Crypto Suites
-
-zcap is **not** a crypto-extension point: it supports a fixed set of signature suites
-(`Ed25519Signature2020`, `EcdsaSecp256r1Signature2019`) recorded in the internal `ZcapSuiteCatalog`,
-with sign/verify delegated to DataProofs' legacy cryptosuites. A new curve is added in **NetCrypto**
-(the primitive) and **DataProofs** (the cryptosuite), then wired into `ZcapSuiteCatalog` +
-`LegacyProofCrypto` — never registered through a zcap API. See
-`docs/crypto-suite-extensibility-decision.md`.
-
-### Custom Caveats
-
-Three steps:
-
-1. Extend `Caveat` with the discriminator `Type` override and any policy fields. Mark mutable runtime state `[JsonIgnore]` — only the policy goes on the wire (otherwise mutation invalidates the signature).
-2. **Register the type against its discriminator** so the polymorphic JSON converter can dispatch:
-   - In-process / examples: `CaveatTypeRegistry.Default.Register<MyCaveat>("MyCaveat")` at startup.
-   - ASP.NET DI: `services.AddZcapCaveatType<MyCaveat>("MyCaveat")` (a process-global registration).
-3. Add evaluation logic — synchronous via `IsSatisfied` on the caveat, or async by extending `CaveatProcessor` (the ValidWhileTrue pattern below).
-
-Skipping step 2 silently breaks cross-language interop: STJ uses the static array element type for `Capability.Caveat`, dropping derived fields at sign time. Without registration, verifier-time deserialization throws on the abstract `Caveat` base for any wire body coming in from another stack.
-
-### ValidWhileTrue Caveat (Remote Revocation)
-
-The `ValidWhileTrueCaveat` embeds a URI that the verifier checks at invocation time. The delegator/controller hosts the status endpoint; the verifier opts in to checking it.
-
-- **Core**: `ValidWhileTrueCaveat` model + `IValidWhileTrueHandler` interface. `CaveatProcessor` accepts an optional handler; without one, the caveat fails closed.
-- **ASP.NET**: `HttpValidWhileTrueHandler` implements `IValidWhileTrueHandler` using `IHttpClientFactory`. Register via `AddZcapValidWhileTrueSupport()`. The existing `GET /zcaps/revocations/{*capabilityId}` endpoint serves as the backend — the handler checks `!isRevoked` from the `RevocationStatusHttpResponse`.
-- **Attenuation**: child capabilities cannot change a parent's ValidWhileTrue URI (enforced in `ValidateCaveatCompatibilityAsync`).
-
-### DID Resolution
-
-DID resolution for did:key is handled by `DidKeyResolver`, which wraps NetDid's `DidKeyMethod`. For additional DID methods (did:web, did:ion, etc.), implement `IDidResolver` and register in `CompositeDidResolver`. The resolver returns `ResolvedKey(byte[] PublicKeyBytes, string KeyType)` so the verification service knows which crypto suite to use.
-
-**Controller authorization** is a separate concern from key resolution. `VerificationService` resolves the controller's DID *document* through a NetDid `IVerificationRelationshipResolver` (2.0.0) and confirms the proof's verification method appears in the relevant relationship — `capabilityInvocation` for invocations, `capabilityDelegation` for delegations **and revocations** (revocation is a delegation-authority action). `DidKeyResolver` also implements this interface (so did:key works out of the box); for other methods, supply a method-appropriate `IVerificationRelationshipResolver` (e.g. one wired by NetDid's `AddNetDid`) either by having your `IDidResolver` implement it or by passing it to `VerificationService` / registering it for `AddZcapServices`. Controllers whose document cannot be resolved fail closed; the log severity is attacker-aware — a malformed/unknown/unsupported controller DID (attacker-drivable) logs at **Debug**, while an unexpected/transient resolver fault logs at **Warning** (Issue #64).
-
-> **Caution (partial self-providing resolvers):** if your `IDidResolver` implements `IVerificationRelationshipResolver` but only handles *one* DID method (e.g. did:key), it is used for **all** controllers — so a controller of a method it doesn't own resolves to `ControllerNotResolvable` and is **silently denied** (fail-closed, logged at Debug). Wire a multi-method resolver (or one that delegates per method) when your capabilities can carry controllers across DID methods.
-
-### Revocation Storage
-
-Implement `IRevocationStore` to persist revocation records in any backend:
-
-- SQL/NoSQL databases
-- Blockchain/smart contract clients
-- Oracle bridges / remote trust infrastructure
-- Distributed cache layers
-
-### ASP.NET Revocation Endpoints
-
-For ASP.NET hosts, use `ZcapLd.AspNetCore` to expose revocation APIs quickly:
-
-- Register the service graph via `AddZcapServices()` — the POST/revoke endpoint resolves `IVerificationService` to authenticate + authorize a **signed** revocation request (proof-of-possession). Override the store with `AddZcapRevocationSupport<MyStore>()`.
-- Expose routes via `MapZcapRevocationEndpoints(...)`
-- POST body is `{ capability, signedRevocation }`; the endpoint returns `403` when unauthenticated/unauthorized. Default route prefix is `/zcaps/revocations`
-
-### Alternative Revocation Exposure Patterns
-
-The core library does not require ASP.NET. Revocation can be exposed through:
-
-- gRPC service methods
-- queue/topic consumers
-- background workers
-- CLI/admin tooling
-- smart-contract relayers/oracles
-
-These patterns should drive `IVerificationService.RevokeCapabilityAsync(Capability, Invocation)` (which enforces signature authentication + chain authorization). `IRevocationService` is the unauthenticated persistence primitive — call it directly only after authenticating and authorizing the caller yourself.
-
-### Persistence Strategy Configuration
-
-Recommended persistence profiles:
-
-- Development: `InMemoryRevocationStore`
-- Centralized production: database-backed `IRevocationStore`
-- Decentralized production: contract/oracle-backed `IRevocationStore`
-- High scale: hybrid cache + durable backing store
-
-Reference implementation guide: `docs/REVOCATION-INTEGRATION.md`.
-
-### Remote Invocation Interface
-
-Library is in-process first. Service methods are interface-driven and can be wrapped by gRPC/HTTP without changing core models.
-
-### Canonicalization
-
-Every proof is canonicalized with **RDFC-1.0** (W3C RDF Dataset Canonicalization) — the only canonicalization, and the format that interoperates with `@digitalbazaar/zcap`. There is no per-service option: JCS support (and the `canonicalizationMethod` argument / `AddZcapRdfcCanonicalization()` toggle) was **removed in 4.0.0**. Canonicalization is delegated to DataProofs' legacy cryptosuites (RDFC-1.0 via DataProofs.Rdfc over dotNetRDF). Cross-stack interop is proven live by `interop/run-interop.sh`. Note: under RDFC, JSON-LD terms not defined in a served context are dropped from the signed N-Quads, so free-form revocation `reason`/`metadata` are informational (the bound revocation fields and the revoker's key-possession auth are unaffected).
-
-## Dependencies
-
-`ZcapLd.Core` keeps a deliberately small runtime footprint (the library is intended to stay AOT/WASM-friendly per the `wasi-experimental` goal). Direct package references:
-
-- **NetCrypto** — the cryptographic foundation: Ed25519 / P-256 sign + verify (`DefaultCryptoProvider`, `EcdsaSignatureFormat`), the key model, and key generation. `CryptoSuite` calls it directly.
-- **NetDid.Core** / **NetDid.Method.Key** (2.0.0) — W3C-compliant `did:key` creation/resolution and the `IVerificationRelationshipResolver`. As of 2.0.0 NetDid itself builds on NetCrypto (it no longer bundles its own crypto), so zcap and NetDid share one crypto stack.
-- **DataProofsDotnet.Rdfc** — the RDFC-1.0 / JSON-LD canonicalization `RdfcDocumentCanonicalizer` adapts; it owns the dotNetRDF dependency transitively (zcap references no RDF library directly). RDFC-1.0 is the only canonicalization, so it is always on the signing/verification path.
-- **NetCid** — multibase/multicodec encoding (arrives transitively via NetCrypto / NetDid / DataProofs.Rdfc, all pinned to the same version).
-- **Microsoft.Extensions.Logging.Abstractions** — added in Issue #64 so `VerificationService` can log the cause when it fails closed. This is the **abstractions** assembly only (it carries no concrete logging implementation): consumers who don't otherwise use `Microsoft.Extensions.*` pull in just the `ILogger` / `NullLogger` types, and the verifier defaults to `NullLogger` (zero output) when no logger is supplied.
-
-`Microsoft.SourceLink.GitHub` is a build-only dependency (`PrivateAssets="All"`) and is not propagated to consumers.
-
-## Non-Goals and Current Limitations
-
-- RDFC-1.0 canonicalization runs through DataProofsDotnet.Rdfc (over dotNetRDF), which has not passed the full W3C RDFC-1.0 conformance test suite (86 test cases); zcap's golden-vector + smoke tests verify byte-stable correctness for ZCAP documents.
-- No default distributed revocation backend is shipped; consumers provide their own `IRevocationStore` for production.
-
-## Thread Safety
-
-- `ZcapSuiteCatalog` is a fixed, immutable static metadata table (no registration needed).
-- Service instances are stateless and safe for concurrent usage.
-- `InMemoryDidProvider` (test helper) uses `ConcurrentDictionary` for key storage.
+zcap-dotnet separates capability policy from cryptographic proof machinery and
+application key/storage infrastructure. The supported profile targets ZCAP v0.4.0;
+see [requirements](docs/ZCAP-LD-SPECIFICATION-REQUIREMENTS.md).
+
+## Packages and boundaries
+
+- **ZcapLd.Core**: models, creation/delegation, signing, chain validation, native
+  attenuation, replay protection and signed revocation.
+- **ZcapLd.AspNetCore**: dependency injection and authenticated revocation endpoints.
+  It does not install an invocation HTTP-signature transport or private-key store.
+- **NetCrypto / NetDid**: cryptographic primitives, key types and DID resolution.
+- **DataProofsDotnet**: legacy cryptosuites and RDFC-1.0 canonicalization.
+- **NetCid**: multibase encoding. Core contains thin adapters rather than separate
+  implementations of these cryptographic foundations.
+
+## Models
+
+`Capability` represents root and delegated capabilities. `ControllerSet`,
+`ProofSet`, and `InvocationCapability` preserve string/array/object wire shapes.
+Roots contain only context, ID, controller and invocation target; delegated
+capabilities add parent, expiry, action restrictions and delegation proofs.
+
+`AdditionalProperties` preserves unknown capability fields. It does not make
+unknown terms signature-bound under RDFC. Security decisions use supported fields.
+The reserved `caveat` field is always rejected, even when stored as extension data.
+There are no typed caveat models, registries or evaluation callbacks.
+
+`Invocation` is the convenience in-stack envelope. The interoperable DI invocation
+API signs an application document and places capability, action and target in its
+proof. `VerificationResult` carries an outcome and optional diagnostic; bool APIs
+return its `IsValid`. `CouldNotVerify` distinguishes infrastructure faults from
+provably invalid authority. Denials are logged at Debug; unexpected faults at Warning.
+
+## Services and extension points
+
+| Service | Responsibility |
+| --- | --- |
+| `ICapabilityService` | Create roots and delegations, check native attenuation, construct unsigned invocations. |
+| `ISigningService` | Produce proofs with consumer-provided `IDidSigner`; self-verify signatures against the resolved public key. |
+| `IVerificationService` | Check proof/controller relationships, chains, target/action/expiry policy, freshness, revocation and replay. |
+| `IDidSigner` | Sign using application-owned keys (HSM/KMS/Key Vault). No default implementation. |
+| `IDidResolver` | Resolve key material; `DidKeyResolver` uses NetDid and `CompositeDidResolver` routes methods. |
+| `IVerificationRelationshipResolver` | Authorize verification methods for the controller and proof purpose. |
+| `IRootCapabilityResolver` | Resolve root trust anchors referenced by ID. Explicit-root overloads are also available. |
+| `IRevocationService` / `IRevocationStore` | Record/check verifier-owned revocation state. In-memory implementations are for local development. |
+| `INonceStore` | Atomic replay tracking. Share across replicas; `NullNonceStore` explicitly opts out. |
+
+A resolver that also supplies relationship/root resolution is detected automatically.
+No verification path fetches delegated ancestors by their IDs: they travel in the
+embedded chain. Root resolution is an explicit trust boundary.
+
+## Capability profile and target attenuation
+
+`CapabilityProfile` walks capability locations before signing or trusting authority.
+It inspects every proof-set member and embedded ancestor, handles typed models and
+wire JSON, and bounds depth/work to reject cycles. It rejects the presence of any
+`caveat` key, including null/empty values. Standalone proof verification applies the
+guard before its proofless-root shortcut. Envelope invocation checks its separate
+capability argument, body capability and proof capability independently. Signed revocation
+also checks these representations and its explicit root before recording state. The DI
+application document may have its own unrelated fields.
+
+`InvocationTargetPolicy` shares ordinal `/`, `?`, `&` suffix checks and literal
+path-traversal protection between creation and verification. Delegation creation
+accepts an optional narrower `invocationTarget`; verification requires explicit
+`VerificationPolicy.AllowTargetAttenuation = true`. Default false matches the JS
+reference's exact-target default. Applications enforce query semantics and ensure
+that routing and URL normalization agree with the authenticated target.
+
+## Proof and chain flow
+
+1. Create a root and register it with a trusted root resolver, or pass it explicitly.
+2. Delegate a subset of actions with a bounded expiry and an optional narrower target.
+3. Build `[rootId]` for the first delegation or
+   `[rootId, ...ancestorIds, {immediateParent}]` for deeper delegations.
+4. Sign with an authorized parent controller through `IDidSigner`.
+5. At invocation, validate every chain link, authority restriction and revocation.
+6. Verify the invoker's signature and controller relationship, enforce freshness,
+   then atomically record the nonce before authorizing the action.
+
+`LegacyProofCrypto` delegates to DataProofs' Ed25519Signature2020 and
+EcdsaSecp256r1Signature2019 suites. `ZcapSuiteCatalog` binds proof type, key type and
+context. `ProofSigningPayloadBuilder` supplies clone helpers and the test oracle.
+Signing bytes remain `SHA-256(RDFC(proofOptions)) || SHA-256(RDFC(document))`.
+`RdfcContextDocumentLoader` serves embedded contexts offline; `ZcapJsonOptions`
+provides consistent serialization and rejects duplicate JSON properties.
+
+The DI verifier requires expected action/targets and can pin root IDs. It validates
+the application context before trusting the proof so invocation fields cannot be
+dropped from the signed RDF dataset. Golden vectors and the live JS harness pin
+canonicalization and proof interoperability. Modern v0.4 example suites do not
+require replacing this explicitly supported proof format.
+
+## Time, revocation and replay
+
+Delegated capabilities expire. The optional `EnforceMaxDelegationExpiration`
+policy bounds each retained link's future expiration. Delegation `created` must
+be parseable when present and cannot exceed allowed clock skew; requiring it is
+optional. Invocation/revocation `created` additionally has a lower freshness bound
+based on the nonce window. Revocation authorization intentionally exempts applicable
+expiration-ceiling/created policies so removing authority remains possible; it does
+not exempt unsupported caveats.
+
+ASP.NET registers `AddZcapServices`, custom signer/resolver/root/nonce/revocation
+implementations, and `MapZcapRevocationEndpoints`. The revoke POST authenticates a
+signed request and caps its body. Anonymous status GET returns only ID and revoked
+state. Free-form revocation `reason`/`metadata` are informational under RDFC, not
+signature-bound policy.
+
+Replicated verifiers must share authoritative revocation and replay stores. The
+library does not discover unknown verifiers, distribute revocations between
+independent operators, or poll a capability-supplied URI. See the
+[revocation guide](docs/REVOCATION-INTEGRATION.md).
+
+## Concurrency and limits
+
+Core holds no private keys. Shared stores/signers/resolvers supplied by consumers
+must be safe for their application concurrency. In-memory implementations use
+concurrent storage. Chain traversal is bounded (maximum length 10). HTTP-signature
+invocation transport, WASM integration, and a negotiated modern cryptosuite profile
+remain separate work; the current interop harness tests Ed25519 delegation and DI
+invocation, not every feature of every peer.

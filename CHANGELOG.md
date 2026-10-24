@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [5.0.0] - Unreleased
+
+### Security and breaking changes (#149)
+
+- Remove `Capability.Caveat`, typed caveats (including Expiration), registry/converter,
+  processors, `InvocationContext`, context-properties verification overloads, caveat
+  exceptions/outcomes, HTTP handler and caveat DI APIs. No legacy acceptance mode.
+- Reject all capability `caveat` fields, including null/empty/custom values and embedded
+  ancestors, at issuance and verification. `UsageCount.maxUses` and `ValidWhileTrue.uri`
+  were not signature-bound; holders could alter restrictions without the delegator key.
+- Add `VerificationPolicy.AllowTargetAttenuation` (default false, matching JavaScript).
+  Enable explicitly for delegated/invoked path or query suffixes. Add the optional
+  `invocationTarget` delegation parameter, checked against the parent before signing.
+- Keep RDFC-1.0 and existing proof suites. Update the supported profile documentation to
+  v0.4.0; its caveat-removal note already appeared in published v0.3.0. Modernized example
+  cryptosuites do not require changing the library's interoperable proof format.
+- Replace remote-caveat examples with native restrictions and verifier-owned revocation.
+  Document query interpretation and multi-verifier revocation distribution obligations.
+- Align interop dependency pins and add cross-stack target-policy and caveat-rejection tests.
+
+### Migration
+
+Remove caveat constructor/creation parameters and use `expires`, `allowedAction`, and
+`invocationTarget`. Remove `ICaveatProcessor` from verifier construction. Remove context
+property arguments; explicit-root envelope verification now takes three arguments.
+Use a shared authoritative revocation store rather than `ValidWhileTrue`. Existing
+caveat-bearing documents are rejected and must be replaced with supported restrictions.
+
 ## [4.2.0] - 2026-07-28
 
 Foundation bump to NetDid 3.0.0 (adds `did:ethr` support upstream). Shipped as a **minor**, not a major:

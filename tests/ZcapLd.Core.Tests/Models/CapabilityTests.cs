@@ -23,7 +23,6 @@ public class CapabilityTests
         capability.AllowedAction.Should().BeNull();
         capability.Expires.Should().BeNull();
         capability.ParentCapability.Should().BeNull();
-        capability.Caveat.Should().BeNull();
         capability.Proof.Should().BeNull();
     }
 

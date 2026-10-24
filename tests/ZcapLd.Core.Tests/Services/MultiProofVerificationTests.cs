@@ -26,7 +26,7 @@ public class MultiProofVerificationTests
     {
         _didProvider = new InMemoryDidProvider();
         _signingService = new SigningService(_didProvider, _didProvider);
-        _verificationService = new VerificationService(_didProvider, new CaveatProcessor());
+        _verificationService = new VerificationService(_didProvider);
         _capabilityService = new CapabilityService(_signingService);
     }
 
@@ -37,10 +37,9 @@ public class MultiProofVerificationTests
         ControllerSet controller,
         string invocationTarget,
         string[]? allowedActions = null,
-        DateTime? expires = null,
-        Caveat[]? caveats = null)
+        DateTime? expires = null)
         => TestRoots.CreateAndRegisterRootAsync(
-            _capabilityService, _didProvider, controller, invocationTarget, allowedActions, expires, caveats);
+            _capabilityService, _didProvider, controller, invocationTarget, allowedActions, expires);
 
     private static Proof NonDelegationProof(string verificationMethod) => new()
     {

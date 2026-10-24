@@ -20,7 +20,7 @@ public interface IVerificationService
     /// or independently verify every ancestor's own proof (signature, attenuation, <c>created</c>). In
     /// particular, on a deep delegation only the <i>leaf</i> link's <c>created</c> is checked here; an
     /// intermediate ancestor's <c>created</c> — like its signature — is gated only by the full-chain
-    /// path. For an authorization decision, use <see cref="VerifyCapabilityChainAsync"/> (full chain)
+    /// path. For an authorization decision, use <see cref="VerifyCapabilityChainAsync(Capability)"/> (full chain)
     /// or <see cref="VerifyInvocationAsync(Invocation, Capability)"/>.
     /// </para>
     /// </summary>
@@ -60,79 +60,17 @@ public interface IVerificationService
     /// <returns>A <see cref="VerificationResult"/> describing the outcome.</returns>
     Task<VerificationResult> VerifyCapabilityProofDetailedAsync(Capability capability, Capability rootCapability);
 
-    /// <summary>
-    /// Verifies an invocation request
-    /// </summary>
-    /// <param name="invocation">The invocation to verify</param>
-    /// <param name="capability">The capability being invoked</param>
-    /// <returns>True if the invocation is valid</returns>
+    /// <summary>Verifies a signed invocation envelope.</summary>
     Task<bool> VerifyInvocationAsync(Invocation invocation, Capability capability);
 
-    /// <summary>
-    /// Verifies an invocation request with application-specific context properties.
-    /// Properties are merged into <see cref="InvocationContext.Properties"/> before caveat evaluation,
-    /// enabling custom caveats to read request-scoped metadata (e.g. content type, schema URI, caller IP).
-    /// </summary>
-    /// <param name="invocation">The invocation to verify</param>
-    /// <param name="capability">The capability being invoked</param>
-    /// <param name="contextProperties">Application-specific key/value pairs to inject into the invocation context</param>
-    /// <returns>True if the invocation is valid</returns>
-    Task<bool> VerifyInvocationAsync(Invocation invocation, Capability capability, Dictionary<string, object>? contextProperties);
+    /// <summary>Verifies a signed invocation with an explicit root trust anchor.</summary>
+    Task<bool> VerifyInvocationAsync(Invocation invocation, Capability capability, Capability rootCapability);
 
-    /// <summary>
-    /// Verifies an invocation request, supplying the root capability explicitly (see
-    /// <see cref="VerifyCapabilityProofAsync(Capability, Capability)"/> for why the root is needed).
-    /// Pass <paramref name="contextProperties"/> as <see langword="null"/> when none are required; the
-    /// root is a four-argument overload so a bare <c>null</c> third argument stays unambiguous against
-    /// <see cref="VerifyInvocationAsync(Invocation, Capability, Dictionary{string, object})"/>.
-    /// </summary>
-    /// <param name="invocation">The invocation to verify</param>
-    /// <param name="capability">The capability being invoked</param>
-    /// <param name="rootCapability">The root capability the chain references by id</param>
-    /// <param name="contextProperties">Application-specific key/value pairs to inject into the invocation context</param>
-    /// <returns>True if the invocation is valid</returns>
-    Task<bool> VerifyInvocationAsync(Invocation invocation, Capability capability, Capability rootCapability, Dictionary<string, object>? contextProperties);
-
-    /// <summary>
-    /// Structured-result sibling of <see cref="VerifyInvocationAsync(Invocation, Capability)"/>: returns a
-    /// <see cref="VerificationResult"/> naming the specific failure (e.g.
-    /// <see cref="VerificationOutcome.Replayed"/>, <see cref="VerificationOutcome.ActionNotAllowed"/>,
-    /// <see cref="VerificationOutcome.UnauthorizedController"/>) instead of a bare <c>false</c> (Issue #70).
-    /// </summary>
-    /// <param name="invocation">The invocation to verify</param>
-    /// <param name="capability">The capability being invoked</param>
-    /// <returns>A <see cref="VerificationResult"/> describing the outcome.</returns>
+    /// <summary>Returns the detailed invocation verification result.</summary>
     Task<VerificationResult> VerifyInvocationDetailedAsync(Invocation invocation, Capability capability);
 
-    /// <summary>
-    /// Structured-result sibling of
-    /// <see cref="VerifyInvocationAsync(Invocation, Capability, Dictionary{string, object})"/>
-    /// (with application context properties). See <see cref="VerifyInvocationDetailedAsync(Invocation, Capability)"/>.
-    /// </summary>
-    /// <param name="invocation">The invocation to verify</param>
-    /// <param name="capability">The capability being invoked</param>
-    /// <param name="contextProperties">Application-specific key/value pairs to inject into the invocation context</param>
-    /// <returns>A <see cref="VerificationResult"/> describing the outcome.</returns>
-    Task<VerificationResult> VerifyInvocationDetailedAsync(
-        Invocation invocation,
-        Capability capability,
-        Dictionary<string, object>? contextProperties);
-
-    /// <summary>
-    /// Structured-result sibling of
-    /// <see cref="VerifyInvocationAsync(Invocation, Capability, Capability, Dictionary{string, object})"/>
-    /// (explicit root + context). See <see cref="VerifyInvocationDetailedAsync(Invocation, Capability)"/>.
-    /// </summary>
-    /// <param name="invocation">The invocation to verify</param>
-    /// <param name="capability">The capability being invoked</param>
-    /// <param name="rootCapability">The root capability the chain references by id</param>
-    /// <param name="contextProperties">Application-specific key/value pairs to inject into the invocation context</param>
-    /// <returns>A <see cref="VerificationResult"/> describing the outcome.</returns>
-    Task<VerificationResult> VerifyInvocationDetailedAsync(
-        Invocation invocation,
-        Capability capability,
-        Capability rootCapability,
-        Dictionary<string, object>? contextProperties);
+    /// <summary>Returns the detailed invocation result with an explicit root trust anchor.</summary>
+    Task<VerificationResult> VerifyInvocationDetailedAsync(Invocation invocation, Capability capability, Capability rootCapability);
 
     /// <summary>
     /// Verifies a capability delegation chain
@@ -192,24 +130,11 @@ public interface IVerificationService
     /// <b>Fail-closed:</b> any structural mismatch (wrong <c>proofPurpose</c>/<c>capabilityAction</c>,
     /// wrong capability binding, body/proof inconsistency), an invalid signature, an unauthorized
     /// signer, a replayed request, or any infrastructure error (DID resolution, network, crypto)
-    /// returns <c>false</c> and records nothing. Caveats are deliberately <b>not</b> evaluated —
-    /// revocation is a control-plane authority action. The recorded <c>RevokedBy</c> is the
-    /// authenticated verification method's bare DID; a signed <c>reason</c>/<c>metadata</c> is
-    /// recorded. Replay protection keys on the request's <c>id</c>, so each request needs a fresh id.
-    /// Only <see cref="System.ArgumentNullException"/> (null capability or request) is thrown.
+    /// returns <c>false</c>. Unsupported caveats remain rejected on this path.
     /// </remarks>
-    /// <param name="capability">The capability to revoke, with its full delegation chain (for authorization).</param>
-    /// <param name="signedRevocation">The signed revocation request (from <see cref="ISigningService.SignRevocationAsync"/>).</param>
-    /// <returns>True if authenticated, authorized, fresh, and recorded; otherwise false.</returns>
     Task<bool> RevokeCapabilityAsync(Capability capability, Invocation signedRevocation);
 
-    /// <summary>
-    /// Revokes a capability from a signed revocation request, supplying the root capability explicitly.
-    /// Revocation authorization verifies the full delegation chain, which references the root by id
-    /// only; supply the root here when no <see cref="IRootCapabilityResolver"/> is configured
-    /// (otherwise revoking a first-level delegated capability fails closed). Same semantics as
-    /// <see cref="RevokeCapabilityAsync(Capability, Invocation)"/> otherwise.
-    /// </summary>
+    /// <summary>Revokes a capability using an explicit root trust anchor.</summary>
     /// <param name="capability">The capability to revoke, with its full delegation chain (for authorization).</param>
     /// <param name="signedRevocation">The signed revocation request (from <see cref="ISigningService.SignRevocationAsync"/>).</param>
     /// <param name="rootCapability">The root capability the chain references by id</param>
@@ -229,7 +154,7 @@ public interface IVerificationService
     /// application document carrying a <c>capabilityInvocation</c> proof. The relying party MUST declare
     /// the action and target(s) it authorizes; the verifier fails closed unless the proof matches them
     /// (this binding prevents a confused-deputy replay of an invocation signed over a different
-    /// capability). See <see cref="VerifyCapabilityInvocationDetailedAsync(JsonObject, string, IReadOnlyCollection{string}, IReadOnlyCollection{string}, Capability, Dictionary{string, object})"/>
+    /// capability). See <see cref="VerifyCapabilityInvocationDetailedAsync(JsonObject, string, IReadOnlyCollection{string}, IReadOnlyCollection{string}, Capability)"/>
     /// for structured results and root pinning.
     /// </summary>
     Task<bool> VerifyCapabilityInvocationAsync(
@@ -241,15 +166,13 @@ public interface IVerificationService
         string expectedAction,
         IReadOnlyCollection<string> expectedTargets,
         IReadOnlyCollection<string>? expectedRootCapabilityIds = null,
-        Capability? rootCapability = null,
-        Dictionary<string, object>? contextProperties = null);
+        Capability? rootCapability = null);
 
     /// <summary>Single-expected-target convenience overload of
-    /// <see cref="VerifyCapabilityInvocationDetailedAsync(JsonObject, string, IReadOnlyCollection{string}, IReadOnlyCollection{string}, Capability, Dictionary{string, object})"/>.</summary>
+    /// <see cref="VerifyCapabilityInvocationDetailedAsync(JsonObject, string, IReadOnlyCollection{string}, IReadOnlyCollection{string}, Capability)"/>.</summary>
     Task<VerificationResult> VerifyCapabilityInvocationDetailedAsync(
         JsonObject securedDocument,
         string expectedAction,
         string expectedTarget,
-        Capability? rootCapability = null,
-        Dictionary<string, object>? contextProperties = null);
+        Capability? rootCapability = null);
 }

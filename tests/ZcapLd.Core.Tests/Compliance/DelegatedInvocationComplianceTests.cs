@@ -29,7 +29,6 @@ public class DelegatedInvocationComplianceTests
 
     private readonly InMemoryDidProvider _didProvider = new();
     private readonly SigningService _signingService;
-    private readonly CaveatProcessor _caveatProcessor = new();
     private readonly CapabilityService _capabilityService;
 
     public DelegatedInvocationComplianceTests()
@@ -39,8 +38,7 @@ public class DelegatedInvocationComplianceTests
     }
 
     private VerificationService CreateVerifier() =>
-        new(_didProvider, _caveatProcessor,
-            new RevocationService(new InMemoryRevocationStore()), new InMemoryNonceStore());
+        new(_didProvider, new RevocationService(new InMemoryRevocationStore()), new InMemoryNonceStore());
 
     private async Task<(Capability root, Capability delegated, string rootDid, string leafDid)> CreateRootAndDelegatedAsync()
     {

@@ -1,22 +1,8 @@
 <Project>
   <PropertyGroup>
-    <!-- Shared package/library version for ZcapLd.Core and ZcapLd.AspNetCore.
-         3.5.0 (#108): crypto/proof code delegated to the composable stack — NetCrypto 1.0.0
-         (via NetDid 2.0.0), DataProofs.Rdfc, and NetCid JCS. Source-breaking (consumers
-         recompile; NetDid.Core.Crypto types moved to NetCrypto) but WIRE-COMPATIBLE — the
-         Ed25519Signature2020 / EcdsaSecp256r1Signature2019 proof bytes are unchanged, so
-         capabilities issued by 3.x still verify.
-         4.1.0 (#127): foundation pin bump only — NetDid.* 2.0.1 → 2.2.0 and NetCrypto
-         1.1.0 → 1.2.0 (additive; downstream convergence for net-wallet-sdk 0.2.0). No
-         source or wire changes.
-         4.1.1: dependency bump — DataProofsDotnet.* Core/Rdfc 1.1.0 → 1.1.1, Legacy
-         1.0.1 → 1.1.1, and NetCrypto 1.2.0 → 1.4.0 (NetDid stays 2.2.0 pending the
-         NetDid 3.0.0 line). Dependency-only; proof/canonicalization wire bytes unchanged
-         (pinned by the golden-vector suite).
-         4.2.0: NetDid.* 2.2.0 → 3.0.0 (adds did:ethr support; NetCrypto floor stays
-         1.4.0, already pinned). Minor, not major — NetDid 3.0.0 is source-compatible
-         with 2.x for consumers; zcap's own public API compiles identically and the
-         proof/canonicalization wire bytes are unchanged. -->
-    <ZcapLdVersion>4.2.0</ZcapLdVersion>
+    <!-- Shared major version: #149 removes typed caveats and invocation context APIs,
+         rejects unsupported caveat fields, and defaults target verification to exact matches.
+         Supported capability proof bytes remain unchanged (RDFC-1.0). -->
+    <ZcapLdVersion>5.0.0</ZcapLdVersion>
   </PropertyGroup>
 </Project>

@@ -59,9 +59,6 @@ public enum VerificationOutcome
     /// <summary>The capability, or one of its ancestors in the chain, has been revoked.</summary>
     Revoked,
 
-    /// <summary>A caveat — on the leaf or inherited from an ancestor — was not satisfied.</summary>
-    CaveatFailed,
-
     /// <summary>The invocation nonce has already been seen within the replay window — a replay.</summary>
     Replayed,
 

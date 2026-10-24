@@ -2,6 +2,19 @@
 
 This file provides instructions for AI agents and human contributors working in this codebase.
 
+## Current profile (5.0.0, #149)
+
+The approved supported profile is ZCAP v0.4.0 native attenuation. All vocabulary
+`caveat` fields are rejected (including null/empty/unknown and embedded ancestors).
+Typed caveat models, registries, processors, `InvocationContext`, context-property
+verification overloads, HTTP handlers and caveat DI APIs have been removed. Any
+older architectural notes below describing them are historical, not implementation
+requirements. Use `expires`, `allowedAction`, and `invocationTarget` instead.
+`VerificationPolicy.AllowTargetAttenuation` defaults to false; opt in explicitly.
+Creation accepts an optional narrower target. RDFC and proof suites are unchanged.
+Follow ARCHITECTURE.md and docs/ZCAP-LD-SPECIFICATION-REQUIREMENTS.md for current
+service boundaries. Revocation distribution and query semantics are application-owned.
+
 ## Project Overview
 
 W3C's ZCAP-LD (Authorization Capabilities for Linked Data) specification defines an object-capability model where authority is granted by possessing a signed "capability" document, rather than by identity or ACLs. A ZCAP-LD capability is a JSON-LD object containing fields like id, invocationTarget, and a cryptographic proof. It can delegate authority by linking to a parent capability (parentCapability) and attaching restrictions called caveats. This model "shifts the burden of identification…to directly work with individuals' actual capabilities" – in other words, "if you have a valid 'capability', you have the authorization" (akin to holding a car key). Our goal is to build a .NET 10 library (for use in-process or via gRPC) that can create, sign, delegate, invoke, and verify ZCAP-LD capabilities for digital wallet agents. Below are the key requirements and design points.

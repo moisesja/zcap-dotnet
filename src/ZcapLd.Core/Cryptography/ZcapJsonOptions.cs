@@ -23,16 +23,12 @@ namespace ZcapLd.Core.Cryptography;
     ///   default <c>JavaScriptEncoder</c> escapes plus signs, angle brackets,
     ///   ampersands, and apostrophes to Unicode escape sequences, which diverges from peer
 ///   canonicalizers. See #36.
-/// - <see cref="CaveatJsonConverter"/>: makes <see cref="Caveat"/> arrays
-///   round-trip through their derived classes' fields. See #39.
 /// </summary>
 public static class ZcapJsonOptions
 {
     /// <summary>
     /// Pre-configured options used everywhere capabilities, invocations, or
-    /// proofs cross the signing boundary. The caveat converter resolves
-    /// against <see cref="CaveatTypeRegistry.Default"/>, so consumers can
-    /// register custom caveat types at startup without rebuilding options.
+    /// proofs cross the signing boundary.
     /// </summary>
     public static JsonSerializerOptions Default { get; } = CreateDefault();
 
@@ -50,7 +46,6 @@ public static class ZcapJsonOptions
             // ambiguous body removes that cross-stack disagreement surface entirely.
             AllowDuplicateProperties = false
         };
-        options.Converters.Add(new CaveatJsonConverter(CaveatTypeRegistry.Default));
         return options;
     }
 }

@@ -22,7 +22,7 @@ public class Capability
 
     /// <summary>
     /// The controller(s) of this capability — the DID(s) authorized over it.
-    /// Per ZCAP-LD v0.3, <c>controller</c> may be a single URI string or an array of
+    /// Per ZCAP-LD v0.4.0, <c>controller</c> may be a single URI string or an array of
     /// URI strings; <see cref="ControllerSet"/> models both and preserves the wire shape.
     /// Assign a <see cref="string"/> or <c>string[]</c> directly (implicit conversion).
     /// </summary>
@@ -68,15 +68,7 @@ public class Capability
     public string? ParentCapability { get; set; }
 
     /// <summary>
-    /// List of caveats (restrictions) for this capability.
-    /// Null on root capabilities (no restrictions); omitted from the wire when null.
-    /// </summary>
-    [JsonPropertyName("caveat")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public Caveat[]? Caveat { get; set; }
-
-    /// <summary>
-    /// Cryptographic proof(s) for this capability. Per ZCAP-LD v0.3 a delegated zcap's
+    /// Cryptographic proof(s) for this capability. Per ZCAP-LD v0.4.0 a delegated zcap's
     /// <c>proof</c> may be a single DI proof object or an array of proof objects (at least one
     /// being a <c>capabilityDelegation</c> proof); <see cref="ProofSet"/> models both and
     /// preserves the wire shape. Null on root capabilities. Assign a single <see cref="Proof"/>

@@ -15,11 +15,10 @@ This library provides:
 - Capability creation and delegation
 - Delegation-chain verification
 - Invocation signing and verification
-- Caveat processing (expiration, usage count, ValidWhileTrue remote revocation) with polymorphic JSON serialization for third-party caveat types via `CaveatTypeRegistry`
+- Native restrictions (`expires`, `allowedAction`, target narrowing); unsupported vocabulary caveats are rejected.
 - Cross-language wire-format compatibility — proven live against `@digitalbazaar/zcap` (RDFC-1.0 / W3C Data Integrity; see [`interop/`](interop/README.md))
 - Invocation replay protection with pluggable nonce stores
 - Revocation persistence with pluggable storage backends
-- ValidWhileTrue caveat support with HTTP-based remote revocation checking
 - Ed25519 and P-256 signature suites with RDFC-1.0 canonicalization (crypto delegated to NetCrypto via DataProofs)
 - DID resolution via [NetDid](https://www.nuget.org/packages/NetDid.Core) (W3C-compliant did:key support)
 - Multibase signature encoding
@@ -34,74 +33,32 @@ dotnet add package ZcapLd.AspNetCore # Optional endpoint adapter
 ## Quick Start
 
 ```csharp
-using ZcapLd.Core.Cryptography;
 using ZcapLd.Core.Models;
 using ZcapLd.Core.Services;
 
-// Wire up services — in production, replace InMemoryDidProvider with your
-// IDidSigner (HSM/Key Vault) and IDidResolver implementations.
-var didProvider = new InMemoryDidProvider(); // test helper: IDidSigner + IDidResolver + IRootCapabilityResolver
-
-var signingService = new SigningService(didProvider, didProvider);
+// Supply your IDidSigner and IDidResolver implementations (for example, HSM/KMS-backed).
+var signingService = new SigningService(didSigner, didResolver);
 var capabilityService = new CapabilityService(signingService);
-var caveatProcessor = new CaveatProcessor();
-// Replay protection is ON by default (in-process InMemoryNonceStore, which is process-local —
-// supply a shared INonceStore via the longer constructor for multi-node verifiers).
-var verificationService = new VerificationService(didProvider, caveatProcessor);
-
-var rootDid = "did:key:z6MkRoot";
-var leafDid = "did:key:z6MkLeaf";
-
-didProvider.GenerateAndRegisterKeyPair(rootDid);
-didProvider.GenerateAndRegisterKeyPair(leafDid);
-
-// Root capability (root metadata only)
-var root = await capabilityService.CreateRootCapabilityAsync(
-    rootDid,
-    "https://api.example.com/resources",
-    new[] { "read", "write" });
-
-// A spec-exact delegation chain references the root by id only (never embedded), so the verifier
-// resolves it via an IRootCapabilityResolver. The test provider implements one — register the root
-// so first-level (and deeper) verification can authorize against it. Alternatively, pass the root
-// explicitly: verificationService.VerifyInvocationAsync(invocation, delegated, root, null).
-didProvider.RegisterRoot(root);
-
-// Delegated capability (restrictions live here)
+var verificationService = new VerificationService(didResolver);
+var root = await capabilityService.CreateRootCapabilityAsync(ownerDid, "https://example.com/reports");
 var delegated = await capabilityService.DelegateCapabilityAsync(
-    root,
-    leafDid,
-    new[] { "read" },
-    DateTime.UtcNow.AddDays(7),
-    new Caveat[]
-    {
-        new ExpirationCaveat { Expires = DateTime.UtcNow.AddDays(3) }
-    });
-
-// CreateInvocation picks the spec-correct `capability` shape automatically (Issue #51): a root
-// capability is referenced by id string, a delegated capability embeds the full zcap object — so you
-// never have to choose between InvocationCapability.FromId(...) and .FromCapability(...) yourself.
-var invocation = capabilityService.CreateInvocation(
-    delegated, "read", "https://api.example.com/resources/123");
-
-invocation.Proof = await signingService.SignInvocationAsync(invocation, leafDid);
-var isValid = await verificationService.VerifyInvocationAsync(invocation, delegated);
-
-// Need to know WHY verification failed? Every verify method has a `...DetailedAsync` sibling that
-// returns a structured VerificationResult (outcome enum + message) instead of a bare bool (Issue #70):
-var result = await verificationService.VerifyInvocationDetailedAsync(invocation, delegated);
-if (!result.IsValid)
-{
-    // result.Outcome is e.g. Revoked, Expired, InvalidSignature, UnauthorizedController, Replayed,
-    // CaveatFailed, ActionNotAllowed, InvalidTarget, ChainTooLong, … or CouldNotVerify (a config/
-    // transient fault rather than an invalid capability). The bool method above == result.IsValid.
-    Console.WriteLine($"Denied: {result.Outcome} — {result.Message}");
-}
+    root, agentDid, new[] { "read" }, DateTime.UtcNow.AddDays(1));
+var invocation = capabilityService.CreateInvocation(delegated, "read");
+invocation.Proof = await signingService.SignInvocationAsync(invocation, agentDid);
+bool valid = await verificationService.VerifyInvocationAsync(invocation, delegated, root);
 ```
+
+The explicit root above supplies the trust anchor. Alternatively configure
+`IRootCapabilityResolver`. For cross-stack application-document invocations use
+`SignCapabilityInvocationAsync` and `VerifyCapabilityInvocationAsync` with the
+relying party's expected action and targets. Run the console example for both paths.
+
+Version 5 removes typed caveats and their context-properties verification overloads.
+See [the breaking changes](CHANGELOG.md) and the native restriction policy below.
 
 ### Single vs Multiple Controllers
 
-Per W3C ZCAP-LD v0.3, a capability's `controller` may be **a single DID or an array of DIDs**.
+Per W3C ZCAP-LD v0.4.0, a capability's `controller` may be **a single DID or an array of DIDs**.
 `Capability.Controller` is a `ControllerSet` that preserves the shape on the wire — assign a
 `string` for one controller or a `string[]` for several (implicit conversions). **Any** controller
 in the set is authorized to invoke or delegate.
@@ -152,7 +109,7 @@ delegation. Provide it one of two ways:
   `AddZcapRootCapabilityResolver<T>()`). An `IDidResolver` that *also* implements
   `IRootCapabilityResolver` is auto-detected. `InMemoryRootCapabilityResolver` is provided for dev.
 - **Explicit root** — call the overloads that take the root directly:
-  `VerifyCapabilityChainAsync(cap, root)`, `VerifyInvocationAsync(invocation, cap, root, props)`,
+  `VerifyCapabilityChainAsync(cap, root)`, `VerifyInvocationAsync(invocation, cap, root)`,
   `VerifyCapabilityProofAsync(cap, root)`, `RevokeCapabilityAsync(cap, signedRevocation, root)`.
 
 When neither is available the verifier **fails closed**. The verifier also rejects non-spec chains
@@ -232,44 +189,37 @@ Configure storage via `IRevocationStore`:
 
 Full developer guide: [`docs/REVOCATION-INTEGRATION.md`](docs/REVOCATION-INTEGRATION.md)
 
-## ValidWhileTrue Caveat (Remote Revocation)
+## Native restrictions and verifier policy
 
-The `ValidWhileTrue` caveat (per the W3C ZCAP-LD spec) enables remote revocation by embedding a URI in the capability. At verification time, the verifier checks the URI to confirm the capability is still valid. The delegator/controller hosts the endpoint — not the verifier.
-
-**Controller side** (hosts the revocation status endpoint):
-
-```csharp
-builder.Services.AddZcapServices();              // POST/revoke endpoint needs IVerificationService
-builder.Services.AddZcapRevocationSupport<MyStore>(); // override the store
-app.MapZcapRevocationEndpoints();
-
-// When delegating, attach the caveat pointing to your endpoint:
-var delegated = await capabilityService.DelegateCapabilityAsync(
-    root, partnerDid, new[] { "read" },
-    DateTime.UtcNow.AddDays(30),
-    new Caveat[]
-    {
-        new ValidWhileTrueCaveat
-        {
-            Uri = $"https://my-service/zcaps/revocations/{Uri.EscapeDataString(root.Id)}"
-        }
-    });
-```
-
-**Verifier side** (checks the URI during invocation verification):
+The supported [ZCAP v0.4.0 profile](https://w3c-ccg.github.io/zcap-spec/v0.4.0/)
+uses `expires`, `allowedAction`, and `invocationTarget` to restrict delegated authority.
+Vocabulary-based `caveat` fields are rejected, including unknown types, empty arrays,
+and null values, throughout embedded chains. There is no custom caveat registry or
+remote `ValidWhileTrue` handler.
 
 ```csharp
-builder.Services.AddZcapValidWhileTrueSupport(); // registers HttpValidWhileTrueHandler
-builder.Services.AddZcapServices();
+var child = await capabilityService.DelegateCapabilityAsync(
+    root, agentDid, new[] { "read" }, DateTime.UtcNow.AddDays(1),
+    invocationTarget: root.InvocationTarget + "/reports?section=summary");
 
-// HttpClient can be configured for timeouts/retry:
-builder.Services.AddHttpClient("ZcapValidWhileTrue", client =>
-{
-    client.Timeout = TimeSpan.FromSeconds(5);
-});
+// Register before AddZcapServices(), or pass policy: to VerificationService.
+services.AddSingleton(new VerificationPolicy { AllowTargetAttenuation = true });
 ```
 
-When a `ValidWhileTrue` caveat is encountered during verification, the handler GETs the URI and checks the `isRevoked` field in the response. Without a handler configured, the caveat fails closed (denies access).
+`AllowTargetAttenuation` defaults to **false**, matching `@digitalbazaar/zcap`:
+parent/child and capability/invocation targets must match exactly. When enabled,
+a suffix must begin with `/` or `?` if the base has no query, or `&` if it does.
+The verifier additionally rejects literal `..` path segments. Creation allows an
+explicit narrower target; verifier acceptance is a separate policy decision.
+
+The resource API must enforce the meaning of each restriction. Lexical matching
+cannot enforce usage counters, quotas, or query semantics. In particular, reject
+ambiguous duplicate restriction parameters: `?maxUses=1&maxUses=100` must not
+widen authority through last-value parsing. Proxies and resource routing must
+interpret the authenticated target consistently, including percent encoding.
+
+Use native `expires` instead of `ExpirationCaveat`. Revocation belongs to the
+verifier responsible for the target; see [revocation integration](docs/REVOCATION-INTEGRATION.md).
 
 ## Root vs Delegated Semantics
 
@@ -278,21 +228,21 @@ When a `ValidWhileTrue` caveat is encountered during verification, the handler G
   - Does not include `proof`, `expires`, `parentCapability`
 - Delegated capability:
   - Contains `parentCapability`, `expires`, delegation `proof`
-  - Supports attenuation (`allowedAction`, target narrowing, caveats)
+  - Supports attenuation (`allowedAction`, target narrowing, expiration)
 
 ## Project Layout
 
 - `src/ZcapLd.Core`: library code
 - `src/ZcapLd.AspNetCore`: optional ASP.NET endpoint adapter package
 - `tests/ZcapLd.Core.Tests`: unit, integration, and compliance tests
-- `examples/ZcapLd.Examples`: console examples (8 scenarios including ValidWhileTrue)
-- `examples/ZcapLd.RevocationEndpointsDemo`: ASP.NET revocation endpoints demo wired to SQLite (with ValidWhileTrue support)
+- `examples/ZcapLd.Examples`: native restriction and signed revocation examples
+- `examples/ZcapLd.RevocationEndpointsDemo`: ASP.NET revocation with SQLite
 - `interop`: live cross-stack interop harness vs `@digitalbazaar/zcap` (run `interop/run-interop.sh`)
 - `docs`: implementation/security notes
 
 ## Developer Docs
 
-- Architecture: [`architecture.md`](architecture.md)
+- Architecture: [`ARCHITECTURE.md`](ARCHITECTURE.md)
 - Interop & spec-compliance analysis: [`docs/ZCAP-LD-INTEROP-COMPATIBILITY-ANALYSIS.md`](docs/ZCAP-LD-INTEROP-COMPATIBILITY-ANALYSIS.md) (with live `@digitalbazaar/zcap` round-trip harness in [`interop/`](interop/README.md))
 - Revocation Integration: [`docs/REVOCATION-INTEGRATION.md`](docs/REVOCATION-INTEGRATION.md)
 - Contributing: [`CONTRIBUTING.md`](CONTRIBUTING.md)
@@ -326,7 +276,7 @@ dotnet pack src/ZcapLd.AspNetCore/ZcapLd.AspNetCore.csproj -c Release
 - No default `IDidSigner` ships in the core package — consumers must provide their own (HSM/KMS/Key Vault).
 - `InMemoryDidProvider` (in examples and tests) stores private keys in plaintext memory and is NOT for production use.
 - Canonicalization is RDFC-1.0 (W3C RDF Dataset Canonicalization) only — the format that interoperates with `@digitalbazaar/zcap`. JCS support was removed in 4.0.0; there is no canonicalization option. Known W3C JSON-LD contexts are embedded for offline operation.
-- Cryptography is provided by [NetCrypto](https://www.nuget.org/packages/NetCrypto) (Ed25519 / P-256 sign + verify), reached via [NetDid](https://www.nuget.org/packages/NetDid.Core) 2.0.0 for W3C-compliant did:key resolution; multibase via [NetCid](https://www.nuget.org/packages/NetCid); RDFC-1.0 via [DataProofsDotnet.Rdfc](https://www.nuget.org/packages/DataProofsDotnet.Rdfc).
+- Cryptography is provided by [NetCrypto](https://www.nuget.org/packages/NetCrypto) (Ed25519 / P-256 sign + verify), reached via [NetDid](https://www.nuget.org/packages/NetDid.Core) 3.1.0 for W3C-compliant did:key resolution; multibase via [NetCid](https://www.nuget.org/packages/NetCid); RDFC-1.0 via [DataProofsDotnet.Rdfc](https://www.nuget.org/packages/DataProofsDotnet.Rdfc).
 - Ed25519 and P-256 are the supported signature suites; cryptography is delegated to NetCrypto (via DataProofs), not extended through a zcap API.
 
 ### Cross-stack interop caveats (`@digitalbazaar/zcap`)
@@ -334,5 +284,4 @@ dotnet pack src/ZcapLd.AspNetCore/ZcapLd.AspNetCore.csproj -c Release
 Capability **delegation** interoperates with `@digitalbazaar/zcap` (proven live by [`interop/`](interop/README.md)). Two things to know for cross-stack use:
 
 - **Use `Ed25519Signature2020`.** P-256 (`EcdsaSecp256r1Signature2019`) has no `@digitalbazaar/zcap` counterpart — it ships/tests Ed25519 only and serves no `ecdsa-2019/v1` context, so a P-256 capability will not verify there.
-- **Custom caveats are not enforced cross-stack.** `@digitalbazaar/zcap` has no generic caveat engine, so a capability whose security depends on `UsageCountCaveat`/`ValidWhileTrueCaveat` verifies there with the caveat **silently un-enforced**. For cross-stack security guarantees, rely only on `expires`/`allowedAction`/`invocationTarget`.
 - **Invocation** interop works via Data Integrity `capabilityInvocation` proofs (`SignCapabilityInvocationAsync` / `VerifyCapabilityInvocationAsync`), proven cross-stack for root + delegated. The verifier requires the relying party to declare the **expected action and target(s)** it authorizes (as the reference impl does) and validates the application document's `@context`, so a valid invocation can't be replayed against a different endpoint or have its terms rewritten. HTTP-Signature invocations (the `ezcap` transport) are not yet supported (tracked in #119).

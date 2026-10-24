@@ -22,23 +22,13 @@ public class CapabilityServiceTests
     }
 
     [Fact]
-    public async Task CreateRootCapability_DropsExpiresAllowedActionsAndCaveats()
+    public async Task CreateRootCapability_DropsExpiresAndAllowedActions()
     {
-        // Issue #72: a root carries no allowedAction/expires/caveat per W3C ZCAP-LD, so these
-        // parameters are accepted but intentionally dropped. This is CORRECT behavior (a root with
-        // expires is actively rejected by ValidateCapabilityAsync) — this test locks it so a future
-        // change does not mistakenly start honoring them on roots.
         var root = await _capabilityService.CreateRootCapabilityAsync(
-            "did:key:z6MkExample",
-            "https://example.com/doc",
-            allowedActions: new[] { "read" },
-            expires: DateTime.UtcNow.AddDays(1),
-            caveats: new Caveat[] { new ExpirationCaveat { Expires = DateTime.UtcNow.AddHours(1) } });
-
+            "did:key:z6MkExample", "https://example.com/resource", ["read"], DateTime.UtcNow.AddDays(1));
         root.AllowedAction.Should().BeNull();
         root.Expires.Should().BeNull();
-        root.Caveat.Should().BeNull();
-        (await _capabilityService.ValidateCapabilityAsync(root)).Should().BeTrue("a clean root validates");
+        (await _capabilityService.ValidateCapabilityAsync(root)).Should().BeTrue();
     }
 
     [Fact]
@@ -123,7 +113,6 @@ public class CapabilityServiceTests
         capability.Proof.Should().BeNull();
         capability.Expires.Should().BeNull();
         capability.ParentCapability.Should().BeNull();
-        capability.Caveat.Should().BeNull();
     }
 
     [Fact]
@@ -278,53 +267,6 @@ public class CapabilityServiceTests
     }
 
     [Fact]
-    public async Task DelegateCapability_ShouldInheritParentCaveats()
-    {
-        // Arrange
-        var parentController = "did:key:z6MkParent";
-        var newController = "did:key:z6MkChild";
-        var invocationTarget = "https://example.com/foo";
-
-        _didProvider.GenerateAndRegisterKeyPair(parentController);
-
-        var parentCaveat = new ExpirationCaveat
-        {
-            Expires = DateTime.UtcNow.AddDays(5)
-        };
-
-        var rootCapability = await _capabilityService.CreateRootCapabilityAsync(
-            parentController,
-            invocationTarget,
-            new[] { "read", "write" });
-
-        var childCaveat = new UsageCountCaveat
-        {
-            MaxUses = 10,
-            CurrentUses = 0
-        };
-
-        var parentDelegation = await _capabilityService.DelegateCapabilityAsync(
-            rootCapability,
-            parentController,
-            new[] { "read" },
-            DateTime.UtcNow.AddDays(20),
-            new Caveat[] { parentCaveat });
-
-        // Act
-        var delegatedCapability = await _capabilityService.DelegateCapabilityAsync(
-            parentDelegation,
-            newController,
-            new[] { "read" },
-            DateTime.UtcNow.AddDays(10),
-            new Caveat[] { childCaveat });
-
-        // Assert
-        delegatedCapability.Caveat.Should().HaveCount(2);
-        delegatedCapability.Caveat.Should().Contain(c => c.Type == "Expiration"); // Inherited
-        delegatedCapability.Caveat.Should().Contain(c => c.Type == "UsageCount"); // New
-    }
-
-    [Fact]
     public async Task DelegateCapability_MultiLevel_ShouldBuildCorrectChain()
     {
         // Arrange
@@ -453,28 +395,6 @@ public class CapabilityServiceTests
         // SHOULD-05 action check passes — the forbidden-root-field check is what rejects it.
         // (W3C ZCAP-LD: "A root zcap MUST NOT have any other fields.")
         capability.AllowedAction = new[] { "read" };
-
-        // Act
-        var isValid = await _capabilityService.ValidateCapabilityAsync(capability);
-
-        // Assert
-        isValid.Should().BeFalse();
-    }
-
-    [Fact]
-    public async Task ValidateCapability_RootWithCaveat_ShouldReturnFalse()
-    {
-        // Arrange
-        var capability = await _capabilityService.CreateRootCapabilityAsync(
-            "did:key:z6MkExample",
-            "https://example.com/foo",
-            new[] { "read" });
-
-        // Corrupt the root by adding a caveat (root zcaps MUST NOT carry caveats).
-        capability.Caveat = new Caveat[]
-        {
-            new ExpirationCaveat { Expires = DateTime.UtcNow.AddDays(1) }
-        };
 
         // Act
         var isValid = await _capabilityService.ValidateCapabilityAsync(capability);
@@ -648,8 +568,7 @@ public class CapabilityServiceTests
     // ─────────────────── CreateInvocation / CreateRootInvocation (Issue #51 ergonomics) ───────────────────
 
     private VerificationService CreateVerifier() =>
-        new(_didProvider, new CaveatProcessor(),
-            new RevocationService(new InMemoryRevocationStore()), new InMemoryNonceStore());
+        new(_didProvider, new RevocationService(new InMemoryRevocationStore()), new InMemoryNonceStore());
 
     [Fact]
     public async Task CreateInvocation_RootCapability_ReferencesByIdString()

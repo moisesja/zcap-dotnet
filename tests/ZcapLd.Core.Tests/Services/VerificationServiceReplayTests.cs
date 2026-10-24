@@ -11,13 +11,12 @@ public class VerificationServiceReplayTests
     private readonly InMemoryDidProvider _didProvider;
     private readonly SigningService _signingService;
     private readonly CapabilityService _capabilityService;
-    private readonly CaveatProcessor _caveatProcessor;
 
     public VerificationServiceReplayTests()
     {
         _didProvider = new InMemoryDidProvider();
         _signingService = new SigningService(_didProvider, _didProvider);
-        _caveatProcessor = new CaveatProcessor();
+
         _capabilityService = new CapabilityService(_signingService);
     }
 
@@ -28,16 +27,14 @@ public class VerificationServiceReplayTests
         ControllerSet controller,
         string invocationTarget,
         string[]? allowedActions = null,
-        DateTime? expires = null,
-        Caveat[]? caveats = null)
+        DateTime? expires = null)
         => TestRoots.CreateAndRegisterRootAsync(
-            _capabilityService, _didProvider, controller, invocationTarget, allowedActions, expires, caveats);
+            _capabilityService, _didProvider, controller, invocationTarget, allowedActions, expires);
 
     private VerificationService CreateVerificationService(INonceStore nonceStore)
     {
         return new VerificationService(
-            _didProvider, _caveatProcessor,
-            new RevocationService(new InMemoryRevocationStore()),
+            _didProvider, new RevocationService(new InMemoryRevocationStore()),
             nonceStore);
     }
 
@@ -85,7 +82,7 @@ public class VerificationServiceReplayTests
         // Issue #62: the convenience constructors must enable replay protection by default
         // (InMemoryNonceStore), not NullNonceStore. The 2-arg constructor is the README Quick
         // Start path, so it must reject a replayed invocation out of the box.
-        var verifier = new VerificationService(_didProvider, _caveatProcessor);
+        var verifier = new VerificationService(_didProvider);
         var (invocation, capability) = await CreateSignedInvocation();
 
         var first = await verifier.VerifyInvocationAsync(invocation, capability);

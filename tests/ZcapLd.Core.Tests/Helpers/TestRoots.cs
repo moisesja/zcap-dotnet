@@ -17,8 +17,7 @@ internal static class TestRoots
         ControllerSet controller,
         string invocationTarget,
         string[]? allowedActions = null,
-        DateTime? expires = null,
-        Caveat[]? caveats = null)
+        DateTime? expires = null)
         => didProvider.RegisterRoot(
-            await capabilities.CreateRootCapabilityAsync(controller, invocationTarget, allowedActions, expires, caveats));
+            await capabilities.CreateRootCapabilityAsync(controller, invocationTarget, allowedActions, expires));
 }

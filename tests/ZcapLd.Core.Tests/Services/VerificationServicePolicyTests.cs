@@ -21,7 +21,6 @@ public class VerificationServicePolicyTests
     private readonly InMemoryDidProvider _didProvider = new();
     private readonly SigningService _signingService;
     private readonly CapabilityService _capabilityService;
-    private readonly CaveatProcessor _caveatProcessor = new();
 
     public VerificationServicePolicyTests()
     {
@@ -31,8 +30,7 @@ public class VerificationServicePolicyTests
 
     private VerificationService CreateVerifier(VerificationPolicy? policy = null)
         => new(
-            _didProvider, _caveatProcessor,
-            new RevocationService(new InMemoryRevocationStore()),
+            _didProvider, new RevocationService(new InMemoryRevocationStore()),
             new InMemoryNonceStore(),
             policy: policy);
 
