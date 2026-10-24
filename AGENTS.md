@@ -202,13 +202,12 @@ dotnet run --project examples/ZcapLd.Examples                          # Run con
 # Task Management
 
 0. **Branch First**: Run `git checkout -b <issue-number>-<slug>` before any other action. See Workflow Orchestration §0.
-1. **Plan First**: Write plan to `tasks/todo{timestamp}.md` with checkable items
+1. **Plan First**: Write plan to `tasks/plan{timestamp}.md` with checkable items. The plan must document the human's intents and decisions. It must also document the results of your work.
 2. **Verify Plan**: Check in before starting implementation
 3. **Track Progress**: Mark items complete as you go
 4. **Explain Changes**: High-level summary at each step
-5. **Document Results**: Add review section to 'tasks/todo.m,
-6. **Capture Lessons**: Update 'tasks/lessons.md' after corrections
-7. **Keep Documentation Relevant**: Update all relevant documentation including README.md, architecture.md.
+5. **Capture Lessons**: Update 'tasks/lessons.md' after corrections
+6. **Keep Documentation Relevant**: Update all relevant documentation including README.md, architecture.md.
 
 ## Core Principles
 
