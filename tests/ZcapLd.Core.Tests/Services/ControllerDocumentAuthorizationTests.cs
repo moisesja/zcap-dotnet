@@ -47,17 +47,15 @@ public class ControllerDocumentAuthorizationTests
         ControllerSet controller,
         string invocationTarget,
         string[]? allowedActions = null,
-        DateTime? expires = null,
-        Caveat[]? caveats = null)
+        DateTime? expires = null)
         => TestRoots.CreateAndRegisterRootAsync(
-            _capabilityService, _didProvider, controller, invocationTarget, allowedActions, expires, caveats);
+            _capabilityService, _didProvider, controller, invocationTarget, allowedActions, expires);
 
     private VerificationService BuildVerifier(
         IVerificationRelationshipResolver relationshipResolver,
         ILogger<VerificationService>? logger = null) =>
         new VerificationService(
             _didProvider,
-            new CaveatProcessor(),
             new RevocationService(new InMemoryRevocationStore()),
             new InMemoryNonceStore(),
             nonceWindow: null,
@@ -240,7 +238,6 @@ public class ControllerDocumentAuthorizationTests
         // IVerificationRelationshipResolver, so the built-in did:key default handles authorization.
         var verifier = new VerificationService(
             new KeyOnlyDidResolver(),
-            new CaveatProcessor(),
             new RevocationService(new InMemoryRevocationStore()),
             new InMemoryNonceStore());
 

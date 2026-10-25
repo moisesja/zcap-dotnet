@@ -31,7 +31,7 @@ public class CapabilityChainShapeTests
     {
         _signing = new SigningService(_did, _did);
         _caps = new CapabilityService(_signing);
-        _verifier = new VerificationService(_did, new CaveatProcessor());
+        _verifier = new VerificationService(_did);
     }
 
     private string NewController() => _did.GenerateDidKey();

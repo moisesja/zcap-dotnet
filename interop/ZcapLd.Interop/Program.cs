@@ -29,6 +29,9 @@ try
 {
     switch (args[0])
     {
+        case "gen-profile":
+            return await GenerateProfileAsync(args[1], args[2], args[3]);
+
         case "gen":
             if (args.Length != 3)
             {
@@ -46,12 +49,12 @@ try
             return await GenerateMultiAsync(args[1], args[2], args[3]);
 
         case "verify":
-            if (args.Length != 3)
+            if (args.Length is < 3 or > 4)
             {
                 Console.Error.WriteLine("Usage: ZcapLd.Interop verify <delegatedFile> <rootFile>");
                 return 2;
             }
-            return await VerifyAsync(args[1], args[2]);
+            return await VerifyAsync(args[1], args[2], args.Length > 3 && bool.Parse(args[3]));
 
         case "gen-invocation":
             if (args.Length != 2)
@@ -62,7 +65,7 @@ try
             return await GenerateInvocationAsync(args[1]);
 
         case "verify-invocation":
-            if (args.Length is < 3 or > 5)
+            if (args.Length is < 3 or > 6)
             {
                 Console.Error.WriteLine("Usage: ZcapLd.Interop verify-invocation <securedDocFile> <rootFile> [expectedAction] [expectedTarget]");
                 return 2;
@@ -70,7 +73,7 @@ try
             return await VerifyInvocationAsync(
                 args[1], args[2],
                 args.Length > 3 ? args[3] : "read",
-                args.Length > 4 ? args[4] : Target);
+                args.Length > 4 ? args[4] : Target, args.Length > 5 && bool.Parse(args[5]));
 
         default:
             Console.Error.WriteLine($"Unknown command: {args[0]}");
@@ -143,7 +146,7 @@ async Task<int> GenerateMultiAsync(string rootOut, string l1Out, string l2Out)
     return 0;
 }
 
-async Task<int> VerifyAsync(string delegatedFile, string rootFile)
+async Task<int> VerifyAsync(string delegatedFile, string rootFile, bool allowTargetAttenuation = false)
 {
     var delegated = ReadJson(delegatedFile);
     var root = ReadJson(rootFile);
@@ -153,9 +156,8 @@ async Task<int> VerifyAsync(string delegatedFile, string rootFile)
 
     var verifier = new VerificationService(
         provider,
-        new CaveatProcessor(),
         new RevocationService(new InMemoryRevocationStore()),
-        new InMemoryNonceStore());
+        new InMemoryNonceStore(), policy: new VerificationPolicy { AllowTargetAttenuation = allowTargetAttenuation });
 
     var result = await verifier.VerifyCapabilityChainDetailedAsync(delegated);
 
@@ -201,7 +203,7 @@ async Task<int> GenerateInvocationAsync(string vectorsDir)
     return 0;
 }
 
-async Task<int> VerifyInvocationAsync(string securedDocFile, string rootFile, string expectedAction, string expectedTarget)
+async Task<int> VerifyInvocationAsync(string securedDocFile, string rootFile, string expectedAction, string expectedTarget, bool allowTargetAttenuation = false)
 {
     var secured = ReadNode(securedDocFile);
     var root = ReadJson(rootFile);
@@ -211,16 +213,15 @@ async Task<int> VerifyInvocationAsync(string securedDocFile, string rootFile, st
 
     var verifier = new VerificationService(
         provider,
-        new CaveatProcessor(),
         new RevocationService(new InMemoryRevocationStore()),
-        new InMemoryNonceStore());
+        new InMemoryNonceStore(), policy: new VerificationPolicy { AllowTargetAttenuation = allowTargetAttenuation });
 
     // The relying party declares what it authorizes (expected action/target/root) — required, so a
     // valid invocation over a different capability can't be replayed here. Pass the root explicitly so
     // both a root invocation (capability = root id) and a delegated invocation (chain[0] = root id) resolve.
     var result = await verifier.VerifyCapabilityInvocationDetailedAsync(
         secured, expectedAction, new[] { expectedTarget },
-        expectedRootCapabilityIds: new[] { root.Id }, rootCapability: root, contextProperties: null);
+        expectedRootCapabilityIds: new[] { root.Id }, rootCapability: root);
 
     if (result.IsValid)
     {
@@ -231,6 +232,29 @@ async Task<int> VerifyInvocationAsync(string securedDocFile, string rootFile, st
     Console.WriteLine("FAIL");
     Console.WriteLine($"{result.Outcome}: {result.Message}");
     return 1;
+}
+
+// Generate independently signed adversarial targets below the creation-time attenuation gate.
+async Task<int> GenerateProfileAsync(string directory, string baseTarget, string target)
+{
+    Directory.CreateDirectory(directory);
+    var provider = new DeterministicDidProvider();
+    var owner = provider.RegisterDeterministicDidKey(Seed(0x11));
+    var holder = provider.RegisterDeterministicDidKey(Seed(0x22));
+    var signing = new SigningService(provider, provider);
+    var caps = new CapabilityService(signing);
+    var root = await caps.CreateRootCapabilityAsync(owner, baseTarget);
+    provider.RegisterRoot(root);
+    var delegated = await caps.DelegateCapabilityAsync(root, holder, new[] { "read" }, DateTime.UtcNow.AddDays(1));
+    WriteJson(Path.Combine(directory, "root.json"), root);
+    WriteNode(Path.Combine(directory, "root-invocation.json"), await signing.SignCapabilityInvocationAsync(
+        InvocationCapability.FromId(root.Id), "read", target, owner));
+    WriteNode(Path.Combine(directory, "delegated-invocation.json"), await signing.SignCapabilityInvocationAsync(
+        InvocationCapability.FromCapability(delegated), "read", target, holder));
+    delegated.InvocationTarget = target;
+    delegated.Proof = await signing.SignCapabilityAsync(delegated, owner, "capabilityDelegation", new object[] { root.Id });
+    WriteJson(Path.Combine(directory, "delegated.json"), delegated);
+    return 0;
 }
 
 static void WriteJson(string path, Capability capability)

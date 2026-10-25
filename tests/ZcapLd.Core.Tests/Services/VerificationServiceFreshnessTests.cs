@@ -20,7 +20,6 @@ public class VerificationServiceFreshnessTests
     private readonly InMemoryDidProvider _didProvider = new();
     private readonly SigningService _signingService;
     private readonly CapabilityService _capabilityService;
-    private readonly CaveatProcessor _caveatProcessor = new();
 
     public VerificationServiceFreshnessTests()
     {
@@ -30,8 +29,7 @@ public class VerificationServiceFreshnessTests
 
     private VerificationService CreateVerificationService(INonceStore nonceStore, TimeSpan? freshnessClockSkew = null)
         => new(
-            _didProvider, _caveatProcessor,
-            new RevocationService(new InMemoryRevocationStore()),
+            _didProvider, new RevocationService(new InMemoryRevocationStore()),
             nonceStore, nonceWindow: null, freshnessClockSkew: freshnessClockSkew);
 
     // Builds a root + delegated capability and signs a delegated DI invocation whose proof carries the

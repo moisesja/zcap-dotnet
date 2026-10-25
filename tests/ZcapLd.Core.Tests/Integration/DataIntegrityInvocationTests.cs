@@ -29,8 +29,7 @@ public class DataIntegrityInvocationTests
         _signing = new SigningService(_did, _did);
         _caps = new CapabilityService(_signing);
         _verifier = new VerificationService(
-            _did, new CaveatProcessor(),
-            new RevocationService(new InMemoryRevocationStore()),
+            _did, new RevocationService(new InMemoryRevocationStore()),
             new InMemoryNonceStore());
     }
 

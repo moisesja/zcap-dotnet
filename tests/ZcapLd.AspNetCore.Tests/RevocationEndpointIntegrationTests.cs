@@ -18,8 +18,7 @@ namespace ZcapLd.AspNetCore.Tests;
 /// <summary>
 /// End-to-end HTTP coverage for the signed revocation endpoint, run against the demo host via
 /// <see cref="WebApplicationFactory{TEntryPoint}"/>. Proves authentication (proof-of-possession),
-/// authorization, route/body binding, and — critically — that an embedded capability carrying a
-/// typed caveat round-trips through the endpoint's JSON deserialization without canonical drift.
+/// authorization, route/body binding, and rejection of unsupported caveats after HTTP deserialization.
 /// </summary>
 public sealed class RevocationEndpointIntegrationTests : IClassFixture<RevocationEndpointIntegrationTests.RevocationApiFactory>
 {
@@ -157,30 +156,28 @@ public sealed class RevocationEndpointIntegrationTests : IClassFixture<Revocatio
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
     }
 
-    [Fact]
-    public async Task Post_CapabilityWithTypedCaveat_RoundTripsAndRevokes()
+    [Theory]
+    [InlineData("null")]
+    [InlineData("[]")]
+    [InlineData("[{\"type\":\"UsageCount\",\"maxUses\":1}]")]
+    public async Task Post_UnsupportedCaveat_Returns403WithoutRecording(string caveat)
     {
-        // Guards the endpoint's JSON-converter wiring: an embedded capability carrying a typed
-        // caveat must deserialize with its derived fields intact, otherwise canonical bytes drift
-        // and the (legitimate) delegation proof fails verification — looking like an auth failure.
         var http = _factory.CreateClient();
         var client = new Client();
-        var rootDid = client.Did.GenerateDidKey();
-        var childDid = client.Did.GenerateDidKey();
+        var owner = client.Did.GenerateDidKey();
+        var root = await client.Capabilities.CreateRootCapabilityAsync(owner, "https://example.com/resource");
+        _factory.RootResolver.Register(root);
+        var leaf = await client.Capabilities.DelegateCapabilityAsync(
+            root, client.Did.GenerateDidKey(), ["read"], DateTime.UtcNow.AddDays(1));
+        var signed = await client.Signing.SignRevocationAsync(leaf.Id, owner, leaf.InvocationTarget);
+        using var doc = JsonDocument.Parse(caveat);
+        leaf.AdditionalProperties = new() { ["caveat"] = doc.RootElement.Clone() };
 
-        var root = await client.Capabilities.CreateRootCapabilityAsync(
-            rootDid, "https://example.com/resource", new[] { "read", "write" });
-        _factory.RootResolver.Register(root); // server resolves the root a spec-exact chain references by id
-        var delegated = await client.Capabilities.DelegateCapabilityAsync(
-            root, childDid, new[] { "read" }, DateTime.UtcNow.AddDays(5),
-            caveats: new Caveat[] { new ExpirationCaveat { Expires = DateTime.UtcNow.AddDays(3) } });
+        (await PostRevocationAsync(http, leaf.Id, leaf, signed)).StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await GetStatusAsync(http, leaf.Id)).IsRevoked.Should().BeFalse();
 
-        var signed = await client.Signing.SignRevocationAsync(delegated.Id, rootDid, delegated.InvocationTarget);
-
-        var response = await PostRevocationAsync(http, delegated.Id, delegated, signed);
-
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
-        (await GetStatusAsync(http, delegated.Id)).IsRevoked.Should().BeTrue();
+        leaf.AdditionalProperties.Remove("caveat");
+        (await PostRevocationAsync(http, leaf.Id, leaf, signed)).StatusCode.Should().Be(HttpStatusCode.OK);
     }
 
     [Fact]

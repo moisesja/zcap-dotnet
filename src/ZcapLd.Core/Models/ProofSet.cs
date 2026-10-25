@@ -6,7 +6,7 @@ namespace ZcapLd.Core.Models;
 /// <summary>
 /// The set of Data Integrity proofs attached to a delegated capability.
 ///
-/// Per W3C ZCAP-LD v0.3, a delegated zcap's <c>proof</c> field MAY be a single DI proof
+/// Per W3C ZCAP-LD v0.4.0, a delegated zcap's <c>proof</c> field MAY be a single DI proof
 /// object <b>or</b> an array of proof objects, and at least one of them MUST be a
 /// <c>capabilityDelegation</c> proof. This immutable value type models both shapes behind
 /// one API and, like <see cref="ControllerSet"/>, <b>preserves the on-wire shape</b> it was

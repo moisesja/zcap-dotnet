@@ -23,7 +23,7 @@ public class Invocation
     public string Id { get; set; } = $"urn:uuid:{Guid.NewGuid()}";
 
     /// <summary>
-    /// The capability being invoked. Per ZCAP-LD v0.3 this is the root zcap <b>id string</b> for a
+    /// The capability being invoked. Per ZCAP-LD v0.4.0 this is the root zcap <b>id string</b> for a
     /// root invocation, or the <b>full embedded delegated zcap object</b> for a delegated DI
     /// invocation (Issue #51); <see cref="InvocationCapability"/> models both and preserves the wire
     /// shape. Assign a <see cref="string"/> id directly (implicit conversion) for root invocations and
@@ -52,4 +52,3 @@ public class Invocation
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public Proof? Proof { get; set; }
 }
-

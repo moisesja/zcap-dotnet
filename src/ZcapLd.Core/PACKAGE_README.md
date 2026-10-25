@@ -1,132 +1,41 @@
 # ZcapLd.Core
 
-`ZcapLd.Core` is a .NET implementation of the W3C ZCAP-LD model for capability-based authorization.
+.NET 10 library for the supported ZCAP v0.4.0 profile: root and delegated
+capabilities, Ed25519/P-256 proofs, controller authorization, replay protection,
+and signed revocation. Proofs use RDFC-1.0 through DataProofs and NetCrypto.
 
-## Install
-
-```bash
-dotnet add package ZcapLd.Core
-```
-
-## What It Provides
-
-- Root capability creation (`urn:zcap:root:*`)
-- Delegated capability creation with attenuation
-- Invocation signing and verification
-- Delegation chain verification
-- Caveat support (expiration, usage count, and ValidWhileTrue remote revocation)
-- ValidWhileTrue caveat with pluggable `IValidWhileTrueHandler` for remote revocation checking
-- Revocation service abstractions with pluggable storage (`IRevocationStore`)
-- Pluggable crypto suites (Ed25519 and P-256 included, additional curves extensible)
-- Dynamic JSON-LD context URLs per crypto suite
-- Multibase signature encoding
-
-## Quick Example
+Provide an `IDidSigner` and `IDidResolver`; no private-key store is installed by default.
 
 ```csharp
-using ZcapLd.Core.Cryptography;
-using ZcapLd.Core.Models;
-using ZcapLd.Core.Services;
-
-// Wire up services — in production, replace InMemoryDidProvider with your
-// IDidSigner (HSM/Key Vault) and IDidResolver implementations.
-var didProvider = new InMemoryDidProvider(); // test helper: IDidSigner + IDidResolver
-var signingService = new SigningService(didProvider, didProvider);
-var capabilityService = new CapabilityService(signingService);
-var caveatProcessor = new CaveatProcessor();
-var verificationService = new VerificationService(didProvider, caveatProcessor);
-
-var rootDid = "did:key:z6MkRoot";
-var leafDid = "did:key:z6MkLeaf";
-
-didProvider.GenerateAndRegisterKeyPair(rootDid);
-didProvider.GenerateAndRegisterKeyPair(leafDid);
-
-// Root capabilities only define root authority metadata.
-var root = await capabilityService.CreateRootCapabilityAsync(
-    rootDid,
-    "https://api.example.com/documents",
-    new[] { "read", "write" });
-
-// Restrictions (actions, caveats, expiry) are enforced on delegated capabilities.
-var delegated = await capabilityService.DelegateCapabilityAsync(
-    root,
-    leafDid,
-    new[] { "read" },
-    DateTime.UtcNow.AddDays(7),
-    new Caveat[]
-    {
-        new ExpirationCaveat { Expires = DateTime.UtcNow.AddDays(3) }
-    });
-
-// CreateInvocation selects the spec-correct `capability` shape automatically (Issue #51): a root
-// capability is referenced by id, a delegated capability embeds the full zcap object.
-var invocation = capabilityService.CreateInvocation(
-    delegated, "read", "https://api.example.com/documents/abc");
-
-invocation.Proof = await signingService.SignInvocationAsync(invocation, leafDid);
-var isValid = await verificationService.VerifyInvocationAsync(invocation, delegated);
+var signing = new SigningService(didSigner, didResolver);
+var capabilities = new CapabilityService(signing);
+var root = await capabilities.CreateRootCapabilityAsync(ownerDid, "https://example.com/reports");
+var child = await capabilities.DelegateCapabilityAsync(root, agentDid, new[] { "read" },
+    DateTime.UtcNow.AddDays(1));
+var verifier = new VerificationService(didResolver);
+var invocation = capabilities.CreateInvocation(child, "read");
+invocation.Proof = await signing.SignInvocationAsync(invocation, agentDid);
+bool authorized = await verifier.VerifyInvocationAsync(invocation, child, root);
 ```
 
-## ValidWhileTrue Caveat (Remote Revocation)
+Supply the root explicitly as above, or configure `IRootCapabilityResolver`.
+For cross-stack invocation use `SignCapabilityInvocationAsync` and
+`VerifyCapabilityInvocationAsync`; the relying party supplies its expected action
+and target. The root is referenced by ID; a delegated invocation embeds the zcap.
 
-`ValidWhileTrueCaveat` enables remote revocation per the W3C ZCAP-LD spec. The delegator embeds a URI in the caveat; at verification time, the handler checks it. Core provides the `IValidWhileTrueHandler` interface — `ZcapLd.AspNetCore` provides the HTTP implementation.
+Version 5 removes all typed caveat APIs and invocation-context property overloads.
+Incoming `caveat` fields are rejected even when null or empty. Use `expires`,
+`allowedAction`, and an optional delegation `invocationTarget` instead.
+Equivalent IRI/prefixed keys and nested restrictions are rejected throughout
+capability/proof JSON. Their contexts must be zcap/v1 or a supported proof-suite
+context; inline aliases and unrelated vocabularies are unsupported.
+`VerificationPolicy.AllowTargetAttenuation` defaults to false; explicitly enable
+it for path/query narrowing. The target API must enforce parameter semantics.
 
-```csharp
-// Delegate with a ValidWhileTrue caveat pointing to the controller's endpoint
-var delegated = await capabilityService.DelegateCapabilityAsync(
-    root, partnerDid, new[] { "read" },
-    DateTime.UtcNow.AddDays(30),
-    new Caveat[]
-    {
-        new ValidWhileTrueCaveat
-        {
-            Uri = "https://my-service/zcaps/revocations/urn%3Auuid%3A12345"
-        }
-    });
-```
+Use `IRevocationStore` and signed revocation requests. Replicated verifiers must
+share authoritative revocation state; there is no automatic polling of a URI
+supplied by a capability holder. `INonceStore` must likewise be shared when replay
+protection spans verifier instances.
 
-Without a handler configured, `ValidWhileTrueCaveat` always fails closed (denies access).
-
-## Revocation Backend Plug-In
-
-`ZcapLd.Core` provides:
-
-- `IRevocationStore` for storage providers
-- `IRevocationService` for revocation workflow orchestration
-- `IValidWhileTrueHandler` for async remote revocation checks (ValidWhileTrue caveat)
-- `InMemoryRevocationStore` as the default implementation
-
-## Exposing Revocation Without ASP.NET
-
-`ZcapLd.Core` is transport-agnostic. You can expose revocation through:
-
-- gRPC APIs
-- message consumers
-- worker services
-- CLI/admin operations
-
-In all cases, call `IRevocationService` from your transport/application layer.
-
-## Persistence Strategies
-
-Use `IRevocationStore` to plug in your persistence model:
-
-- In-memory (`InMemoryRevocationStore`) for local development
-- SQL/NoSQL-backed custom stores
-- Smart-contract/oracle-backed stores
-- Hybrid cache + durable stores
-
-## Notes
-
-- This package is designed for in-process usage.
-- No default `IDidSigner` ships in the core package — consumers must provide their own (HSM/KMS/Key Vault).
-- Ed25519 and P-256 are the supported signature suites; cryptography is delegated to NetCrypto (via DataProofs), not extended through a zcap API.
-- Data integrity processing supports JCS (default) and RDFC-1.0 (W3C RDF Dataset Canonicalization) via pluggable `IDocumentCanonicalizer`. Register `RdfcDocumentCanonicalizer` for full Data Integrity spec compliance.
-
-## Documentation
-
-- Repository: https://github.com/moisesja/zcap-dotnet
-- Architecture: `architecture.md`
-- Revocation Guide: `docs/REVOCATION-INTEGRATION.md`
-- Contributing: `CONTRIBUTING.md`
+See [the repository](https://github.com/moisesja/zcap-dotnet) for the full guide,
+policy options, examples and live JavaScript interoperability tests.

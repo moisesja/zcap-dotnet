@@ -20,16 +20,12 @@ public interface ICapabilityService
     /// <param name="expires">Ignored for root capabilities — a root carries no <c>expires</c> per
     /// W3C ZCAP-LD (it is unbounded; <c>ValidateCapabilityAsync</c> actively rejects a root that
     /// carries one). Supplying it has no effect; it is not honored (Issue #72).</param>
-    /// <param name="caveats">Ignored for root capabilities — a root carries no <c>caveat</c> per
-    /// W3C ZCAP-LD. Supplying caveats has no effect; apply restrictions on a delegated capability
-    /// instead (Issue #72).</param>
     /// <returns>The created capability</returns>
     Task<Capability> CreateRootCapabilityAsync(
         ControllerSet controller,
         string invocationTarget,
         string[]? allowedActions = null,
-        DateTime? expires = null,
-        Caveat[]? caveats = null);
+        DateTime? expires = null);
 
     /// <summary>
     /// Delegates a capability to another controller
@@ -39,17 +35,18 @@ public interface ICapabilityService
     /// (implicit from <see cref="string"/>) or several (implicit from <c>string[]</c>)</param>
     /// <param name="allowedActions">Actions to delegate (must be subset of parent)</param>
     /// <param name="expires">Optional expiration time (must not exceed parent)</param>
-    /// <param name="caveats">Optional additional caveats</param>
     /// <param name="signerDid">Which of the parent's controllers signs the delegation.
     /// Defaults to the parent's first controller; must be one of the parent's controllers.</param>
+    /// <param name="invocationTarget">Optional narrower target; defaults to the parent target.
+    /// Verifiers must independently opt into target attenuation to accept a narrowed target.</param>
     /// <returns>The delegated capability</returns>
     Task<Capability> DelegateCapabilityAsync(
         Capability parentCapability,
         ControllerSet newController,
         string[] allowedActions,
         DateTime? expires = null,
-        Caveat[]? caveats = null,
-        string? signerDid = null);
+        string? signerDid = null,
+        string? invocationTarget = null);
 
     /// <summary>
     /// Builds an <b>unsigned</b> <see cref="Invocation"/> for <paramref name="capability"/>, selecting

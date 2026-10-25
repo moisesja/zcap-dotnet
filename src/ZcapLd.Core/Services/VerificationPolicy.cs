@@ -11,6 +11,15 @@ namespace ZcapLd.Core.Services;
 public sealed record VerificationPolicy
 {
     /// <summary>
+    /// Permit lexical path/query narrowing of invocation targets at delegation and invocation.
+    /// Default false: targets must match exactly, matching the JavaScript reference default.
+    /// With true, suffixes must begin with / or ? before a query, or &amp; after one.
+    /// The application must enforce the meaning of query parameters without allowing later
+    /// parameters to override earlier restrictions.
+    /// </summary>
+    public bool AllowTargetAttenuation { get; init; }
+
+    /// <summary>
     /// When <see langword="true"/>, the verifier rejects a delegated zcap whose <c>expires</c> is more
     /// than <see cref="MaxDelegationExpirationMonths"/> in the future, measured at verification time.
     /// This implements the W3C ZCAP-LD verifier-side SHOULD — "a verifier SHOULD ensure that an invoked
@@ -88,6 +97,6 @@ public sealed record VerificationPolicy
     /// </summary>
     public bool RejectUnknownRootFields { get; init; }
 
-    /// <summary>The default policy: no opt-in SHOULD checks enforced.</summary>
+    /// <summary>The default policy: exact targets and no opt-in SHOULD checks enforced.</summary>
     public static VerificationPolicy Default { get; } = new();
 }

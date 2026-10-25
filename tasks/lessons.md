@@ -1,5 +1,32 @@
 # Lessons Learned
 
+## 2026-10-24 — PR #150: inspection budgets must cover supported wire shapes
+
+- When broadening a bounded traversal, re-evaluate its work/depth budget against the
+  maximum supported chain, array-form proof sets, and large ordinary field values.
+  Keep positive wire-round-trip regressions alongside the adversarial bound tests.
+- Report inspection exhaustion separately from unsupported vocabulary so callers can
+  diagnose resource limits without looking for nonexistent caveats or context errors.
+- Check documentation link casing against tracked paths, including on case-insensitive
+  development filesystems, and update review checklists when a feature is removed.
+
+## 2026-10-24 — PR #150: JSON-LD equivalent forms and evidence quality
+
+- A ban on a JSON-LD term must cover its expanded IRI and reachable aliases, not just
+  its compact key. Probe scoped prefixes, inline contexts, `@nest`, graph inclusion
+  and nested objects sharing an ID. Use a bounded capability/proof JSON scan and an
+  explicit supported-context profile; keep application bodies outside that scan.
+- Separate unsupported-vocabulary tests from signature-tampering tests. Independently
+  sign a well-formed restriction and prove its verifier disposition; assert specific
+  canonicalization error events rather than accepting any thrown error.
+- Apply profile checks consistently to newly generated proof extensions before
+  signing, so issuance does not produce documents that the verifier refuses.
+- Update contributor trees and requirements directly after removing APIs. A disclaimer
+  does not make executable instructions to use deleted APIs safe. Preserve unrelated
+  public contracts when editing XML docs, including replay identity and audit behavior.
+- Keep task history accurate after commit/PR creation; use the repository's plan naming
+  convention and descriptive follow-up commit bodies when addressing review findings.
+
 ## 2026-06-19 — Run adversarial agents on GENERATED CODE before opening a PR (CLAUDE.md §2), not just on analyses
 - I shipped the new Path-A invocation verifier (#117/PR #120) with only a functional interop harness + happy-path unit tests + a passive PR reviewer. I had NOT run adversarial/exploit agents against the generated code, which CLAUDE.md §2 explicitly mandates ("Always use adversarial agents to attempt to exploit the code"). The user had to ask "did you run adversarial agents?".
 - When prompted, a red-team workflow found a **CRITICAL forgery** (no application-document `@context` validation → RDFC drops the unbound zcap/v1 auth terms → attacker rewrites `capabilityAction`/`invocationTarget` post-signing) and a **HIGH confused-deputy** (no relying-party `expected*` gate) — both execution-confirmed, both would have merged.

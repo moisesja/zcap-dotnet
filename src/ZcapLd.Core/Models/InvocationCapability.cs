@@ -6,7 +6,7 @@ namespace ZcapLd.Core.Models;
 /// <summary>
 /// The capability an <see cref="Invocation"/> (and its invocation <see cref="Proof"/>) references.
 ///
-/// Per W3C ZCAP-LD v0.3 the <c>capability</c> field of a capability-invocation Data Integrity proof
+/// Per W3C ZCAP-LD v0.4.0 the <c>capability</c> field of a capability-invocation Data Integrity proof
 /// takes one of two spec-defined shapes:
 /// <list type="bullet">
 /// <item><b>Root invocation</b> — <i>Invoking a Root ZCAP</i>: <c>capability</c> is the root zcap
@@ -14,7 +14,7 @@ namespace ZcapLd.Core.Models;
 /// <item><b>Delegated invocation</b> — <i>Invoking a Delegated ZCAP</i>: "When invoking using a DI
 /// proof, the <c>capability</c> property must express the <b>full delegated zcap</b>." The whole
 /// delegated <see cref="Capability"/> object (its <c>id</c>, <c>parentCapability</c>, <c>controller</c>,
-/// <c>invocationTarget</c>, <c>expires</c>, <c>allowedAction</c>/caveats, and its delegation
+/// <c>invocationTarget</c>, <c>expires</c>, <c>allowedAction</c>, and its delegation
 /// <c>proof</c> with <c>capabilityChain</c>) is embedded, so the verifier has the full authority
 /// chain without dereferencing the delegated zcap by id (Issue #51).</item>
 /// </list>

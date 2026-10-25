@@ -8,16 +8,14 @@ internal sealed class ComplianceTestFixture
     public InMemoryDidProvider DidProvider { get; }
     public SigningService SigningService { get; }
     public CapabilityService CapabilityService { get; }
-    public CaveatProcessor CaveatProcessor { get; }
     public VerificationService VerificationService { get; }
 
     public ComplianceTestFixture()
     {
         DidProvider = new InMemoryDidProvider();
         SigningService = new SigningService(DidProvider, DidProvider);
-        CaveatProcessor = new CaveatProcessor();
         CapabilityService = new CapabilityService(SigningService);
-        VerificationService = new VerificationService(DidProvider, CaveatProcessor);
+        VerificationService = new VerificationService(DidProvider);
     }
 
     public string RegisterControllerDid()
@@ -25,4 +23,3 @@ internal sealed class ComplianceTestFixture
         return DidProvider.GenerateDidKey();
     }
 }
-

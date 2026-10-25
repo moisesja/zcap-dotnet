@@ -1,3 +1,8 @@
+> Historical report: caveat APIs and conclusions below describe earlier releases.
+> Version 5 removes typed caveats after #149 demonstrated unsigned parameters.
+> See [the current requirements](ZCAP-LD-SPECIFICATION-REQUIREMENTS.md) and
+> [corrected interoperability analysis](ZCAP-LD-INTEROP-COMPATIBILITY-ANALYSIS.md).
+
 # Security and Compliance Fixes Summary
 
 **Date**: 2026-02-20

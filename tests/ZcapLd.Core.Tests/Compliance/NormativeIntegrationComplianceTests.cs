@@ -262,47 +262,6 @@ public class NormativeIntegrationComplianceTests
         result.Should().BeFalse();
     }
 
-    [Fact(DisplayName = "MUST-20 Verifier MUST evaluate caveats across the capability chain")]
-    public async Task Must20_Verifier_MustEvaluateAllChainCaveats()
-    {
-        var fixture = new ComplianceTestFixture();
-        var parentDid = fixture.RegisterControllerDid();
-        var middleDid = fixture.RegisterControllerDid();
-        var childDid = fixture.RegisterControllerDid();
-
-        var root = await fixture.CapabilityService.CreateRootCapabilityAsync(
-            parentDid,
-            "https://example.com/resources",
-            new[] { "read" });
-
-        var parentDelegation = await fixture.CapabilityService.DelegateCapabilityAsync(
-            root,
-            middleDid,
-            new[] { "read" },
-            DateTime.UtcNow.AddDays(14),
-            new Caveat[]
-            {
-                new ExpirationCaveat { Expires = DateTime.UtcNow.AddMinutes(-5) }
-            });
-
-        var delegated = await fixture.CapabilityService.DelegateCapabilityAsync(
-            parentDelegation,
-            childDid,
-            new[] { "read" },
-            DateTime.UtcNow.AddDays(7));
-
-        var invocation = new Invocation
-        {
-            Capability = InvocationCapability.FromCapability(delegated),
-            CapabilityAction = "read",
-            InvocationTarget = delegated.InvocationTarget
-        };
-        invocation.Proof = await fixture.SigningService.SignInvocationAsync(invocation, childDid);
-
-        var result = await fixture.VerificationService.VerifyInvocationAsync(invocation, delegated);
-        result.Should().BeFalse();
-    }
-
     [Fact(DisplayName = "MUST-21 Verifier MUST store revoked zcaps until expiration")]
     public void Must21_Verifier_MustPersistRevokedCapabilitiesUntilExpiration()
     {
@@ -451,7 +410,7 @@ public class NormativeIntegrationComplianceTests
     private static VerificationService BuildVerifier(ComplianceTestFixture fixture, VerificationPolicy policy)
         => new(
             fixture.DidProvider,
-            fixture.CaveatProcessor,
+
             new RevocationService(new InMemoryRevocationStore()),
             new InMemoryNonceStore(),
             policy: policy);

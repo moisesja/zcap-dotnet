@@ -49,13 +49,3 @@ public class InvocationException : ZcapLdException
     public InvocationException(string message) : base(message) { }
     public InvocationException(string message, Exception innerException) : base(message, innerException) { }
 }
-
-/// <summary>
-/// Exception thrown when caveat evaluation fails
-/// </summary>
-public class CaveatException : ZcapLdException
-{
-    public CaveatException() { }
-    public CaveatException(string message) : base(message) { }
-    public CaveatException(string message, Exception innerException) : base(message, innerException) { }
-}

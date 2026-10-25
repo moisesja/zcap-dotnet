@@ -1,6 +1,5 @@
 using ZcapLd.AspNetCore.DependencyInjection;
 using ZcapLd.AspNetCore.Endpoints;
-using ZcapLd.AspNetCore.Services;
 using ZcapLd.Core.Services;
 using ZcapLd.RevocationEndpointsDemo;
 
@@ -30,16 +29,6 @@ builder.Services.AddZcapRevocationSupport(_ => new SqliteRevocationStore(connect
 // delegated revocations against (e.g. at startup) so the POST endpoint can authorize them.
 builder.Services.AddZcapRootCapabilityResolver<InMemoryRootCapabilityResolver>();
 
-// Enable ValidWhileTrue caveat support.
-// This registers HttpValidWhileTrueHandler, which GETs the caveat URI during
-// verification and checks the RevocationStatusHttpResponse.IsRevoked field.
-// The named HttpClient can be configured for timeouts, retry policies, etc.
-builder.Services.AddZcapValidWhileTrueSupport();
-builder.Services.AddHttpClient(HttpValidWhileTrueHandler.HttpClientName, client =>
-{
-    client.Timeout = TimeSpan.FromSeconds(5);
-});
-
 var app = builder.Build();
 
 app.MapGet("/", () => Results.Ok(new
@@ -50,18 +39,6 @@ app.MapGet("/", () => Results.Ok(new
     {
         getStatus = "GET /zcaps/revocations/{url-encoded-capability-id}",
         revoke = "POST /zcaps/revocations/{url-encoded-capability-id}"
-    },
-    validWhileTrue = new
-    {
-        description = "These endpoints also serve as the backend for ValidWhileTrue caveats. " +
-                      "Delegators create capabilities with a ValidWhileTrue caveat URI pointing " +
-                      "to the GET endpoint. Verifiers with AddZcapValidWhileTrueSupport() check " +
-                      "this URI automatically during invocation verification.",
-        exampleCaveat = new
-        {
-            type = "ValidWhileTrue",
-            uri = "http://localhost:5099/zcaps/revocations/urn%3Auuid%3A12345"
-        }
     },
     revocation = new
     {

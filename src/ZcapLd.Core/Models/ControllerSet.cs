@@ -6,7 +6,7 @@ namespace ZcapLd.Core.Models;
 /// <summary>
 /// The set of controllers authorized over a capability.
 ///
-/// Per W3C ZCAP-LD v0.3, both root and delegated zcaps MUST have a <c>controller</c>
+/// Per W3C ZCAP-LD v0.4.0, both root and delegated zcaps MUST have a <c>controller</c>
 /// that is "a string or an array of strings that each express a URI". This immutable
 /// value type models both shapes behind one API and, crucially, <b>preserves the
 /// on-wire shape</b> it was created from: a single controller round-trips as a bare

@@ -155,66 +155,31 @@ Implement `IRevocationStore` as a composite:
 - Durable write-through in `UpsertAsync`
 - Coordinated delete/expiration cleanup
 
-## 4. ValidWhileTrue Caveat (Remote Revocation)
+## 4. Revocation across verifier instances
 
-The `ValidWhileTrue` caveat (per the W3C ZCAP-LD spec) enables remote revocation by embedding a URI in the capability. At verification time, the verifier checks the URI to confirm the capability is still valid. The delegator/controller hosts the endpoint — not the verifier.
+Submit a signed revocation request and the capability's delegation chain to the
+revocation endpoint of the verifier responsible for its invocation target. The POST
+authenticates the signer and checks control of the capability or an ancestor before
+recording revocation. An ancestor revocation invalidates descendant chains.
+Retain revocation records until the affected capability expires.
 
-### Controller Side
+The built-in GET endpoint exposes only `capabilityId` and `isRevoked`. It is a
+status API, not a capability-specified policy oracle. Version 5 removes the
+`ValidWhileTrue` model, HTTP handler and DI registrations. The old URI was not
+signature-bound under the bundled context and could be redirected by a holder.
+SSRF protections did not establish the integrity of that URI.
 
-The controller hosts the revocation status endpoint and attaches a `ValidWhileTrue` caveat when delegating:
+All replicas that authorize the same target must consult authoritative revocation
+state, through a shared `IRevocationStore` or an explicitly configured trusted
+revocation service. Account for cache invalidation and fail-closed behavior during
+store outages. Short expirations can bound exposure but do not provide immediate
+revocation.
 
-```csharp
-builder.Services.AddZcapRevocationSupport<MyStore>();
-app.MapZcapRevocationEndpoints();
-
-// When delegating, attach the caveat pointing to your endpoint:
-var delegated = await capabilityService.DelegateCapabilityAsync(
-    root, partnerDid, new[] { "read" },
-    DateTime.UtcNow.AddDays(30),
-    new Caveat[]
-    {
-        new ValidWhileTrueCaveat
-        {
-            Uri = $"https://my-service/zcaps/revocations/{Uri.EscapeDataString(root.Id)}"
-        }
-    });
-```
-
-To revoke, the controller POSTs to their own revocation endpoint. All verifiers checking the URI will see the updated status.
-
-### Verifier Side
-
-The verifier registers the `ValidWhileTrue` handler so that `CaveatProcessor` can check the URI during verification:
-
-```csharp
-builder.Services.AddZcapValidWhileTrueSupport(); // registers HttpValidWhileTrueHandler
-builder.Services.AddZcapServices();
-
-// Optional: configure timeouts/retry for the named HttpClient
-builder.Services.AddHttpClient("ZcapValidWhileTrue", client =>
-{
-    client.Timeout = TimeSpan.FromSeconds(5);
-});
-```
-
-When a `ValidWhileTrue` caveat is encountered during verification, the handler GETs the URI and checks the `IsRevoked` field in the `RevocationStatusHttpResponse`. Without a handler configured, the caveat fails closed (denies access).
-
-### Custom Handlers
-
-You can provide a custom `IValidWhileTrueHandler` instead of the default HTTP handler:
-
-```csharp
-// Generic type registration
-builder.Services.AddZcapValidWhileTrueSupport<MyCustomHandler>();
-
-// Factory registration
-builder.Services.AddZcapValidWhileTrueSupport(sp =>
-    new MyCustomHandler(sp.GetRequiredService<IMyDependency>()));
-```
-
-### Attenuation Rules
-
-When delegating a capability that contains a `ValidWhileTrue` caveat, the child capability must use the same URI as the parent. This prevents a delegatee from bypassing revocation by redirecting the check to a different endpoint.
+For delegation involving independently operated verifiers, the deployment must
+agree on who owns revocation state and how updates reach every verifier. Neither
+the endpoint model nor path/query attenuation discovers unknown verifiers or
+automatically distributes revocations. Do not reintroduce arbitrary holder-supplied
+URLs as trusted revocation policy.
 
 ## Operational Notes
 

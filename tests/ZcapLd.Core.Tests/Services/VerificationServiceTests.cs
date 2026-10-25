@@ -17,15 +17,18 @@ public class VerificationServiceTests
     private readonly InMemoryDidProvider _didProvider;
     private readonly SigningService _signingService;
     private readonly CapabilityService _capabilityService;
-    private readonly CaveatProcessor _caveatProcessor;
+
     private readonly VerificationService _verificationService;
 
     public VerificationServiceTests()
     {
         _didProvider = new InMemoryDidProvider();
         _signingService = new SigningService(_didProvider, _didProvider);
-        _caveatProcessor = new CaveatProcessor();
-        _verificationService = new VerificationService(_didProvider, _caveatProcessor);
+
+        // These fixtures exercise permitted narrowing. CapabilityProfileTests pins the exact-only default.
+        _verificationService = new VerificationService(_didProvider,
+            new RevocationService(new InMemoryRevocationStore()), new InMemoryNonceStore(),
+            policy: new VerificationPolicy { AllowTargetAttenuation = true });
         _capabilityService = new CapabilityService(_signingService);
     }
 
@@ -36,10 +39,9 @@ public class VerificationServiceTests
         ControllerSet controller,
         string invocationTarget,
         string[]? allowedActions = null,
-        DateTime? expires = null,
-        Caveat[]? caveats = null)
+        DateTime? expires = null)
         => TestRoots.CreateAndRegisterRootAsync(
-            _capabilityService, _didProvider, controller, invocationTarget, allowedActions, expires, caveats);
+            _capabilityService, _didProvider, controller, invocationTarget, allowedActions, expires);
 
     [Fact]
     public async Task VerifyChain_ChildOmitsAllowedActionUnderRestrictingParent_ReturnsFalse()
@@ -120,25 +122,6 @@ public class VerificationServiceTests
     }
 
     [Fact]
-    public async Task VerifyChain_ResolvedRootWithCaveat_ReturnsFalse()
-    {
-        // R-ROOT-NOEXTRA: caveat is a spec MUST-NOT on a root (rejected unconditionally).
-        const string c0 = "did:key:z6MkRootCaveatOwner";
-        const string c1 = "did:key:z6MkRootCaveatChild";
-        _didProvider.GenerateAndRegisterKeyPair(c0);
-        _didProvider.GenerateAndRegisterKeyPair(c1);
-
-        var root = await CreateAndRegisterRootAsync(c0, "https://example.com/root-caveat", new[] { "read" });
-        var delegated = await _capabilityService.DelegateCapabilityAsync(
-            root, c1, new[] { "read" }, DateTime.UtcNow.AddDays(30));
-
-        root.Caveat = new Caveat[] { new ExpirationCaveat { Expires = DateTime.UtcNow.AddDays(1) } };
-
-        (await _verificationService.VerifyCapabilityChainAsync(delegated)).Should().BeFalse(
-            "a resolved root that carries caveat violates the root MUST-NOT-extra-fields invariant");
-    }
-
-    [Fact]
     public async Task VerifyChain_ResolvedRootWithUnknownFields_RejectedOnlyUnderStrictPolicy()
     {
         // Unknown root fields (AdditionalProperties / [JsonExtensionData]) are IGNORED by default —
@@ -164,8 +147,7 @@ public class VerificationServiceTests
 
         // Strict policy: unknown root fields are rejected.
         var strictVerifier = new VerificationService(
-            _didProvider, _caveatProcessor,
-            new RevocationService(new InMemoryRevocationStore()),
+            _didProvider, new RevocationService(new InMemoryRevocationStore()),
             new InMemoryNonceStore(),
             policy: new VerificationPolicy { RejectUnknownRootFields = true });
 
@@ -291,14 +273,13 @@ public class VerificationServiceTests
 
         // Verifier whose resolver returns the correct key bytes but a mismatched key type.
         var mismatchVerifier = new VerificationService(
-            new WrongKeyTypeResolver(_didProvider, "EcdsaSecp256r1VerificationKey2019"),
-            _caveatProcessor);
+            new WrongKeyTypeResolver(_didProvider, "EcdsaSecp256r1VerificationKey2019"));
 
         (await mismatchVerifier.VerifyInvocationAsync(invocation, root)).Should().BeFalse();
 
         // Sanity: the same invocation verifies under the honest resolver (so the only failing
         // factor above is the key-type/suite mismatch).
-        var honestVerifier = new VerificationService(_didProvider, _caveatProcessor);
+        var honestVerifier = new VerificationService(_didProvider);
         (await honestVerifier.VerifyInvocationAsync(invocation, root)).Should().BeTrue();
     }
 
@@ -321,14 +302,13 @@ public class VerificationServiceTests
             root, "did:key:z6MkKeyTypeBindingGrantee", new[] { "read" }, DateTime.UtcNow.AddDays(30));
 
         var mismatchVerifier = new VerificationService(
-            new WrongKeyTypeResolver(_didProvider, "EcdsaSecp256r1VerificationKey2019"),
-            _caveatProcessor);
+            new WrongKeyTypeResolver(_didProvider, "EcdsaSecp256r1VerificationKey2019"));
 
         (await mismatchVerifier.VerifyCapabilityProofAsync(delegated)).Should().BeFalse();
 
         // Sanity: the same delegated capability verifies under the honest resolver, so the only
         // failing factor above is the key-type/suite mismatch.
-        var honestVerifier = new VerificationService(_didProvider, _caveatProcessor);
+        var honestVerifier = new VerificationService(_didProvider);
         (await honestVerifier.VerifyCapabilityProofAsync(delegated)).Should().BeTrue();
     }
 
@@ -341,7 +321,6 @@ public class VerificationServiceTests
         var logger = new CapturingLogger<VerificationService>();
         var verifier = new VerificationService(
             _didProvider,
-            _caveatProcessor,
             new RevocationService(new InMemoryRevocationStore()),
             new InMemoryNonceStore(),
             nonceWindow: null,
@@ -380,7 +359,6 @@ public class VerificationServiceTests
         var logger = new CapturingLogger<VerificationService>();
         var verifier = new VerificationService(
             _didProvider,
-            _caveatProcessor,
             new RevocationService(new InMemoryRevocationStore()),
             new InMemoryNonceStore(),
             nonceWindow: null,
@@ -426,7 +404,6 @@ public class VerificationServiceTests
         var logger = new CapturingLogger<VerificationService>();
         var verifier = new VerificationService(
             _didProvider,
-            _caveatProcessor,
             new ThrowingRevocationService(),
             new InMemoryNonceStore(),
             nonceWindow: null,
@@ -458,7 +435,6 @@ public class VerificationServiceTests
         var logger = new CapturingLogger<VerificationService>();
         var verifier = new VerificationService(
             _didProvider,
-            _caveatProcessor,
             new RevocationService(new InMemoryRevocationStore()),
             new InMemoryNonceStore(),
             nonceWindow: null,
@@ -1294,181 +1270,6 @@ public class VerificationServiceTests
         result.Should().BeFalse();
     }
 
-    [Fact]
-    public async Task VerifyInvocation_WithCaveats_ShouldEvaluateThem()
-    {
-        // Arrange
-        var rootControllerDid = "did:key:z6MkRootController";
-        var delegatedControllerDid = "did:key:z6MkDelegatedController";
-        _didProvider.GenerateAndRegisterKeyPair(rootControllerDid);
-        _didProvider.GenerateAndRegisterKeyPair(delegatedControllerDid);
-
-        var expiredCaveat = new ExpirationCaveat
-        {
-            Expires = DateTime.UtcNow.AddDays(-1) // Expired
-        };
-
-        var rootCapability = await CreateAndRegisterRootAsync(
-            rootControllerDid,
-            "https://example.com/resource",
-            new[] { "read" });
-
-        var delegatedCapability = await _capabilityService.DelegateCapabilityAsync(
-            rootCapability,
-            delegatedControllerDid,
-            new[] { "read" },
-            DateTime.UtcNow.AddDays(5),
-            new Caveat[] { expiredCaveat });
-
-        var invocation = new Invocation
-        {
-            Capability = InvocationCapability.FromCapability(delegatedCapability),
-            CapabilityAction = "read",
-            InvocationTarget = "https://example.com/resource"
-        };
-
-        invocation.Proof = await _signingService.SignInvocationAsync(invocation, delegatedControllerDid);
-
-        // Act
-        var result = await _verificationService.VerifyInvocationAsync(invocation, delegatedCapability);
-
-        // Assert
-        result.Should().BeFalse(); // Caveat should cause failure
-    }
-
-    [Fact]
-    public async Task VerifyInvocation_WithContextProperties_ShouldPassToCustomCaveat()
-    {
-        // Arrange
-        var controllerDid = "did:key:z6MkController";
-        _didProvider.GenerateAndRegisterKeyPair(controllerDid);
-
-        var caveat = new ContentTypeCaveat { RequiredContentType = "application/json" };
-
-        var rootCapability = await CreateAndRegisterRootAsync(
-            controllerDid,
-            "https://example.com/resource",
-            new[] { "write" });
-
-        var delegatedCapability = await _capabilityService.DelegateCapabilityAsync(
-            rootCapability,
-            controllerDid,
-            new[] { "write" },
-            DateTime.UtcNow.AddDays(5),
-            new Caveat[] { caveat });
-
-        var invocation = new Invocation
-        {
-            Capability = InvocationCapability.FromCapability(delegatedCapability),
-            CapabilityAction = "write",
-            InvocationTarget = "https://example.com/resource"
-        };
-        invocation.Proof = await _signingService.SignInvocationAsync(invocation, controllerDid);
-
-        // Act — inject the property the caveat expects
-        var result = await _verificationService.VerifyInvocationAsync(
-            invocation,
-            delegatedCapability,
-            new Dictionary<string, object> { ["contentType"] = "application/json" });
-
-        // Assert
-        result.Should().BeTrue();
-    }
-
-    [Fact]
-    public async Task VerifyInvocation_WithContextProperties_WrongValue_ShouldReturnFalse()
-    {
-        // Arrange
-        var controllerDid = "did:key:z6MkController";
-        _didProvider.GenerateAndRegisterKeyPair(controllerDid);
-
-        var caveat = new ContentTypeCaveat { RequiredContentType = "application/json" };
-
-        var rootCapability = await CreateAndRegisterRootAsync(
-            controllerDid,
-            "https://example.com/resource",
-            new[] { "write" });
-
-        var delegatedCapability = await _capabilityService.DelegateCapabilityAsync(
-            rootCapability,
-            controllerDid,
-            new[] { "write" },
-            DateTime.UtcNow.AddDays(5),
-            new Caveat[] { caveat });
-
-        var invocation = new Invocation
-        {
-            Capability = InvocationCapability.FromCapability(delegatedCapability),
-            CapabilityAction = "write",
-            InvocationTarget = "https://example.com/resource"
-        };
-        invocation.Proof = await _signingService.SignInvocationAsync(invocation, controllerDid);
-
-        // Act — inject a wrong content type
-        var result = await _verificationService.VerifyInvocationAsync(
-            invocation,
-            delegatedCapability,
-            new Dictionary<string, object> { ["contentType"] = "text/plain" });
-
-        // Assert
-        result.Should().BeFalse();
-    }
-
-    [Fact]
-    public async Task VerifyInvocation_WithNullContextProperties_ShouldSucceed()
-    {
-        // Arrange — same setup as valid invocation, but call the 3-param overload with null
-        var controllerDid = "did:key:z6MkController";
-        _didProvider.GenerateAndRegisterKeyPair(controllerDid);
-
-        var rootCapability = await CreateAndRegisterRootAsync(
-            controllerDid,
-            "https://example.com/resource",
-            new[] { "read" });
-
-        var invocation = new Invocation
-        {
-            Capability = rootCapability.Id,
-            CapabilityAction = "read",
-            InvocationTarget = "https://example.com/resource"
-        };
-        invocation.Proof = await _signingService.SignInvocationAsync(invocation, controllerDid);
-
-        // Act
-        var result = await _verificationService.VerifyInvocationAsync(invocation, rootCapability, null);
-
-        // Assert
-        result.Should().BeTrue();
-    }
-
-    [Fact]
-    public async Task VerifyInvocation_WithEmptyContextProperties_ShouldSucceed()
-    {
-        // Arrange
-        var controllerDid = "did:key:z6MkController";
-        _didProvider.GenerateAndRegisterKeyPair(controllerDid);
-
-        var rootCapability = await CreateAndRegisterRootAsync(
-            controllerDid,
-            "https://example.com/resource",
-            new[] { "read" });
-
-        var invocation = new Invocation
-        {
-            Capability = rootCapability.Id,
-            CapabilityAction = "read",
-            InvocationTarget = "https://example.com/resource"
-        };
-        invocation.Proof = await _signingService.SignInvocationAsync(invocation, controllerDid);
-
-        // Act
-        var result = await _verificationService.VerifyInvocationAsync(
-            invocation, rootCapability, new Dictionary<string, object>());
-
-        // Assert
-        result.Should().BeTrue();
-    }
-
     #endregion
 
     #region Revocation Tests
@@ -1568,7 +1369,7 @@ public class VerificationServiceTests
         var store = new InMemoryRevocationStore();
         var revocation = new RevocationService(store);
         var verifier = new VerificationService(
-            _didProvider, _caveatProcessor, revocation, new InMemoryNonceStore());
+            _didProvider, revocation, new InMemoryNonceStore());
         return (verifier, revocation, store);
     }
 
@@ -2003,23 +1804,6 @@ public class VerificationServiceTests
     }
 
     #endregion
-}
-
-/// <summary>
-/// Test caveat that reads "contentType" from InvocationContext.Properties.
-/// Used to verify that contextProperties flow through the verification pipeline.
-/// </summary>
-internal class ContentTypeCaveat : Caveat
-{
-    public override string Type => "ContentType";
-    public string RequiredContentType { get; set; } = string.Empty;
-
-    public override bool IsSatisfied(InvocationContext context)
-    {
-        return context.Properties.TryGetValue("contentType", out var value)
-            && value is string contentType
-            && string.Equals(contentType, RequiredContentType, StringComparison.OrdinalIgnoreCase);
-    }
 }
 
 /// <summary>

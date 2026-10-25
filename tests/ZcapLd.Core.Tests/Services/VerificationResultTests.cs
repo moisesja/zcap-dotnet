@@ -18,36 +18,36 @@ public class VerificationResultTests
     private readonly InMemoryDidProvider _didProvider;
     private readonly SigningService _signingService;
     private readonly CapabilityService _capabilityService;
-    private readonly CaveatProcessor _caveatProcessor;
+
     private readonly VerificationService _verificationService;
 
     public VerificationResultTests()
     {
         _didProvider = new InMemoryDidProvider();
         _signingService = new SigningService(_didProvider, _didProvider);
-        _caveatProcessor = new CaveatProcessor();
-        _verificationService = new VerificationService(_didProvider, _caveatProcessor);
+
+        _verificationService = new VerificationService(_didProvider);
         _capabilityService = new CapabilityService(_signingService);
     }
 
     private Task<Capability> CreateAndRegisterRootAsync(
         ControllerSet controller, string invocationTarget, string[]? allowedActions = null,
-        DateTime? expires = null, Caveat[]? caveats = null)
+        DateTime? expires = null)
         => TestRoots.CreateAndRegisterRootAsync(
-            _capabilityService, _didProvider, controller, invocationTarget, allowedActions, expires, caveats);
+            _capabilityService, _didProvider, controller, invocationTarget, allowedActions, expires);
 
     // Builds a valid first-level delegation (root registered for spec-exact root-by-id resolution).
     // The root id is derived from invocationTarget, so callers that build more than one root in a
     // single test MUST pass distinct targets to avoid a root-id collision in the resolver.
     private async Task<(Capability root, Capability delegated)> BuildValidDelegationAsync(
-        string rootDid, string childDid, string[] actions, DateTime? expires = null, Caveat[]? caveats = null,
+        string rootDid, string childDid, string[] actions, DateTime? expires = null,
         string invocationTarget = "https://example.com/resource")
     {
         _didProvider.GenerateAndRegisterKeyPair(rootDid);
         _didProvider.GenerateAndRegisterKeyPair(childDid);
         var root = await CreateAndRegisterRootAsync(rootDid, invocationTarget, new[] { "read", "write" });
         var delegated = await _capabilityService.DelegateCapabilityAsync(
-            root, childDid, actions, expires ?? DateTime.UtcNow.AddDays(7), caveats);
+            root, childDid, actions, expires ?? DateTime.UtcNow.AddDays(7));
         return (root, delegated);
     }
 
@@ -95,7 +95,7 @@ public class VerificationResultTests
     {
         var revocationService = new RevocationService(new InMemoryRevocationStore());
         var verifier = new VerificationService(
-            _didProvider, _caveatProcessor, revocationService);
+            _didProvider, revocationService);
         var (_, delegated) = await BuildValidDelegationAsync("did:key:z6MkRevRoot", "did:key:z6MkRevChild", new[] { "read" });
         await revocationService.RevokeAsync(new RevocationRequest { CapabilityId = delegated.Id, RevokedBy = "did:key:z6MkRevRoot" });
 
@@ -193,19 +193,6 @@ public class VerificationResultTests
         var result = await _verificationService.VerifyCapabilityProofDetailedAsync(overbroad);
 
         result.Outcome.Should().Be(VerificationOutcome.AttenuationViolation);
-    }
-
-    [Fact]
-    public async Task InvocationDetailed_FailingCaveat_ReturnsCaveatFailed()
-    {
-        var expiredCaveat = new ExpirationCaveat { Expires = DateTime.UtcNow.AddDays(-1) };
-        var (_, delegated) = await BuildValidDelegationAsync(
-            "did:key:z6MkCavRoot", "did:key:z6MkCavChild", new[] { "read" }, caveats: new Caveat[] { expiredCaveat });
-        var invocation = await SignInvocationAsync(delegated, "did:key:z6MkCavChild", "read", "https://example.com/resource");
-
-        var result = await _verificationService.VerifyInvocationDetailedAsync(invocation, delegated);
-
-        result.Outcome.Should().Be(VerificationOutcome.CaveatFailed);
     }
 
     [Fact]

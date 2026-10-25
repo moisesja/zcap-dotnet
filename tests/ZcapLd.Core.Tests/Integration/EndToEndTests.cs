@@ -15,15 +15,18 @@ public class EndToEndTests
     private readonly InMemoryDidProvider _didProvider;
     private readonly SigningService _signingService;
     private readonly CapabilityService _capabilityService;
-    private readonly CaveatProcessor _caveatProcessor;
+
     private readonly VerificationService _verificationService;
 
     public EndToEndTests()
     {
         _didProvider = new InMemoryDidProvider();
         _signingService = new SigningService(_didProvider, _didProvider);
-        _caveatProcessor = new CaveatProcessor();
-        _verificationService = new VerificationService(_didProvider, _caveatProcessor);
+
+        // These fixtures exercise permitted narrowing. CapabilityProfileTests pins the exact-only default.
+        _verificationService = new VerificationService(_didProvider,
+            new RevocationService(new InMemoryRevocationStore()), new InMemoryNonceStore(),
+            policy: new VerificationPolicy { AllowTargetAttenuation = true });
         _capabilityService = new CapabilityService(_signingService);
     }
 
@@ -34,10 +37,9 @@ public class EndToEndTests
         ControllerSet controller,
         string invocationTarget,
         string[]? allowedActions = null,
-        DateTime? expires = null,
-        Caveat[]? caveats = null)
+        DateTime? expires = null)
         => TestRoots.CreateAndRegisterRootAsync(
-            _capabilityService, _didProvider, controller, invocationTarget, allowedActions, expires, caveats);
+            _capabilityService, _didProvider, controller, invocationTarget, allowedActions, expires);
 
     #region Complete Workflow Tests
 
@@ -153,211 +155,6 @@ public class EndToEndTests
 
         var invocationIsValid = await _verificationService.VerifyInvocationAsync(invocation, level2Capability);
         invocationIsValid.Should().BeTrue();
-    }
-
-    #endregion
-
-    #region Caveat Integration Tests
-
-    [Fact]
-    public async Task CompleteWorkflow_WithExpirationCaveat_ShouldEnforce()
-    {
-        // Arrange - Create delegated capability with expiration caveat
-        var rootControllerDid = "did:key:z6MkRootController";
-        var delegatedControllerDid = "did:key:z6MkDelegatedController";
-        _didProvider.GenerateAndRegisterKeyPair(rootControllerDid);
-        _didProvider.GenerateAndRegisterKeyPair(delegatedControllerDid);
-
-        var expirationCaveat = new ExpirationCaveat
-        {
-            Expires = DateTime.UtcNow.AddHours(1) // Expires in 1 hour
-        };
-
-        var rootCapability = await CreateAndRegisterRootAsync(
-            rootControllerDid,
-            "https://api.example.com/documents",
-            new[] { "read", "write" });
-
-        var delegatedCapability = await _capabilityService.DelegateCapabilityAsync(
-            rootCapability,
-            delegatedControllerDid,
-            new[] { "read" },
-            DateTime.UtcNow.AddDays(5),
-            new Caveat[] { expirationCaveat });
-
-        // Act - Invoke before expiration
-        var invocation = new Invocation
-        {
-            Capability = InvocationCapability.FromCapability(delegatedCapability),
-            CapabilityAction = "read",
-            InvocationTarget = "https://api.example.com/documents/doc1"
-        };
-
-        invocation.Proof = await _signingService.SignInvocationAsync(invocation, delegatedControllerDid);
-
-        // Assert - Should succeed
-        var isValid = await _verificationService.VerifyInvocationAsync(invocation, delegatedCapability);
-        isValid.Should().BeTrue();
-    }
-
-    [Fact]
-    public async Task CompleteWorkflow_WithExpiredCaveat_ShouldReject()
-    {
-        // Arrange - Create delegated capability with expired caveat
-        var rootControllerDid = "did:key:z6MkRootController";
-        var delegatedControllerDid = "did:key:z6MkDelegatedController";
-        _didProvider.GenerateAndRegisterKeyPair(rootControllerDid);
-        _didProvider.GenerateAndRegisterKeyPair(delegatedControllerDid);
-
-        var expirationCaveat = new ExpirationCaveat
-        {
-            Expires = DateTime.UtcNow.AddHours(-1) // Already expired
-        };
-
-        var rootCapability = await CreateAndRegisterRootAsync(
-            rootControllerDid,
-            "https://api.example.com/documents",
-            new[] { "read", "write" });
-
-        var delegatedCapability = await _capabilityService.DelegateCapabilityAsync(
-            rootCapability,
-            delegatedControllerDid,
-            new[] { "read" },
-            DateTime.UtcNow.AddDays(5),
-            new Caveat[] { expirationCaveat });
-
-        // Act - Try to invoke after expiration
-        var invocation = new Invocation
-        {
-            Capability = InvocationCapability.FromCapability(delegatedCapability),
-            CapabilityAction = "read",
-            InvocationTarget = "https://api.example.com/documents/doc1"
-        };
-
-        invocation.Proof = await _signingService.SignInvocationAsync(invocation, delegatedControllerDid);
-
-        // Assert - Should fail
-        var isValid = await _verificationService.VerifyInvocationAsync(invocation, delegatedCapability);
-        isValid.Should().BeFalse();
-    }
-
-    [Fact]
-    public async Task CompleteWorkflow_WithUsageCountCaveat_ShouldEnforce()
-    {
-        // Arrange - Create delegated capability with usage count caveat
-        var rootControllerDid = "did:key:z6MkRootController";
-        var delegatedControllerDid = "did:key:z6MkDelegatedController";
-        _didProvider.GenerateAndRegisterKeyPair(rootControllerDid);
-        _didProvider.GenerateAndRegisterKeyPair(delegatedControllerDid);
-
-        var usageCaveat = new UsageCountCaveat
-        {
-            MaxUses = 3
-        };
-
-        var rootCapability = await CreateAndRegisterRootAsync(
-            rootControllerDid,
-            "https://api.example.com/documents",
-            new[] { "read", "write" });
-
-        var delegatedCapability = await _capabilityService.DelegateCapabilityAsync(
-            rootCapability,
-            delegatedControllerDid,
-            new[] { "read" },
-            DateTime.UtcNow.AddDays(5),
-            new Caveat[] { usageCaveat });
-
-        // Act - each use is a distinct invocation with its own id/nonce (the realistic flow). The
-        // current usage count is supplied by the relying party via the invocation context (it cannot
-        // live in the signed payload); this is the wire-faithful flow, unlike mutating an in-process
-        // caveat object. The usage-count caveat is what gates the invocations.
-        async Task<bool> InvokeOnceAsync(int priorUses)
-        {
-            var invocation = new Invocation
-            {
-                Capability = InvocationCapability.FromCapability(delegatedCapability),
-                CapabilityAction = "read",
-                InvocationTarget = "https://api.example.com/documents/doc1"
-            };
-            invocation.Proof = await _signingService.SignInvocationAsync(invocation, delegatedControllerDid);
-            var contextProperties = new Dictionary<string, object>
-            {
-                [UsageCountCaveat.CurrentUsesContextKey] = priorUses
-            };
-            return await _verificationService.VerifyInvocationAsync(
-                invocation, delegatedCapability, contextProperties);
-        }
-
-        // Assert - within the usage limit (0, 1, 2 prior uses < MaxUses 3), each fresh invocation succeeds
-        (await InvokeOnceAsync(0)).Should().BeTrue();
-        (await InvokeOnceAsync(1)).Should().BeTrue();
-        (await InvokeOnceAsync(2)).Should().BeTrue();
-
-        // At limit (3 prior uses) - should fail
-        (await InvokeOnceAsync(3)).Should().BeFalse();
-    }
-
-    [Fact]
-    public async Task CompleteWorkflow_WithInheritedCaveats_ShouldEnforceAll()
-    {
-        // Arrange - Create chain with caveats at each level
-        var controller1 = "did:key:z6MkController1";
-        var controller2 = "did:key:z6MkController2";
-
-        _didProvider.GenerateAndRegisterKeyPair(controller1);
-        _didProvider.GenerateAndRegisterKeyPair(controller2);
-
-        // Root without caveats; add caveat on first delegation.
-        var rootCapability = await CreateAndRegisterRootAsync(
-            controller1,
-            "https://api.example.com/documents",
-            new[] { "read", "write" });
-
-        var parentDelegation = await _capabilityService.DelegateCapabilityAsync(
-            rootCapability,
-            controller1,
-            new[] { "read", "write" },
-            DateTime.UtcNow.AddDays(7),
-            new Caveat[]
-            {
-                new ExpirationCaveat { Expires = DateTime.UtcNow.AddDays(10) }
-            });
-
-        // Second delegation with additional usage count caveat.
-        var delegatedCapability = await _capabilityService.DelegateCapabilityAsync(
-            parentDelegation,
-            controller2,
-            new[] { "read" },
-            DateTime.UtcNow.AddDays(5),
-            new Caveat[]
-            {
-                new UsageCountCaveat { MaxUses = 5, CurrentUses = 0 }
-            });
-
-        // Act - Invoke
-        var invocation = new Invocation
-        {
-            Capability = InvocationCapability.FromCapability(delegatedCapability),
-            CapabilityAction = "read",
-            InvocationTarget = "https://api.example.com/documents/doc1"
-        };
-
-        invocation.Proof = await _signingService.SignInvocationAsync(invocation, controller2);
-
-        // Assert - Should verify both caveats. The usage-count caveat's current count is supplied by
-        // the relying party via the invocation context (0 prior uses < MaxUses 5 -> satisfied).
-        var contextProperties = new Dictionary<string, object>
-        {
-            [UsageCountCaveat.CurrentUsesContextKey] = 0
-        };
-        var isValid = await _verificationService.VerifyInvocationAsync(
-            invocation, delegatedCapability, contextProperties);
-        isValid.Should().BeTrue();
-
-        // Verify that both caveats are inherited
-        delegatedCapability.Caveat.Should().HaveCount(2);
-        delegatedCapability.Caveat.Should().Contain(c => c.Type == "Expiration");
-        delegatedCapability.Caveat.Should().Contain(c => c.Type == "UsageCount");
     }
 
     #endregion
@@ -643,62 +440,6 @@ public class EndToEndTests
         // Assert - Bob can read
         var bobCanRead = await _verificationService.VerifyInvocationAsync(bobInvocation, bobCapability);
         bobCanRead.Should().BeTrue();
-    }
-
-    [Fact]
-    public async Task RealWorldScenario_APIAccessWithRateLimiting_ShouldWork()
-    {
-        // Scenario: API provider grants access with usage limits
-
-        // Arrange
-        var apiProvider = "did:key:z6MkAPIProvider";
-        var customer = "did:key:z6MkCustomer";
-
-        _didProvider.GenerateAndRegisterKeyPair(apiProvider);
-        _didProvider.GenerateAndRegisterKeyPair(customer);
-
-        // API provider creates root capability
-        var apiCapability = await CreateAndRegisterRootAsync(
-            apiProvider,
-            "https://api.example.com/v1/data",
-            new[] { "query", "download" });
-
-        // Delegate to customer with usage count and expiration
-        var customerCapability = await _capabilityService.DelegateCapabilityAsync(
-            apiCapability,
-            customer,
-            new[] { "query" }, // Only query, no download
-            DateTime.UtcNow.AddMonths(1),
-            new Caveat[]
-            {
-                new UsageCountCaveat { MaxUses = 100, CurrentUses = 0 },
-                new ExpirationCaveat { Expires = DateTime.UtcNow.AddMonths(1) }
-            });
-
-        // Act - Customer makes valid query
-        var invocation = new Invocation
-        {
-            Capability = InvocationCapability.FromCapability(customerCapability),
-            CapabilityAction = "query",
-            InvocationTarget = "https://api.example.com/v1/data?filter=active"
-        };
-
-        invocation.Proof = await _signingService.SignInvocationAsync(invocation, customer);
-
-        // Assert - Should succeed. The relying party supplies the current usage count via the
-        // invocation context (3 prior queries < MaxUses 100 -> within limit).
-        var contextProperties = new Dictionary<string, object>
-        {
-            [UsageCountCaveat.CurrentUsesContextKey] = 3
-        };
-        var isValid = await _verificationService.VerifyInvocationAsync(
-            invocation, customerCapability, contextProperties);
-        isValid.Should().BeTrue();
-
-        // Verify caveats are in place
-        customerCapability.Caveat.Should().HaveCount(2);
-        customerCapability.Caveat.Should().Contain(c => c.Type == "UsageCount");
-        customerCapability.Caveat.Should().Contain(c => c.Type == "Expiration");
     }
 
     #endregion

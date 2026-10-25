@@ -67,44 +67,6 @@ public class WireFormatTests
         json.Should().NotContain("\"controller\":[");
     }
 
-    [Fact(DisplayName = "Issue #37 — root capability wire form omits absent optional fields")]
-    public void RootCapabilityWireForm_OmitsAbsentOptionalFields()
-    {
-        // Per W3C ZCAP-LD, root capabilities have unbounded authority — allowedAction,
-        // caveat, parentCapability, expires, and proof are optional. Strict cross-language
-        // parsers (zcap-py and friends) reject empty arrays / null values when those
-        // fields are present, but accept absence. The model must therefore omit them
-        // entirely from the wire when unset.
-        var rootCapability = new Capability
-        {
-            Id = "urn:zcap:root:https%3A%2F%2Fexample.com%2Fapi%2Fresource",
-            Context = "https://w3id.org/zcap/v1",
-            Controller = "did:key:z6MkfixedController",
-            InvocationTarget = "https://example.com/api/resource",
-            // AllowedAction, Caveat, Expires, ParentCapability, Proof intentionally unset
-        };
-
-        var serializerOptions = new JsonSerializerOptions
-        {
-            WriteIndented = false,
-            DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
-            Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
-        };
-
-        var wireJson = JsonSerializer.Serialize(rootCapability, serializerOptions);
-
-        wireJson.Should().NotContain("\"allowedAction\"",
-            "empty allowedAction would crash zcap-py's _parse_optional_action_list (#37)");
-        wireJson.Should().NotContain("\"caveat\"",
-            "empty caveat array breaks strict spec-conformant parsers (#37)");
-        wireJson.Should().NotContain("\"parentCapability\"",
-            "null parentCapability has no spec meaning on root capabilities (#37)");
-        wireJson.Should().NotContain("\"expires\"",
-            "null expires has no spec meaning on root capabilities (#37)");
-        wireJson.Should().NotContain("\"proof\"",
-            "root capabilities are unsigned by definition (#37)");
-    }
-
     [Fact(DisplayName = "Issue #37 — CreateRootCapabilityAsync emits only @context, id, controller, invocationTarget")]
     public async Task CreateRootCapabilityAsync_EmitsOnlyMandatoryFields()
     {

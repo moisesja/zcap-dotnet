@@ -28,8 +28,7 @@ internal static class ProofSigningPayloadBuilder
 
     /// <summary>
     /// Sign-time and verifier-time JSON options live in <see cref="ZcapJsonOptions.Default"/>
-    /// so the <see cref="CaveatJsonConverter"/> registration is shared. Without this,
-    /// sign-time and wire-emit serializers diverge for any non-trivial caveat (Issue #39).
+    /// so model shape and extension data round-trip consistently across signing and verification.
     /// </summary>
     private static JsonSerializerOptions ModelSerializerOptions => ZcapJsonOptions.Default;
 
@@ -46,7 +45,6 @@ internal static class ProofSigningPayloadBuilder
             InvocationTarget = capability.InvocationTarget,
             Expires = capability.Expires,
             AllowedAction = capability.AllowedAction,
-            Caveat = capability.Caveat,
             // Preserve unmodeled wire fields so JCS canonicalization sees them.
             AdditionalProperties = capability.AdditionalProperties,
             Proof = null

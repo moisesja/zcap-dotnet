@@ -79,9 +79,8 @@ public static class ZcapRevocationEndpointRouteBuilderExtensions
             bodySizeFeature.MaxRequestBodySize = MaxRevocationRequestBytes;
         }
 
-        // Deserialize with the ZCAP options (polymorphic caveat converter, etc.) so an embedded
-        // capability carrying typed caveats / a controller array round-trips byte-faithfully —
-        // otherwise dropped fields would drift the canonical bytes and fail verification.
+        // Preserve embedded proofs, controller arrays and extension data with the shared options.
+        // In particular, forbidden caveat fields must reach the verifier rather than disappear.
         SignedRevocationHttpRequest? request;
         try
         {

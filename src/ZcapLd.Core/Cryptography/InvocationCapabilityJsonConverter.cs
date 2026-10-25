@@ -11,7 +11,7 @@ namespace ZcapLd.Core.Cryptography;
 /// preserves whichever shape it saw.
 ///
 /// The embedded <see cref="Capability"/> is (de)serialized through the supplied serializer options
-/// — <see cref="ZcapJsonOptions.Default"/> on the signing/verification paths — so its caveats, proof
+/// — <see cref="ZcapJsonOptions.Default"/> on the signing/verification paths — so its extension fields, proof
 /// set, and <c>capabilityChain</c> round-trip exactly and the delegated object's bytes match between
 /// the signer and any other Data Integrity verifier (the same contract <see cref="ProofSetJsonConverter"/>
 /// upholds for a delegated zcap's <c>proof</c>).
@@ -60,7 +60,7 @@ internal sealed class InvocationCapabilityJsonConverter : JsonConverter<Invocati
         {
             // Delegated invocation: emit the full delegated zcap object so it participates in the
             // signed canonical payload (Issue #51). Serialized through the shared options so the
-            // embedded object's caveats/proof/chain round-trip identically.
+            // embedded object's extension fields/proof/chain round-trip identically.
             JsonSerializer.Serialize(writer, embedded, options);
         }
         else

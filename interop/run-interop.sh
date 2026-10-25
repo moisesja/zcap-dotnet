@@ -53,7 +53,7 @@ js_invoke_verify() { ( cd "$JS" && node invoke-verify.mjs "$@" ); }
 
 cyan "== Setup =="
 echo "-- building .NET harness (Release) --"
-dotnet build "$PROJ" -c Release -v quiet -nologo || { red "dotnet build failed"; exit 1; }
+dotnet build "$PROJ" -c Release --disable-build-servers -m:1 -v quiet -nologo || { red "dotnet build failed"; exit 1; }
 
 if [[ ! -d "$JS/node_modules" ]]; then
   echo "-- installing JS deps (npm ci) --"
@@ -127,6 +127,9 @@ expect "db(tampered invocation) -> dotnet   (rejected)" FAIL $?
 
 rm -f "$VEC/dotnet-delegated.tampered.json" "$VEC/js-delegated.tampered.json" \
       "$VEC/dotnet-invocation-root.tampered.json" "$VEC/js-invocation-root.tampered.json"
+
+cyan "== v0.4 supported-profile matrix (#149) =="
+( cd "$JS" && node profile.mjs "$DLL" ) || { red "profile matrix failed"; exit 1; }
 
 echo
 if [[ "$FAIL_COUNT" -eq 0 ]]; then

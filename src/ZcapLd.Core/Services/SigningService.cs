@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using ZcapLd.Core.Cryptography;
+using CapabilityValidationException = ZcapLd.Core.Exceptions.CapabilityValidationException;
 using ZcapLd.Core.Models;
 
 namespace ZcapLd.Core.Services;
@@ -61,6 +62,7 @@ public class SigningService : ISigningService
         if (string.IsNullOrWhiteSpace(proofPurpose))
             throw new ArgumentException("Proof purpose cannot be null or empty", nameof(proofPurpose));
 
+        CapabilityProfile.EnsureSupported(capability, capabilityChain);
         var capabilityWithoutProof = ProofSigningPayloadBuilder.CloneCapabilityWithoutProof(capability);
         var resolvedKey = await _resolver.ResolvePublicKeyAsync(signerDid);
         var suite = ZcapSuiteCatalog.GetByKeyType(resolvedKey.KeyType)
@@ -170,12 +172,6 @@ public class SigningService : ISigningService
     }
 
     /// <summary>
-    /// Shared invocation-proof assembly. The <paramref name="proofPurpose"/> and any
-    /// <paramref name="additionalProperties"/> are part of the canonical bytes that get signed,
-    /// so a revocation proof (purpose <c>capabilityRevocation</c>, carrying a signed reason) is
-    /// byte-disjoint from a normal <c>capabilityInvocation</c> proof.
-    /// </summary>
-    /// <summary>
     /// Signs an application document with a Data Integrity <c>capabilityInvocation</c> proof, producing
     /// a <c>@digitalbazaar/zcap</c>-compatible ("Path A") invocation. Unlike the self-contained
     /// <see cref="Invocation"/> envelope (used in-stack and for revocation), the invocation metadata
@@ -188,6 +184,9 @@ public class SigningService : ISigningService
     /// </summary>
     /// <param name="capability">Root zcap id string (root invocation) or the full embedded delegated
     /// zcap object (delegated invocation).</param>
+    /// <param name="capabilityAction">The action requested at the resource.</param>
+    /// <param name="invocationTarget">The absolute target URI.</param>
+    /// <param name="signerDid">The invoking controller's signer.</param>
     /// <param name="applicationDocument">Optional JSON-LD application payload to invoke against. When
     /// <see langword="null"/>, a minimal default request document is generated. A supplied document MUST
     /// carry an <c>@context</c> containing <c>https://w3id.org/zcap/v1</c> and the signing suite context,
@@ -215,6 +214,7 @@ public class SigningService : ISigningService
         DateTime? createdOverride)
     {
         ArgumentNullException.ThrowIfNull(capability);
+        CapabilityProfile.EnsureSupported(capability.EmbeddedCapability);
         if (string.IsNullOrEmpty(capabilityAction))
             throw new ArgumentException("Capability action cannot be null or empty", nameof(capabilityAction));
         if (string.IsNullOrEmpty(invocationTarget))
@@ -279,6 +279,8 @@ public class SigningService : ISigningService
         IReadOnlyDictionary<string, JsonElement>? additionalProperties = null,
         DateTime? createdOverride = null)
     {
+        CapabilityProfile.EnsureSupported(invocation.Capability?.EmbeddedCapability);
+        CapabilityProfile.EnsureSupported(invocation.Proof?.Capability?.EmbeddedCapability);
         var invocationWithoutProof = ProofSigningPayloadBuilder.CloneInvocationWithoutProof(invocation);
         var resolvedKey = await _resolver.ResolvePublicKeyAsync(signerDid);
         var suite = ZcapSuiteCatalog.GetByKeyType(resolvedKey.KeyType)
@@ -302,12 +304,15 @@ public class SigningService : ISigningService
             CapabilityAction = invocation.CapabilityAction
         };
 
-        // Signed extension fields (e.g. revocation reason/metadata) ride in the proof's
-        // [JsonExtensionData] and are included in the canonical bytes, so they are tamper-evident.
+        // Preserve extension fields on the wire. Free-form revocation reason/metadata are
+        // informational: undefined terms do not become tamper-evident merely by serialization.
         if (additionalProperties is { Count: > 0 })
         {
             proof.AdditionalProperties = new Dictionary<string, JsonElement>(additionalProperties, StringComparer.Ordinal);
         }
+
+        if (CapabilityProfile.GetProofRejectionReason(proof) is { } profileReason)
+            throw new CapabilityValidationException(profileReason);
 
         var didSigner = CreateLegacySigner(signerDid, resolvedKey, proofType);
         proof.ProofValue = await _legacyProofCrypto.CreateProofValueAsync(
