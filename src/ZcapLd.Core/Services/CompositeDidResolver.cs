@@ -1,5 +1,6 @@
 using NetDid.Core.Model;
 using NetDid.Core.Resolution;
+using ZcapLd.Core.Exceptions;
 using ZcapLd.Core.Models;
 
 namespace ZcapLd.Core.Services;
@@ -16,7 +17,10 @@ namespace ZcapLd.Core.Services;
 /// <c>StartsWith</c>, so a prefix without the colon also matches other methods that share its
 /// leading characters (<c>did:keyfoo:…</c>) and shadows any adapter registered later for them.
 /// Complete all registrations before handing the composite to a verifier; <see cref="Register(string, IDidResolver)"/>
-/// is not synchronized against concurrent resolution.
+/// is not synchronized against concurrent resolution. Key resolution for a DID that no
+/// registration matches throws <see cref="CapabilityValidationException"/>, which the verifier
+/// classifies as an expected (Debug-level) failure like any other unresolvable
+/// <c>verificationMethod</c>.
 /// </para>
 /// <para>
 /// The composite also implements <see cref="IVerificationRelationshipResolver"/> (Issue #148), so
@@ -33,7 +37,11 @@ namespace ZcapLd.Core.Services;
 /// <item><description>The matched resolver resolves keys only and does not implement
 /// <see cref="IVerificationRelationshipResolver"/>: <c>internalError</c>. This is a deployment
 /// misconfiguration — controllers of that method can never be authorized — so the verifier logs it
-/// at Warning. Successful key resolution is never treated as evidence of authority.</description></item>
+/// at Warning, and keeps doing so for every capability naming such a controller until the
+/// configuration is fixed. Successful key resolution is never treated as evidence of authority.</description></item>
+/// <item><description>The matched adapter throws (network outage, adapter bug): <c>internalError</c>
+/// carrying the exception type and message, logged at Warning. Cancellation
+/// (<see cref="OperationCanceledException"/>) is not a resolver fault and propagates.</description></item>
 /// </list>
 /// </remarks>
 public class CompositeDidResolver : IDidResolver, IVerificationRelationshipResolver
@@ -82,12 +90,12 @@ public class CompositeDidResolver : IDidResolver, IVerificationRelationshipResol
     /// against the document of <paramref name="controllerDid"/>, routed to the resolver registered
     /// for the controller's DID method. The controller is matched verbatim (no fragment stripping):
     /// a controller value that is not a bare DID is handed to the method adapter, which rejects it.
-    /// See the class remarks for the two fail-closed outcomes.
+    /// See the class remarks for the fail-closed outcomes.
     /// </summary>
     /// <exception cref="ArgumentException">Thrown when <paramref name="controllerDid"/> or
     /// <paramref name="verificationMethodDidUrl"/> is null or whitespace, matching
     /// <see cref="DefaultVerificationRelationshipResolver"/>.</exception>
-    public Task<VerificationRelationshipAuthorizationResult> IsAuthorizedForRelationshipAsync(
+    public async Task<VerificationRelationshipAuthorizationResult> IsAuthorizedForRelationshipAsync(
         string controllerDid,
         string verificationMethodDidUrl,
         VerificationRelationship relationship,
@@ -98,10 +106,10 @@ public class CompositeDidResolver : IDidResolver, IVerificationRelationshipResol
 
         if (!TryResolve(controllerDid, out var resolver))
         {
-            return Task.FromResult(VerificationRelationshipAuthorizationResult.NotResolvable(
+            return VerificationRelationshipAuthorizationResult.NotResolvable(
                 "methodNotSupported",
                 $"No IDidResolver is registered for the DID method of controller '{controllerDid}'; " +
-                "verification-relationship authorization is not possible."));
+                "verification-relationship authorization is not possible.");
         }
 
         // Fail closed on a key-only adapter. Being able to resolve the controller's (or the
@@ -109,15 +117,29 @@ public class CompositeDidResolver : IDidResolver, IVerificationRelationshipResol
         // grants, so key resolution is never consulted here.
         if (resolver is not IVerificationRelationshipResolver relationshipResolver)
         {
-            return Task.FromResult(VerificationRelationshipAuthorizationResult.NotResolvable(
+            return VerificationRelationshipAuthorizationResult.NotResolvable(
                 "internalError",
                 $"The IDidResolver registered for controller '{controllerDid}' ({resolver.GetType().Name}) " +
                 "resolves keys only and does not implement IVerificationRelationshipResolver; " +
-                "register a relationship-aware adapter for this DID method to authorize its controllers."));
+                "register a relationship-aware adapter for this DID method to authorize its controllers.");
         }
 
-        return relationshipResolver.IsAuthorizedForRelationshipAsync(
-            controllerDid, verificationMethodDidUrl, relationship, ct);
+        try
+        {
+            return await relationshipResolver.IsAuthorizedForRelationshipAsync(
+                controllerDid, verificationMethodDidUrl, relationship, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // A faulting adapter must not abort the verifier's multi-controller loop (an outage of one
+            // method's host would otherwise lock out a co-controller of another method). Report it as
+            // the same operator-actionable code as a misconfigured adapter so the verifier logs it at
+            // Warning, denies this controller, and continues to the next one.
+            return VerificationRelationshipAuthorizationResult.NotResolvable(
+                "internalError",
+                $"The IVerificationRelationshipResolver for controller '{controllerDid}' ({resolver.GetType().Name}) " +
+                $"threw {ex.GetType().Name}: {ex.Message}");
+        }
     }
 
     private IDidResolver Resolve(string did)
@@ -125,9 +147,13 @@ public class CompositeDidResolver : IDidResolver, IVerificationRelationshipResol
         if (TryResolve(did, out var resolver))
             return resolver;
 
-        throw new InvalidOperationException(
+        // CapabilityValidationException (not InvalidOperationException): the DID comes from a
+        // presented proof's verificationMethod, so an unknown method is an expected, attacker-drivable
+        // failure that the verifier must log at Debug — the same classification DidKeyResolver uses
+        // for a DID it does not handle (Issue #64 severity policy).
+        throw new CapabilityValidationException(
             $"No IDidResolver registered that can handle DID: {did}. " +
-            $"Register a resolver using Register(prefix, resolver) or Register(predicate, resolver).");
+            "Register a resolver using Register(prefix, resolver) or Register(predicate, resolver).");
     }
 
     private bool TryResolve(string did, out IDidResolver resolver)

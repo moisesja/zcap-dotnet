@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using NetDid.Core.Model;
 using NetDid.Core.Resolution;
 using Xunit;
+using ZcapLd.Core.Exceptions;
 using ZcapLd.Core.Models;
 using ZcapLd.Core.Services;
 using ZcapLd.Core.Tests.Helpers;
@@ -197,14 +198,45 @@ public class CompositeDidResolverTests
     }
 
     [Fact]
-    public async Task KeyResolution_UnregisteredMethod_StillThrowsInvalidOperation()
+    public async Task KeyResolution_UnregisteredMethod_ThrowsCapabilityValidationException()
     {
-        // Pre-existing key-routing contract is unchanged by the relationship routing.
+        // The DID comes from a presented proof's verificationMethod, so an unknown method must be the
+        // Debug-classified validation exception (as DidKeyResolver throws), not InvalidOperationException
+        // which the verifier would log at Warning — an anonymous Warning-flood vector.
         var composite = Compose();
 
         var act = () => composite.ResolvePublicKeyAsync("did:example:nobody#key-1");
 
-        await act.Should().ThrowAsync<InvalidOperationException>();
+        (await act.Should().ThrowAsync<CapabilityValidationException>())
+            .WithMessage("*No IDidResolver registered*");
+    }
+
+    [Fact]
+    public async Task RelationshipCheck_ThrowingAdapter_MapsToInternalError_InsteadOfPropagating()
+    {
+        var composite = new CompositeDidResolver();
+        composite.Register("did:web:", new ThrowingRelationshipResolver(
+            new HttpRequestException("host unreachable"), throwSynchronously: true));
+
+        var result = await composite.IsAuthorizedForRelationshipAsync(
+            "did:web:down.example", "#key-1", VerificationRelationship.CapabilityInvocation);
+
+        result.Decision.Should().Be(AuthorizationDecision.ControllerNotResolvable);
+        result.ResolutionError.Should().Be("internalError");
+        result.Message.Should().Contain("HttpRequestException").And.Contain("host unreachable");
+    }
+
+    [Fact]
+    public async Task RelationshipCheck_Cancellation_Propagates()
+    {
+        var composite = new CompositeDidResolver();
+        composite.Register("did:web:", new ThrowingRelationshipResolver(new OperationCanceledException()));
+
+        var act = () => composite.IsAuthorizedForRelationshipAsync(
+            "did:web:down.example", "#key-1", VerificationRelationship.CapabilityInvocation);
+
+        await act.Should().ThrowAsync<OperationCanceledException>(
+            "cancellation is not a resolver fault and must not be swallowed into a denial");
     }
 
     // ─── Through VerificationService: invocation ───────────────────────────────────────
@@ -299,12 +331,71 @@ public class CompositeDidResolverTests
         // result instead of throwing.
         var alice = DidWebIdentities.Create(_signerKeys, "did:web:alice.example");
         var bob = _signerKeys.GenerateDidKey();
-        var verifier = Verifier(Compose(new StaticDidWebAdapter(alice.Document)));
+        var web = new StaticDidWebAdapter(alice.Document);
+        var verifier = Verifier(Compose(web));
         var root = await RootAsync(new[] { alice.Did, bob }, Target("multi"));
 
         var result = await verifier.VerifyInvocationDetailedAsync(await InvokeAsync(root, bob), root);
 
         result.Outcome.Should().Be(VerificationOutcome.Valid, result.Message);
+        web.RelationshipCalls.Should().ContainSingle(c =>
+            c.Controller == alice.Did && c.Relationship == VerificationRelationship.CapabilityInvocation,
+            "the first controller was consulted through the composite before the loop moved on");
+    }
+
+    [Fact]
+    public async Task MultiController_ThrowingFirstControllerAdapter_LoopContinues_LogsWarning()
+    {
+        // A did:web host outage must deny that controller and move on, not lock out the did:key
+        // co-controller by aborting the whole verification as CouldNotVerify.
+        var bob = _signerKeys.GenerateDidKey();
+        var logger = new CapturingLogger<VerificationService>();
+        var composite = Compose(new ThrowingRelationshipResolver(new HttpRequestException("host unreachable")));
+        var verifier = Verifier(composite, logger);
+        var root = await RootAsync(new[] { "did:web:down.example", bob }, Target("multi-throwing"));
+
+        var result = await verifier.VerifyInvocationDetailedAsync(await InvokeAsync(root, bob), root);
+
+        result.Outcome.Should().Be(VerificationOutcome.Valid, result.Message);
+        logger.Entries.Should().Contain(e =>
+            e.Level == LogLevel.Warning &&
+            e.Message.Contains("could not be resolved") &&
+            e.Message.Contains("HttpRequestException"));
+    }
+
+    [Fact]
+    public async Task RootInvocation_ThrowingControllerAdapter_IsUnauthorizedController_NotCouldNotVerify()
+    {
+        var alice = DidWebIdentities.Create(_signerKeys, "did:web:down.example");
+        var logger = new CapturingLogger<VerificationService>();
+        var faulting = new ThrowingRelationshipResolver(
+            new HttpRequestException("host unreachable"), keys: new StaticDidWebAdapter(alice.Document));
+        var verifier = Verifier(Compose(faulting), logger);
+        var root = await RootAsync(alice.Did, Target("throwing"));
+
+        var result = await verifier.VerifyInvocationDetailedAsync(await InvokeAsync(root, alice.Did), root);
+
+        result.Outcome.Should().Be(VerificationOutcome.UnauthorizedController,
+            "an adapter fault denies that controller; it is not an aborted verification");
+        logger.Entries.Should().Contain(e => e.Level == LogLevel.Warning && e.Message.Contains("HttpRequestException"));
+    }
+
+    [Fact]
+    public async Task Invocation_SignerOfUnregisteredMethod_FailsClosed_WithoutWarning()
+    {
+        // The proof's verificationMethod is attacker-chosen. An unknown method on the KEY path must
+        // not reach the Warning channel (anonymous flood vector); it is an expected denial.
+        var bob = _signerKeys.GenerateDidKey();
+        _signerKeys.GenerateAndRegisterKeyPair("did:example:eve");
+        var logger = new CapturingLogger<VerificationService>();
+        var verifier = Verifier(Compose(), logger);
+        var root = await RootAsync(bob, Target("unregistered-signer"));
+
+        var result = await verifier.VerifyInvocationDetailedAsync(await InvokeAsync(root, "did:example:eve"), root);
+
+        result.IsValid.Should().BeFalse();
+        logger.Entries.Should().NotContain(e => e.Level == LogLevel.Warning);
+        logger.Entries.Should().Contain(e => e.Level == LogLevel.Debug);
     }
 
     [Fact]
@@ -490,6 +581,38 @@ internal sealed class RecordingDualResolver : IDidResolver, IVerificationRelatio
                 VerificationRelationshipAuthorizationResult.NotResolvable("notFound", "test"),
             _ => VerificationRelationshipAuthorizationResult.NotAuthorized()
         });
+    }
+}
+
+/// <summary>
+/// Relationship-aware composite child whose relationship check faults with a configured exception
+/// (faulted task by default, or a synchronous throw); key methods are delegated to <c>keys</c>.
+/// </summary>
+internal sealed class ThrowingRelationshipResolver : IDidResolver, IVerificationRelationshipResolver
+{
+    private readonly Exception _exception;
+    private readonly bool _throwSynchronously;
+    private readonly IDidResolver _keys;
+
+    public ThrowingRelationshipResolver(Exception exception, bool throwSynchronously = false, IDidResolver? keys = null)
+    {
+        _exception = exception;
+        _throwSynchronously = throwSynchronously;
+        _keys = keys ?? new RecordingKeyOnlyResolver();
+    }
+
+    public Task<ResolvedKey> ResolvePublicKeyAsync(string didOrVerificationMethod) =>
+        _keys.ResolvePublicKeyAsync(didOrVerificationMethod);
+
+    public Task<string> GetVerificationMethodAsync(string did) => _keys.GetVerificationMethodAsync(did);
+
+    public Task<VerificationRelationshipAuthorizationResult> IsAuthorizedForRelationshipAsync(
+        string controllerDid, string verificationMethodDidUrl,
+        VerificationRelationship relationship, CancellationToken ct = default)
+    {
+        if (_throwSynchronously)
+            throw _exception;
+        return Task.FromException<VerificationRelationshipAuthorizationResult>(_exception);
     }
 }
 

@@ -1,5 +1,6 @@
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using NetDid.Core.Model;
 using NetDid.Core.Resolution;
 using Xunit;
@@ -32,7 +33,10 @@ public sealed class CompositeResolverDependencyInjectionTests
         _capabilities = new CapabilityService(_signing);
     }
 
-    private ServiceProvider Build(IDidResolver didWebAdapter, IVerificationRelationshipResolver? explicitResolver = null)
+    private ServiceProvider Build(
+        IDidResolver didWebAdapter,
+        IVerificationRelationshipResolver? explicitResolver = null,
+        ILogger<VerificationService>? logger = null)
     {
         var composite = new CompositeDidResolver();
         composite.Register("did:key:", new DidKeyResolver());
@@ -44,6 +48,8 @@ public sealed class CompositeResolverDependencyInjectionTests
         services.AddZcapRootCapabilityResolver(_ => _roots);
         if (explicitResolver is not null)
             services.AddSingleton(explicitResolver);
+        if (logger is not null)
+            services.AddSingleton(logger);
         return services.BuildServiceProvider();
     }
 
@@ -77,7 +83,8 @@ public sealed class CompositeResolverDependencyInjectionTests
     {
         var alice = DidWebIdentities.Create(_signerKeys, "did:web:alice.example");
         var keyOnly = new StaticDidWebAdapter(alice.Document);
-        using var provider = Build(keyOnly.AsKeyOnly());
+        var logger = new CapturingLogger();
+        using var provider = Build(keyOnly.AsKeyOnly(), logger: logger);
         var (root, invocation) = await OwnerInvocationAsync(alice, Target + "/key-only");
 
         var result = await provider.GetRequiredService<IVerificationService>()
@@ -85,6 +92,12 @@ public sealed class CompositeResolverDependencyInjectionTests
 
         result.Outcome.Should().Be(VerificationOutcome.UnauthorizedController);
         keyOnly.KeyResolutions.Should().BeGreaterThan(0, "the key resolved; authority was still not inferred from it");
+        // Pins the composite's own fail-closed branch (not the did:key default's methodNotSupported):
+        // the DI-built verifier logged the key-only misconfiguration at Warning with internalError.
+        logger.Entries.Should().Contain(e =>
+            e.Level == LogLevel.Warning &&
+            e.Message.Contains("could not be resolved") &&
+            e.Message.Contains("internalError"));
     }
 
     [Fact]
@@ -100,6 +113,25 @@ public sealed class CompositeResolverDependencyInjectionTests
 
         result.Outcome.Should().Be(VerificationOutcome.UnauthorizedController);
         web.RelationshipCalls.Should().BeEmpty("the explicit registration replaces the composite for relationship checks");
+    }
+
+    private sealed class CapturingLogger : ILogger<VerificationService>
+    {
+        public List<(LogLevel Level, string Message)> Entries { get; } = new();
+
+        public IDisposable BeginScope<TState>(TState state) where TState : notnull => NullScope.Instance;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter) =>
+            Entries.Add((logLevel, formatter(state, exception)));
+
+        private sealed class NullScope : IDisposable
+        {
+            public static readonly NullScope Instance = new();
+            public void Dispose() { }
+        }
     }
 
     private sealed class DenyAllRelationshipResolver : IVerificationRelationshipResolver

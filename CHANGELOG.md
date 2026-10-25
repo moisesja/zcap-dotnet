@@ -45,6 +45,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   (logged at Debug; attacker-drivable). A registered resolver that resolves keys only yields
   `internalError` (logged at Warning; operator misconfiguration). Successful key resolution is
   never treated as evidence of authority.
+- A method adapter that throws from its relationship check is reported as `internalError`
+  (Warning) for that controller instead of aborting verification as `CouldNotVerify`, so a
+  co-controller of another method is still consulted when one method's host is down.
+  Cancellation still propagates.
+- The composite's key-resolution path throws `CapabilityValidationException` (was
+  `InvalidOperationException`) for a DID with no registered resolver, so an attacker-chosen
+  `verificationMethod` of an unknown method logs at Debug like `DidKeyResolver`'s unsupported-DID
+  failure instead of Warning.
 - Verifier precedence is unchanged and now tested: an explicit `relationshipResolver` argument or
   DI registration wins over what the `IDidResolver` self-provides, which wins over the `did:key`
   default. The controller-not-resolvable log line now includes the resolver's diagnostic message.
