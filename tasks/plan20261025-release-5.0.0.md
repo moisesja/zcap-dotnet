@@ -54,4 +54,4 @@ to native-AOT settings, including `System.Text.Json.JsonSerializer.IsReflectionE
 exception, and the library does not declare `IsAotCompatible`/`IsTrimmable`, so this is a
 pre-existing limitation, not a 5.0.0 regression. 5.0.0 does make the diagnosis worse:
 `CapabilityProfile.GetRejectionReason` catches the `InvalidOperationException` and reports the
-generic inspection message. Disposition pending the owner's decision (track or fix).
+generic inspection message. The owner chose to track it: issue #154.
