@@ -194,8 +194,8 @@ bash interop/run-interop.sh
   rough token cost and let the user decide. Never auto-launch — workflows can
   spawn dozens of agents and consume a large token budget.
 - **High-value workflows in this repo**:
-  - _Security review_ — fan out review dimensions (chain validation, caveat
-    inheritance, attenuation, replay/nonce, revocation), then spawn N skeptics
+  - _Security review_ — fan out review dimensions (chain validation, unsupported
+    restriction rejection, attenuation, replay/nonce, revocation), then spawn N skeptics
     per finding to refute it; keep only findings that survive a majority vote.
   - _Spec-compliance sweep_ — one agent per normative requirement cluster →
     verify implementation + `tests/Compliance/` coverage → completeness critic

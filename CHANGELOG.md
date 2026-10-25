@@ -18,6 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Reject equivalent absolute-IRI/prefixed keys and nested JSON-LD restriction nodes.
   Scan capability/proof extension JSON and restrict their contexts to zcap/v1 and
   supported proof suites, including on signing and standalone verification paths.
+- Bound profile inspection at depth 64 and 65,536 visited values, with a distinct
+  resource-limit diagnostic. Maximum-length chains with array-form proofs and large
+  action lists remain accepted.
 - Add `VerificationPolicy.AllowTargetAttenuation` (default false, matching JavaScript).
   Enable explicitly for delegated/invoked path or query suffixes. Add the optional
   `invocationTarget` delegation parameter, checked against the parent before signing.

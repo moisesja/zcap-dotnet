@@ -311,8 +311,8 @@ public class SigningService : ISigningService
             proof.AdditionalProperties = new Dictionary<string, JsonElement>(additionalProperties, StringComparer.Ordinal);
         }
 
-        if (!CapabilityProfile.IsSupportedProof(proof))
-            throw new CapabilityValidationException(CapabilityProfile.RejectionMessage);
+        if (CapabilityProfile.GetProofRejectionReason(proof) is { } profileReason)
+            throw new CapabilityValidationException(profileReason);
 
         var didSigner = CreateLegacySigner(signerDid, resolvedKey, proofType);
         proof.ProofValue = await _legacyProofCrypto.CreateProofValueAsync(

@@ -10,6 +10,13 @@ internal static class CapabilityProfile
 {
     internal const string RejectionMessage =
         "Unsupported caveat vocabulary or capability/proof context. Use expires, allowedAction and invocationTarget attenuation with the supported suite contexts.";
+    // A maximum-length chain with array-form proofs uses more than 32 JSON levels.
+    // These inspection limits allow that shape and substantial action lists, while still
+    // bounding work on arbitrary extension data and programmatically constructed cycles.
+    internal const int MaxInspectionDepth = 64;
+    internal const int MaxInspectionValues = 65_536;
+    internal const string InspectionLimitMessage =
+        "Capability/proof inspection exceeds the depth (64) or visited-value (65536) limit.";
 
     private static readonly HashSet<string> CaveatKeys = new(StringComparer.Ordinal)
     {
@@ -17,12 +24,15 @@ internal static class CapabilityProfile
     };
 
     internal static bool IsSupportedProof(Proof? proof)
-        => proof is null || IsSupported(new Capability { Proof = proof });
+        => GetProofRejectionReason(proof) is null;
+
+    internal static string? GetProofRejectionReason(Proof? proof)
+        => proof is null ? null : GetRejectionReason(new Capability { Proof = proof });
 
     internal static void EnsureSupported(Capability? capability, object[]? chain = null)
     {
-        if (!IsSupported(capability, chain))
-            throw new CapabilityValidationException(RejectionMessage);
+        if (GetRejectionReason(capability, chain) is { } reason)
+            throw new CapabilityValidationException(reason);
     }
 
     // Inspect capability/proof JSON, including extension data: @nest/@graph or a nested object
@@ -30,20 +40,28 @@ internal static class CapabilityProfile
     // document bodies are outside this scan. Restrict contexts to prevent alternate aliases.
     // Bounds also reject cycles in programmatically constructed capability graphs.
     internal static bool IsSupported(Capability? capability, object[]? chain = null)
+        => GetRejectionReason(capability, chain) is null;
+
+    internal static string? GetRejectionReason(Capability? capability, object[]? chain = null)
     {
-        var remaining = 1024;
+        var remaining = MaxInspectionValues;
+        var reason = RejectionMessage;
         try
         {
-            return Check(capability, 0) && (chain == null || chain.All(entry => Check(entry, 0)));
+            return Check(capability, 0) && (chain == null || chain.All(entry => Check(entry, 0))) ? null : reason;
         }
         catch (Exception ex) when (ex is JsonException or NotSupportedException or InvalidOperationException)
         {
-            return false;
+            return "Capability/proof JSON could not be inspected safely.";
         }
 
         bool Check(object? value, int depth)
         {
-            if (--remaining < 0 || depth > 32) return false;
+            if (--remaining < 0 || depth > MaxInspectionDepth)
+            {
+                reason = InspectionLimitMessage;
+                return false;
+            }
             if (value is null or string) return true;
             if (value is Capability cap)
             {

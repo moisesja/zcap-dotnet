@@ -231,18 +231,64 @@ public class CapabilityProfileTests
         (await store.GetByCapabilityIdAsync(leaf.Id)).Should().NotBeNull();
     }
 
+    [Theory]
+    [InlineData(true, 1)]
+    [InlineData(false, 120)]
+    [InlineData(true, 120)]
+    public async Task MaximumLengthChain_WithProofArraysOrManyActions_Verifies(bool proofArrays, int actionCount)
+    {
+        var root = await _caps.CreateRootCapabilityAsync(_owner, "https://example.com/r");
+        _dids.RegisterRoot(root);
+        var actions = Enumerable.Range(0, actionCount).Select(i => $"action-{i}").ToArray();
+        var expires = DateTime.UtcNow.AddDays(1);
+        var leaf = root;
+        // The ten-entry limit includes the root. Preserve each parent's array wire shape
+        // before it is embedded and signed by the next delegation.
+        for (var i = 1; i < 10; i++)
+        {
+            leaf = await _caps.DelegateCapabilityAsync(leaf, _owner, actions, expires);
+            if (proofArrays) leaf.Proof = ProofSet.FromValues(leaf.Proof!.Values);
+            leaf = Copy(leaf);
+        }
+
+        var result = await Verifier().VerifyCapabilityChainDetailedAsync(leaf, root);
+        result.Outcome.Should().Be(VerificationOutcome.Valid, result.Message);
+    }
+
     [Fact]
     public void ProfileInspection_BoundsWideAndDeepJsonGraphs()
     {
-        CapabilityProfile.IsSupported(new Capability(), Enumerable.Repeat<object>("urn:test", 1023).ToArray()).Should().BeTrue();
-        CapabilityProfile.IsSupported(new Capability(), Enumerable.Repeat<object>("urn:test", 1024).ToArray()).Should().BeFalse();
-        foreach (var depth in new[] { 10, 40 })
+        CapabilityProfile.IsSupported(new Capability(), Enumerable.Repeat<object>("urn:test", 65_535).ToArray()).Should().BeTrue();
+        CapabilityProfile.GetRejectionReason(new Capability(), Enumerable.Repeat<object>("urn:test", 65_536).ToArray())
+            .Should().Be(CapabilityProfile.InspectionLimitMessage);
+        foreach (var depth in new[] { 64, 65 })
         {
             var json = "{}";
-            for (var i = 0; i < depth; i++) json = "{\"proof\":{\"capabilityChain\":[" + json + "]}}";
+            for (var i = 0; i < depth; i++) json = "{\"extension\":" + json + "}";
             using var doc = JsonDocument.Parse(json, new JsonDocumentOptions { MaxDepth = 256 });
-            CapabilityProfile.IsSupported(new Capability(), [doc.RootElement]).Should().Be(depth == 10);
+            CapabilityProfile.GetRejectionReason(new Capability(), [doc.RootElement])
+                .Should().Be(depth == 64 ? null : CapabilityProfile.InspectionLimitMessage);
         }
+    }
+
+    [Fact]
+    public async Task InspectionLimit_HasDistinctSigningAndVerificationDiagnostics()
+    {
+        var (root, leaf) = await Chain();
+        leaf.AdditionalProperties = new()
+        {
+            ["https://example.com/extension"] = JsonSerializer.SerializeToElement(new int[65_536])
+        };
+        var proofResult = await Verifier().VerifyCapabilityProofDetailedAsync(leaf, root);
+        var chainResult = await Verifier().VerifyCapabilityChainDetailedAsync(leaf, root);
+        foreach (var result in new[] { proofResult, chainResult })
+        {
+            result.Outcome.Should().Be(VerificationOutcome.MalformedCapability);
+            result.Message.Should().Be(CapabilityProfile.InspectionLimitMessage);
+        }
+        var error = await Assert.ThrowsAsync<CapabilityValidationException>(() =>
+            _signing.SignCapabilityAsync(leaf, _owner, "capabilityDelegation", [root.Id]));
+        error.Message.Should().Be(CapabilityProfile.InspectionLimitMessage);
     }
 
     [Fact]
@@ -250,7 +296,7 @@ public class CapabilityProfileTests
     {
         var cap = new Capability();
         cap.Proof = new Proof { CapabilityChain = [cap] };
-        CapabilityProfile.IsSupported(cap).Should().BeFalse();
+        CapabilityProfile.GetRejectionReason(cap).Should().Be(CapabilityProfile.InspectionLimitMessage);
     }
 
     [Theory]

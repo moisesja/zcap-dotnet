@@ -197,6 +197,8 @@ Vocabulary-based `caveat` fields are rejected, including unknown types, empty ar
 and null values, throughout embedded chains. Equivalent absolute-IRI/prefixed keys
 and nested restriction nodes are rejected too. Capability/proof contexts are limited
 to zcap/v1 and supported proof-suite contexts; inline aliases are unsupported.
+Profile inspection is bounded to depth 64 and 65,536 visited values per scan;
+exceeding those limits produces a distinct resource-limit diagnostic.
 There is no custom caveat registry or
 remote `ValidWhileTrue` handler.
 
@@ -245,7 +247,7 @@ verifier responsible for the target; see [revocation integration](docs/REVOCATIO
 
 ## Developer Docs
 
-- Architecture: [`ARCHITECTURE.md`](ARCHITECTURE.md)
+- Architecture: [`architecture.md`](architecture.md)
 - Interop & spec-compliance analysis: [`docs/ZCAP-LD-INTEROP-COMPATIBILITY-ANALYSIS.md`](docs/ZCAP-LD-INTEROP-COMPATIBILITY-ANALYSIS.md) (with live `@digitalbazaar/zcap` round-trip harness in [`interop/`](interop/README.md))
 - Revocation Integration: [`docs/REVOCATION-INTEGRATION.md`](docs/REVOCATION-INTEGRATION.md)
 - Contributing: [`CONTRIBUTING.md`](CONTRIBUTING.md)

@@ -55,7 +55,11 @@ embedded chain. Root resolution is an explicit trust boundary.
 
 `CapabilityProfile` walks capability locations before signing or trusting authority.
 It inspects every proof-set member and embedded ancestor, handles typed models and
-wire JSON, and bounds depth/work to reject cycles. Extension JSON is scanned too:
+wire JSON, and bounds depth/work to reject cycles. Each inspection permits depth 64
+and 65,536 visited values, accommodating ten-entry chains with array-form proofs and
+large action lists. Exceeding these resource limits reports a distinct diagnostic
+instead of an unsupported-vocabulary message. These are local resource limits, not
+ZCAP specification limits. Extension JSON is scanned too:
 JSON-LD nesting or a nested object sharing the capability ID can contribute the
 same restricted RDF property. Compact, absolute-IRI and `sec:caveat` keys are rejected,
 including null/empty values. Contexts on capabilities/proofs must be zcap/v1 or a

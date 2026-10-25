@@ -1,5 +1,15 @@
 # Lessons Learned
 
+## 2026-10-24 — PR #150: inspection budgets must cover supported wire shapes
+
+- When broadening a bounded traversal, re-evaluate its work/depth budget against the
+  maximum supported chain, array-form proof sets, and large ordinary field values.
+  Keep positive wire-round-trip regressions alongside the adversarial bound tests.
+- Report inspection exhaustion separately from unsupported vocabulary so callers can
+  diagnose resource limits without looking for nonexistent caveats or context errors.
+- Check documentation link casing against tracked paths, including on case-insensitive
+  development filesystems, and update review checklists when a feature is removed.
+
 ## 2026-10-24 — PR #150: JSON-LD equivalent forms and evidence quality
 
 - A ban on a JSON-LD term must cover its expanded IRI and reachable aliases, not just

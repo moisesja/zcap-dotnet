@@ -231,8 +231,8 @@ public class VerificationService : IVerificationService
         if (capability == null)
             throw new ArgumentNullException(nameof(capability));
 
-        if (!CapabilityProfile.IsSupported(capability) || !CapabilityProfile.IsSupported(explicitRoot))
-            return VerificationResult.Fail(VerificationOutcome.MalformedCapability, CapabilityProfile.RejectionMessage);
+        if ((CapabilityProfile.GetRejectionReason(capability) ?? CapabilityProfile.GetRejectionReason(explicitRoot)) is { } profileReason)
+            return VerificationResult.Fail(VerificationOutcome.MalformedCapability, profileReason);
 
         if (await IsCapabilityRevokedAsync(capability.Id))
         {
@@ -583,8 +583,8 @@ public class VerificationService : IVerificationService
                 return VerificationResult.Fail(VerificationOutcome.MalformedCapability,
                     "Invocation proof could not be parsed.");
 
-            if (!CapabilityProfile.IsSupportedProof(proof))
-                return VerificationResult.Fail(VerificationOutcome.MalformedCapability, CapabilityProfile.RejectionMessage);
+            if (CapabilityProfile.GetProofRejectionReason(proof) is { } proofProfileReason)
+                return VerificationResult.Fail(VerificationOutcome.MalformedCapability, proofProfileReason);
 
             if (proof.ProofPurpose != Proof.CapabilityInvocationPurpose)
                 return VerificationResult.Fail(VerificationOutcome.MalformedCapability,
@@ -660,8 +660,8 @@ public class VerificationService : IVerificationService
             }
 
             // 5. Verify the capability chain (delegation proofs, attenuation, @context, expiry, revocation).
-            if (!CapabilityProfile.IsSupported(capability) || !CapabilityProfile.IsSupported(explicitRoot))
-                return VerificationResult.Fail(VerificationOutcome.MalformedCapability, CapabilityProfile.RejectionMessage);
+            if ((CapabilityProfile.GetRejectionReason(capability) ?? CapabilityProfile.GetRejectionReason(explicitRoot)) is { } profileReason)
+                return VerificationResult.Fail(VerificationOutcome.MalformedCapability, profileReason);
             var chain = await BuildCapabilityChainAsync(capability, explicitRoot);
             var chainResult = await VerifyBuiltChainAsync(chain);
             if (!chainResult.IsValid)
@@ -734,9 +734,9 @@ public class VerificationService : IVerificationService
 
         try
         {
-            if (!CapabilityProfile.IsSupported(invocation.Capability?.EmbeddedCapability) ||
-                !CapabilityProfile.IsSupportedProof(invocation.Proof))
-                return VerificationResult.Fail(VerificationOutcome.MalformedCapability, CapabilityProfile.RejectionMessage);
+            if ((CapabilityProfile.GetRejectionReason(invocation.Capability?.EmbeddedCapability) ??
+                CapabilityProfile.GetProofRejectionReason(invocation.Proof)) is { } invocationProfileReason)
+                return VerificationResult.Fail(VerificationOutcome.MalformedCapability, invocationProfileReason);
 
             if (string.IsNullOrWhiteSpace(invocation.Id))
             {
@@ -748,8 +748,8 @@ public class VerificationService : IVerificationService
             // instead of rebuilding it (BuildCapabilityChainAsync
             // throwing is caught by this method's outer fail-closed catch). Propagate the chain's
             // specific failure reason (revoked / attenuation / chain-too-long / …) unchanged.
-            if (!CapabilityProfile.IsSupported(capability) || !CapabilityProfile.IsSupported(explicitRoot))
-                return VerificationResult.Fail(VerificationOutcome.MalformedCapability, CapabilityProfile.RejectionMessage);
+            if ((CapabilityProfile.GetRejectionReason(capability) ?? CapabilityProfile.GetRejectionReason(explicitRoot)) is { } profileReason)
+                return VerificationResult.Fail(VerificationOutcome.MalformedCapability, profileReason);
             var chain = await BuildCapabilityChainAsync(capability, explicitRoot);
             var chainResult = await VerifyBuiltChainAsync(chain);
             if (!chainResult.IsValid)
@@ -1010,8 +1010,8 @@ public class VerificationService : IVerificationService
             // Build the complete chain from leaf to root, then verify it. Split so callers that
             // also need the built chain (revocation authorization, invocation verification)
             // can build once and reuse it instead of rebuilding (see VerifyBuiltChainAsync callers).
-            if (!CapabilityProfile.IsSupported(capability) || !CapabilityProfile.IsSupported(explicitRoot))
-                return VerificationResult.Fail(VerificationOutcome.MalformedCapability, CapabilityProfile.RejectionMessage);
+            if ((CapabilityProfile.GetRejectionReason(capability) ?? CapabilityProfile.GetRejectionReason(explicitRoot)) is { } profileReason)
+                return VerificationResult.Fail(VerificationOutcome.MalformedCapability, profileReason);
             var chain = await BuildCapabilityChainAsync(capability, explicitRoot);
             return await VerifyBuiltChainAsync(chain);
         }
@@ -1064,8 +1064,8 @@ public class VerificationService : IVerificationService
             // 2. Revocation check for all capabilities in the chain.
             foreach (var chainCapability in chain)
             {
-                if (!CapabilityProfile.IsSupported(chainCapability))
-                    return VerificationResult.Fail(VerificationOutcome.MalformedCapability, CapabilityProfile.RejectionMessage);
+                if (CapabilityProfile.GetRejectionReason(chainCapability) is { } profileReason)
+                    return VerificationResult.Fail(VerificationOutcome.MalformedCapability, profileReason);
                 if (await IsCapabilityRevokedAsync(chainCapability.Id))
                 {
                     return VerificationResult.Fail(VerificationOutcome.Revoked,
@@ -1620,10 +1620,7 @@ public class VerificationService : IVerificationService
         {
             throw new CapabilityValidationException("Root capability MUST NOT have allowedAction.");
         }
-        if (!CapabilityProfile.IsSupported(root))
-        {
-            throw new CapabilityValidationException("Root capability MUST NOT have caveat.");
-        }
+        CapabilityProfile.EnsureSupported(root);
 
         // Arbitrary unmodeled fields are rejected ONLY under the opt-in policy: db's checkCapability
         // IGNORES (does not reject) unknown root fields, and Capability.AdditionalProperties
