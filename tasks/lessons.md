@@ -1,5 +1,19 @@
 # Lessons Learned
 
+## 2026-10-25 — Release 5.0.0: smoke-test packages as a consumer would, and quote zsh loops
+
+- Run a post-publish smoke test against the package restored from nuget.org with an isolated
+  `NUGET_PACKAGES`, so a locally packed copy cannot satisfy the restore. Use an ordinary
+  `net10.0` console project. A .NET 10 file-based app (`dotnet run file.cs`) defaults to
+  native-AOT feature switches, including disabled reflection-based JSON, and tests a different
+  host than most consumers. That difference is itself worth knowing: it exposed that the
+  library has never been AOT-compatible.
+- In zsh, `for id in $IDS` does not split a newline-separated variable, so a CI watch loop over
+  several run ids watched nothing and reported in-progress runs. Prefer
+  `gh pr checks <n> --watch`, or iterate with `${=IDS}` / `while read`.
+- `dotnet nuget push --skip-duplicate` makes a workflow succeed even when nothing was uploaded.
+  Confirm "Your package was pushed" in the logs before declaring a release published.
+
 ## 2026-10-25 — PR #151 review: `OperationCanceledException` is not proof of caller cancellation
 
 - `HttpClient.Timeout` surfaces as `TaskCanceledException` (an `OperationCanceledException`)
