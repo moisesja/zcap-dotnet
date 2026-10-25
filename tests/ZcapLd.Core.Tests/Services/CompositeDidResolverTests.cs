@@ -1,3 +1,4 @@
+using System.Net;
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using NetDid.Core.Model;
@@ -227,16 +228,37 @@ public class CompositeDidResolverTests
     }
 
     [Fact]
-    public async Task RelationshipCheck_Cancellation_Propagates()
+    public async Task RelationshipCheck_CallerCancellation_Propagates()
     {
+        // Only cancellation requested through the CALLER's token is not a resolver fault.
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
         var composite = new CompositeDidResolver();
-        composite.Register("did:web:", new ThrowingRelationshipResolver(new OperationCanceledException()));
+        composite.Register("did:web:", new ThrowingRelationshipResolver(new OperationCanceledException(cts.Token)));
 
         var act = () => composite.IsAuthorizedForRelationshipAsync(
-            "did:web:down.example", "#key-1", VerificationRelationship.CapabilityInvocation);
+            "did:web:down.example", "#key-1", VerificationRelationship.CapabilityInvocation, cts.Token);
 
         await act.Should().ThrowAsync<OperationCanceledException>(
-            "cancellation is not a resolver fault and must not be swallowed into a denial");
+            "the caller cancelled; the composite must not turn that into a denial");
+    }
+
+    [Fact]
+    public async Task RelationshipCheck_AdapterTimeout_MapsToInternalError()
+    {
+        // HttpClient.Timeout raises TaskCanceledException (an OperationCanceledException) while the
+        // caller's token is NOT cancelled. That is an adapter fault, not caller cancellation
+        // (PR #151 review): it must be a denial for this controller, not an escaping exception.
+        var composite = new CompositeDidResolver();
+        composite.Register("did:web:", new ThrowingRelationshipResolver(
+            new TaskCanceledException("The request was canceled due to the configured HttpClient.Timeout elapsing.")));
+
+        var result = await composite.IsAuthorizedForRelationshipAsync(
+            "did:web:down.example", "#key-1", VerificationRelationship.CapabilityInvocation);
+
+        result.Decision.Should().Be(AuthorizationDecision.ControllerNotResolvable);
+        result.ResolutionError.Should().Be("internalError");
+        result.Message.Should().Contain("TaskCanceledException");
     }
 
     // ─── Through VerificationService: invocation ───────────────────────────────────────
@@ -361,6 +383,43 @@ public class CompositeDidResolverTests
             e.Level == LogLevel.Warning &&
             e.Message.Contains("could not be resolved") &&
             e.Message.Contains("HttpRequestException"));
+    }
+
+    [Fact]
+    public async Task MultiController_DidWebAdapterHttpTimeout_LoopContinues_LogsWarning()
+    {
+        // PR #151 review (P2): a real HttpClient.Timeout on the did:web adapter raises
+        // TaskCanceledException while the caller's token is NOT cancelled. It must deny that controller
+        // and move on to bob, not abort the whole verification as CouldNotVerify.
+        var bob = _signerKeys.GenerateDidKey();
+        var logger = new CapturingLogger<VerificationService>();
+        var timingOut = new HttpTimeoutRelationshipResolver();
+        var verifier = Verifier(Compose(timingOut), logger);
+        var root = await RootAsync(new[] { "did:web:down.example", bob }, Target("multi-http-timeout"));
+
+        var result = await verifier.VerifyInvocationDetailedAsync(await InvokeAsync(root, bob), root);
+
+        result.Outcome.Should().Be(VerificationOutcome.Valid, result.Message);
+        timingOut.ObservedException.Should().BeOfType<TaskCanceledException>("the genuine HttpClient timeout exception was raised");
+        timingOut.CallerCancellationRequested.Should().BeFalse("the timeout is the adapter's, not the caller's");
+        logger.Entries.Should().Contain(e =>
+            e.Level == LogLevel.Warning &&
+            e.Message.Contains("could not be resolved") &&
+            e.Message.Contains("TaskCanceledException"));
+    }
+
+    [Fact]
+    public async Task RootInvocation_DidWebAdapterHttpTimeout_IsUnauthorizedController_NotCouldNotVerify()
+    {
+        var alice = DidWebIdentities.Create(_signerKeys, "did:web:down.example");
+        var timingOut = new HttpTimeoutRelationshipResolver(keys: new StaticDidWebAdapter(alice.Document));
+        var verifier = Verifier(Compose(timingOut));
+        var root = await RootAsync(alice.Did, Target("http-timeout"));
+
+        var result = await verifier.VerifyInvocationDetailedAsync(await InvokeAsync(root, alice.Did), root);
+
+        result.Outcome.Should().Be(VerificationOutcome.UnauthorizedController,
+            "an adapter timeout denies that controller; it is not an aborted verification");
     }
 
     [Fact]
@@ -616,7 +675,56 @@ internal sealed class ThrowingRelationshipResolver : IDidResolver, IVerification
     }
 }
 
-/// <summary>Composite child that resolves keys only; counts key resolutions.</summary>
+/// <summary>
+/// Relationship-aware composite child whose relationship check performs a real <see cref="HttpClient"/>
+/// request with a 20 ms <see cref="HttpClient.Timeout"/> through a handler that never answers in time,
+/// so the exception is the genuine <see cref="TaskCanceledException"/> HttpClient raises on its own
+/// timeout while the caller's token is not cancelled. Records what it observed for assertions.
+/// </summary>
+internal sealed class HttpTimeoutRelationshipResolver : IDidResolver, IVerificationRelationshipResolver
+{
+    private readonly HttpClient _http = new(new DelayingHandler()) { Timeout = TimeSpan.FromMilliseconds(20) };
+    private readonly IDidResolver _keys;
+
+    public HttpTimeoutRelationshipResolver(IDidResolver? keys = null) => _keys = keys ?? new RecordingKeyOnlyResolver();
+
+    public Exception? ObservedException { get; private set; }
+    public bool? CallerCancellationRequested { get; private set; }
+
+    public Task<ResolvedKey> ResolvePublicKeyAsync(string didOrVerificationMethod) =>
+        _keys.ResolvePublicKeyAsync(didOrVerificationMethod);
+
+    public Task<string> GetVerificationMethodAsync(string did) => _keys.GetVerificationMethodAsync(did);
+
+    public async Task<VerificationRelationshipAuthorizationResult> IsAuthorizedForRelationshipAsync(
+        string controllerDid, string verificationMethodDidUrl,
+        VerificationRelationship relationship, CancellationToken ct = default)
+    {
+        try
+        {
+            using var response = await _http.GetAsync("https://down.example/.well-known/did.json", ct);
+            throw new InvalidOperationException("the delaying handler must never answer within the timeout");
+        }
+        catch (Exception ex) when (ex is not InvalidOperationException)
+        {
+            ObservedException = ex;
+            CallerCancellationRequested = ct.IsCancellationRequested;
+            throw;
+        }
+    }
+
+    private sealed class DelayingHandler : HttpMessageHandler
+    {
+        protected override async Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            await Task.Delay(TimeSpan.FromSeconds(30), cancellationToken);
+            return new HttpResponseMessage(HttpStatusCode.OK);
+        }
+    }
+}
+
+/// <summary>Composite child that resolves keys only; counts key resolutions.</summary>/// <summary>Composite child that resolves keys only; counts key resolutions.</summary>
 internal sealed class RecordingKeyOnlyResolver : IDidResolver
 {
     public int KeyResolutions { get; private set; }

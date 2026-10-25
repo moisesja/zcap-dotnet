@@ -47,8 +47,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   never treated as evidence of authority.
 - A method adapter that throws from its relationship check is reported as `internalError`
   (Warning) for that controller instead of aborting verification as `CouldNotVerify`, so a
-  co-controller of another method is still consulted when one method's host is down.
-  Cancellation still propagates.
+  co-controller of another method is still consulted when one method's host is down. Only
+  cancellation requested through the caller's token propagates; an adapter's own timeout
+  (`HttpClient.Timeout` raises `TaskCanceledException` with the caller's token not cancelled) is
+  a fault for that controller alone.
 - The composite's key-resolution path throws `CapabilityValidationException` (was
   `InvalidOperationException`) for a DID with no registered resolver, so an attacker-chosen
   `verificationMethod` of an unknown method logs at Debug like `DidKeyResolver`'s unsupported-DID

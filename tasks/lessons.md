@@ -1,5 +1,20 @@
 # Lessons Learned
 
+## 2026-10-25 — PR #151 review: `OperationCanceledException` is not proof of caller cancellation
+
+- `HttpClient.Timeout` surfaces as `TaskCanceledException` (an `OperationCanceledException`)
+  while the caller's token is NOT cancelled. A catch filter that exempts every
+  `OperationCanceledException` therefore lets an adapter's own timeout escape a fail-closed
+  mapping and abort a multi-controller loop. Decide by the caller's token
+  (`ct.IsCancellationRequested`), not by exception type.
+- A "cancellation propagates" test that throws a tokenless exception under the default token
+  pins the wrong rule and passes for the wrong reason. Use a genuinely cancelled
+  `CancellationTokenSource` for the propagation case, and a real `HttpClient` with a short
+  `Timeout` behind a delaying `HttpMessageHandler` for the timeout case, so the exception under
+  test is the one production raises.
+- When an adversarial pass says "exceptions are mapped", ask which exceptions it exempted and
+  whether production can raise one of those for a non-caller reason.
+
 ## 2026-10-24 — Issue #148: background agents need a committed target; audit `git status` before `git add`
 
 - A red-team agent briefed to review `git diff origin/main...HEAD` saw an empty diff because the

@@ -39,9 +39,11 @@ namespace ZcapLd.Core.Services;
 /// misconfiguration — controllers of that method can never be authorized — so the verifier logs it
 /// at Warning, and keeps doing so for every capability naming such a controller until the
 /// configuration is fixed. Successful key resolution is never treated as evidence of authority.</description></item>
-/// <item><description>The matched adapter throws (network outage, adapter bug): <c>internalError</c>
-/// carrying the exception type and message, logged at Warning. Cancellation
-/// (<see cref="OperationCanceledException"/>) is not a resolver fault and propagates.</description></item>
+/// <item><description>The matched adapter throws (network outage, adapter bug, its own HTTP timeout):
+/// <c>internalError</c> carrying the exception type and message, logged at Warning. Only cancellation
+/// requested through the caller's <see cref="CancellationToken"/> propagates; an adapter-local
+/// <see cref="OperationCanceledException"/> such as the <see cref="TaskCanceledException"/> that
+/// <c>HttpClient.Timeout</c> raises is a fault for that controller alone.</description></item>
 /// </list>
 /// </remarks>
 public class CompositeDidResolver : IDidResolver, IVerificationRelationshipResolver
@@ -129,12 +131,15 @@ public class CompositeDidResolver : IDidResolver, IVerificationRelationshipResol
             return await relationshipResolver.IsAuthorizedForRelationshipAsync(
                 controllerDid, verificationMethodDidUrl, relationship, ct);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
             // A faulting adapter must not abort the verifier's multi-controller loop (an outage of one
             // method's host would otherwise lock out a co-controller of another method). Report it as
             // the same operator-actionable code as a misconfigured adapter so the verifier logs it at
-            // Warning, denies this controller, and continues to the next one.
+            // Warning, denies this controller, and continues to the next one. Only cancellation the
+            // CALLER requested propagates: an OperationCanceledException is not proof of that —
+            // HttpClient.Timeout raises TaskCanceledException while the caller's token is untouched —
+            // so the decision is made on the caller's token, not on the exception type (PR #151 review).
             return VerificationRelationshipAuthorizationResult.NotResolvable(
                 "internalError",
                 $"The IVerificationRelationshipResolver for controller '{controllerDid}' ({resolver.GetType().Name}) " +
