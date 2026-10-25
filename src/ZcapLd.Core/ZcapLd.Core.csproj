@@ -48,7 +48,7 @@
          for raw sign/verify in CryptoSuite. NetCrypto's ECDSA Sign/Verify default to DER, but the
          W3C `ecdsa-2019` suite requires IEEE P1363 (fixed-width r||s), so CryptoSuite calls the
          format-aware overloads with EcdsaSignatureFormat.IeeeP1363. See CryptoSuite.cs. -->
-    <PackageReference Include="NetCrypto" Version="1.6.0" />
+    <PackageReference Include="NetCrypto" Version="1.7.1" />
     <!-- Data Integrity proof machinery: RDFC-1.0 / JSON-LD canonicalization (DataProofsDotnet.Rdfc)
          and the legacy Linked-Data-Signature cryptosuites — Ed25519Signature2020 /
          EcdsaSecp256r1Signature2019 — that sign/verify zcap's 2020-era wire convention
@@ -56,7 +56,7 @@
          clarity. See LegacyProofCrypto.cs. -->
     <PackageReference Include="DataProofsDotnet.Core" Version="1.3.0" />
     <PackageReference Include="DataProofsDotnet.Rdfc" Version="1.3.0" />
-    <PackageReference Include="DataProofsDotnet.Legacy" Version="1.1.1" />
+    <PackageReference Include="DataProofsDotnet.Legacy" Version="1.3.0" />
     <!-- W3C DID Core and did:key method (DID resolution; crypto via NetCrypto). -->
     <PackageReference Include="NetDid.Core" Version="3.1.0" />
     <PackageReference Include="NetDid.Method.Key" Version="3.1.0" />
@@ -64,10 +64,10 @@
     <!-- Logging abstraction only: lets the verifier emit a diagnostic when it fails closed,
          so a misconfiguration/transient fault is distinguishable from an invalid capability
          (Issue #64). Defaults to NullLogger when no ILogger is supplied. -->
-    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.10" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.13" />
 
     <!-- Embed source and commit metadata for debugging/open-source distribution -->
-    <PackageReference Include="Microsoft.SourceLink.GitHub" Version="10.0.400" PrivateAssets="All" />
+    <PackageReference Include="Microsoft.SourceLink.GitHub" Version="10.0.402" PrivateAssets="All" />
   </ItemGroup>
 
   <ItemGroup>
