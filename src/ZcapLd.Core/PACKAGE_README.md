@@ -5,6 +5,10 @@ capabilities, Ed25519/P-256 proofs, controller authorization, replay protection,
 and signed revocation. Proofs use RDFC-1.0 through DataProofs and NetCrypto.
 
 Provide an `IDidSigner` and `IDidResolver`; no private-key store is installed by default.
+`DidKeyResolver` handles `did:key`. For several DID methods, register one adapter per method
+in a `CompositeDidResolver` (full prefixes such as `"did:web:"`): it routes key resolution
+and controller authorization to the adapter for the controller's method, so each adapter should
+also implement NetDid's `IVerificationRelationshipResolver`. Key-only adapters fail closed.
 
 ```csharp
 var signing = new SigningService(didSigner, didResolver);
