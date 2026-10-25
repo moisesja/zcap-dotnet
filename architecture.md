@@ -41,13 +41,16 @@ provably invalid authority. Denials are logged at Debug; unexpected faults at Wa
 | `ISigningService` | Produce proofs with consumer-provided `IDidSigner`; self-verify signatures against the resolved public key. |
 | `IVerificationService` | Check proof/controller relationships, chains, target/action/expiry policy, freshness, revocation and replay. |
 | `IDidSigner` | Sign using application-owned keys (HSM/KMS/Key Vault). No default implementation. |
-| `IDidResolver` | Resolve key material; `DidKeyResolver` uses NetDid and `CompositeDidResolver` routes methods. |
+| `IDidResolver` | Resolve key material; `DidKeyResolver` uses NetDid. `CompositeDidResolver` routes key and controller-relationship checks by DID method and fails closed for key-only adapters (#148). |
 | `IVerificationRelationshipResolver` | Authorize verification methods for the controller and proof purpose. |
 | `IRootCapabilityResolver` | Resolve root trust anchors referenced by ID. Explicit-root overloads are also available. |
 | `IRevocationService` / `IRevocationStore` | Record/check verifier-owned revocation state. In-memory implementations are for local development. |
 | `INonceStore` | Atomic replay tracking. Share across replicas; `NullNonceStore` explicitly opts out. |
 
-A resolver that also supplies relationship/root resolution is detected automatically.
+A resolver that also supplies relationship/root resolution is detected automatically; an
+explicit relationship resolver passed to the constructor or registered in DI takes precedence.
+The composite routes relationship checks by the controller's DID, never by the verification
+method's DID, and never infers authority from successful key resolution.
 No verification path fetches delegated ancestors by their IDs: they travel in the
 embedded chain. Root resolution is an explicit trust boundary.
 

@@ -32,6 +32,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Align interop dependency pins and add target-policy, exact JS vocabulary-error,
   authentic restriction rejection by .NET, and signature-tampering interop tests.
 
+### Fixed (#148)
+
+- `CompositeDidResolver` now implements `IVerificationRelationshipResolver`. Controller
+  authorization (`capabilityInvocation` / `capabilityDelegation`) is routed to the resolver
+  registered for the *controller's* DID method, so a verifier built on the composite authorizes
+  non-`did:key` controllers (for example `did:webvh`) without a separately wired relationship
+  resolver. Previously the composite exposed only `IDidResolver`, the verifier fell back to its
+  `did:key`-only default and every non-`did:key` controller was denied (`UnauthorizedController`).
+- Routing fails closed with a tri-state result, never an exception, so a multi-controller check
+  continues to the next controller. An unroutable controller method yields `methodNotSupported`
+  (logged at Debug; attacker-drivable). A registered resolver that resolves keys only yields
+  `internalError` (logged at Warning; operator misconfiguration). Successful key resolution is
+  never treated as evidence of authority.
+- Verifier precedence is unchanged and now tested: an explicit `relationshipResolver` argument or
+  DI registration wins over what the `IDidResolver` self-provides, which wins over the `did:key`
+  default. The controller-not-resolvable log line now includes the resolver's diagnostic message.
+- Migration: hosts that bridged the gap with their own relationship-aware composite can delete it
+  and register `CompositeDidResolver` through `AddZcapDidResolver` or the `VerificationService`
+  constructor. Registering the same composite explicitly as `IVerificationRelationshipResolver`
+  is redundant but harmless. Register full method prefixes with the trailing colon (`did:key:`).
+
 ### Migration
 
 Remove caveat constructor/creation parameters and use `expires`, `allowedAction`, and

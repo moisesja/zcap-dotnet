@@ -28,6 +28,8 @@
   <ItemGroup>
     <!-- Reuse the test DID signer/resolver without a test-to-test project dependency. -->
     <Compile Include="../ZcapLd.Core.Tests/Helpers/InMemoryDidProvider.cs" Link="Helpers/InMemoryDidProvider.cs" />
+    <Compile Include="../ZcapLd.Core.Tests/Helpers/StaticDidDocumentResolver.cs" Link="Helpers/StaticDidDocumentResolver.cs" />
+    <Compile Include="../ZcapLd.Core.Tests/Helpers/StaticDidWebAdapter.cs" Link="Helpers/StaticDidWebAdapter.cs" />
   </ItemGroup>
 
 </Project>

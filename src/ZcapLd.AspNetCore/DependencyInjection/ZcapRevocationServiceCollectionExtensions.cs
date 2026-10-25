@@ -126,6 +126,14 @@ public static class ZcapRevocationServiceCollectionExtensions
     /// Registers a custom <see cref="IDidResolver"/> implementation.
     /// Replaces the default <see cref="DidKeyResolver"/>.
     /// </summary>
+    /// <remarks>
+    /// A resolver that also implements <see cref="IVerificationRelationshipResolver"/> self-provides
+    /// controller authorization to the verifier: <see cref="DidKeyResolver"/> does, and
+    /// <see cref="ZcapLd.Core.Services.CompositeDidResolver"/> routes the check to the adapter registered for the
+    /// controller's DID method, failing closed for key-only adapters (Issue #148). An
+    /// <see cref="IVerificationRelationshipResolver"/> registered explicitly in the container takes
+    /// precedence over what the resolver self-provides.
+    /// </remarks>
     public static IServiceCollection AddZcapDidResolver<TResolver>(this IServiceCollection services)
         where TResolver : class, IDidResolver
     {
@@ -137,7 +145,9 @@ public static class ZcapRevocationServiceCollectionExtensions
 
     /// <summary>
     /// Registers a custom <see cref="IDidResolver"/> using a factory.
-    /// Replaces the default <see cref="DidKeyResolver"/>.
+    /// Replaces the default <see cref="DidKeyResolver"/>. See
+    /// <see cref="AddZcapDidResolver{TResolver}"/> for how a relationship-aware resolver (such as
+    /// <see cref="ZcapLd.Core.Services.CompositeDidResolver"/>) self-provides controller authorization.
     /// </summary>
     public static IServiceCollection AddZcapDidResolver(
         this IServiceCollection services,

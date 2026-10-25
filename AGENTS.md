@@ -47,7 +47,10 @@ Community Group draft; interoperability claims are limited to the tested cases.
   party expected action/targets and optionally pins root IDs.
 - **Identity and keys** are application-owned. Consumers provide `IDidSigner`;
   `IDidResolver` resolves key material, and `IVerificationRelationshipResolver`
-  authorizes keys through controller documents. Never persist private keys in Core.
+  authorizes keys through controller documents. `CompositeDidResolver` routes both by the
+  controller's DID method and fails closed (`methodNotSupported` / `internalError`) instead
+  of inferring authority from key resolution; an explicit relationship resolver takes
+  precedence. Never persist private keys in Core.
 - **Revocation and replay** use pluggable stores shared across verifier replicas.
   Revocation requests must prove possession of an authorized key. Distribution to
   independent verifiers is a deployment responsibility. HTTP-signature invocation

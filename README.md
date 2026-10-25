@@ -37,6 +37,7 @@ using ZcapLd.Core.Models;
 using ZcapLd.Core.Services;
 
 // Supply your IDidSigner and IDidResolver implementations (for example, HSM/KMS-backed).
+// For several DID methods, see "DID methods and controller authorization" below.
 var signingService = new SigningService(didSigner, didResolver);
 var capabilityService = new CapabilityService(signingService);
 var verificationService = new VerificationService(didResolver);
@@ -88,6 +89,27 @@ var delegatedByBob = await capabilityService.DelegateCapabilityAsync(
     DateTime.UtcNow.AddDays(7),
     signerDid: "did:key:zBob");                 // must be one of `shared`'s controllers
 ```
+
+### DID methods and controller authorization
+
+`DidKeyResolver` handles `did:key`. For another method, implement `IDidResolver` (key material) and
+NetDid's `IVerificationRelationshipResolver` (which keys the controller's DID document lists under
+`capabilityInvocation` / `capabilityDelegation`) in one adapter, then register adapters in a
+`CompositeDidResolver` using full method prefixes with the trailing colon:
+
+```csharp
+var resolver = new CompositeDidResolver();
+resolver.Register("did:key:", new DidKeyResolver());
+resolver.Register("did:webvh:", myWebVhAdapter); // IDidResolver + IVerificationRelationshipResolver
+var verificationService = new VerificationService(resolver); // DI: services.AddZcapDidResolver(_ => resolver)
+```
+
+The composite routes key resolution and controller authorization to the adapter registered for the
+*controller's* DID method, so no separate relationship resolver is needed. It fails closed: a
+controller whose method has no adapter is denied (`methodNotSupported`, logged at Debug), and an
+adapter that resolves keys only is denied with `internalError` (logged at Warning) rather than
+having authority inferred from key resolution. An explicit `relationshipResolver` constructor
+argument or DI registration takes precedence over what the resolver self-provides.
 
 ## Delegation Chains & Root Resolution
 
