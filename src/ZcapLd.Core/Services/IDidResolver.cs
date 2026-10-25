@@ -8,7 +8,10 @@ namespace ZcapLd.Core.Services;
 ///
 /// The library ships <see cref="DidKeyResolver"/> for the did:key method.
 /// Implement this interface for other DID methods (did:web, did:ion, etc.)
-/// and compose them via <see cref="CompositeDidResolver"/>.
+/// and compose them via <see cref="CompositeDidResolver"/>. An implementation that also
+/// implements NetDid's <c>IVerificationRelationshipResolver</c> lets the verifier authorize that
+/// method's controllers; the composite routes those checks to the adapter registered for the
+/// controller's method and fails closed for key-only adapters (Issue #148).
 /// </summary>
 public interface IDidResolver
 {

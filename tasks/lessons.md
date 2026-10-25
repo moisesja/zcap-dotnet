@@ -1,5 +1,47 @@
 # Lessons Learned
 
+## 2026-10-25 — PR #151 review: `OperationCanceledException` is not proof of caller cancellation
+
+- `HttpClient.Timeout` surfaces as `TaskCanceledException` (an `OperationCanceledException`)
+  while the caller's token is NOT cancelled. A catch filter that exempts every
+  `OperationCanceledException` therefore lets an adapter's own timeout escape a fail-closed
+  mapping and abort a multi-controller loop. Decide by the caller's token
+  (`ct.IsCancellationRequested`), not by exception type.
+- A "cancellation propagates" test that throws a tokenless exception under the default token
+  pins the wrong rule and passes for the wrong reason. Use a genuinely cancelled
+  `CancellationTokenSource` for the propagation case, and a real `HttpClient` with a short
+  `Timeout` behind a delaying `HttpMessageHandler` for the timeout case, so the exception under
+  test is the one production raises.
+- When an adversarial pass says "exceptions are mapped", ask which exceptions it exempted and
+  whether production can raise one of those for a non-caller reason.
+
+## 2026-10-24 — Issue #148: background agents need a committed target; audit `git status` before `git add`
+
+- A red-team agent briefed to review `git diff origin/main...HEAD` saw an empty diff because the
+  work was still uncommitted, and a `git stash` run for a baseline-warning comparison briefly
+  reverted the working tree while that agent was reading it. Commit the work (or point the agent
+  at `git diff` of the working tree) BEFORE spawning any agent that reads source, and never run
+  `git stash`/`checkout` on files an active agent may be reading; run baseline comparisons before
+  spawning or after the agent completes.
+- `git add <dir>` swept in a `ZcapLd.Core.csproj` dependency bump I had not made (modified
+  fourteen seconds before the commit, source unknown). Compare `git status` against the list of
+  files you edited before staging, and stage explicit paths; an unrelated change inside a
+  security-fix commit must be amended out and surfaced to the user.
+- NetDid ships `NetDid.Core.Resolution.CompositeDidResolver`; any file importing both that
+  namespace and `ZcapLd.Core.Services` needs a using alias, and XML `cref`s to the zcap type must
+  be fully qualified or they raise `CS0419`. Check the warning count against `origin/main` for
+  every doc-comment edit, not only for code.
+- For a fail-closed tri-state result, split the error code by who can act on it: attacker-drivable
+  routing failures reuse an expected W3C code (`methodNotSupported`, Debug), operator
+  misconfiguration uses a code outside the expected list (`internalError`, Warning) so the
+  existing severity seam surfaces it without verifier changes. A test for the misconfiguration
+  branch passes even without the fix unless its ablation replaces the branch with the wrong
+  behavior ("key resolution succeeds ⇒ authorized"), so name that ablation in the plan.
+- A verifier test over a composite must never hand `InMemoryDidProvider` to the verifier as the
+  `didResolver`: its relationship implementation self-authorizes and bypasses the composite. Use a
+  real `DidKeyResolver` child and supply roots via `InMemoryRootCapabilityResolver`, since the
+  composite is not a root resolver and chain tests would otherwise fail as `CouldNotVerify`.
+
 ## 2026-10-24 — PR #150: inspection budgets must cover supported wire shapes
 
 - When broadening a bounded traversal, re-evaluate its work/depth budget against the

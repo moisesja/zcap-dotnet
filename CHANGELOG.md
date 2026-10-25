@@ -32,6 +32,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Align interop dependency pins and add target-policy, exact JS vocabulary-error,
   authentic restriction rejection by .NET, and signature-tampering interop tests.
 
+### Fixed (#148)
+
+- `CompositeDidResolver` now implements `IVerificationRelationshipResolver`. Controller
+  authorization (`capabilityInvocation` / `capabilityDelegation`) is routed to the resolver
+  registered for the *controller's* DID method, so a verifier built on the composite authorizes
+  non-`did:key` controllers (for example `did:webvh`) without a separately wired relationship
+  resolver. Previously the composite exposed only `IDidResolver`, the verifier fell back to its
+  `did:key`-only default and every non-`did:key` controller was denied (`UnauthorizedController`).
+- Routing fails closed with a tri-state result, never an exception, so a multi-controller check
+  continues to the next controller. An unroutable controller method yields `methodNotSupported`
+  (logged at Debug; attacker-drivable). A registered resolver that resolves keys only yields
+  `internalError` (logged at Warning; operator misconfiguration). Successful key resolution is
+  never treated as evidence of authority.
+- A method adapter that throws from its relationship check is reported as `internalError`
+  (Warning) for that controller instead of aborting verification as `CouldNotVerify`, so a
+  co-controller of another method is still consulted when one method's host is down. Only
+  cancellation requested through the caller's token propagates; an adapter's own timeout
+  (`HttpClient.Timeout` raises `TaskCanceledException` with the caller's token not cancelled) is
+  a fault for that controller alone.
+- The composite's key-resolution path throws `CapabilityValidationException` (was
+  `InvalidOperationException`) for a DID with no registered resolver, so an attacker-chosen
+  `verificationMethod` of an unknown method logs at Debug like `DidKeyResolver`'s unsupported-DID
+  failure instead of Warning.
+- Verifier precedence is unchanged and now tested: an explicit `relationshipResolver` argument or
+  DI registration wins over what the `IDidResolver` self-provides, which wins over the `did:key`
+  default. The controller-not-resolvable log line now includes the resolver's diagnostic message.
+- Migration: hosts that bridged the gap with their own relationship-aware composite can delete it
+  and register `CompositeDidResolver` through `AddZcapDidResolver` or the `VerificationService`
+  constructor. Registering the same composite explicitly as `IVerificationRelationshipResolver`
+  is redundant but harmless. Register full method prefixes with the trailing colon (`did:key:`).
+
+### Dependencies
+
+- Pins moved to the latest stable releases: `NetCrypto` 1.6.0 → 1.7.1 (also in
+  `interop/ZcapLd.Interop`, whose own pin must match Core's or restore fails with `NU1605`),
+  `DataProofsDotnet.Legacy` 1.1.1 → 1.3.0 (now level with `DataProofsDotnet.Core`/`Rdfc`),
+  `Microsoft.Extensions.Logging.Abstractions` 10.0.13, `Microsoft.SourceLink.GitHub` 10.0.402,
+  `Microsoft.Data.Sqlite` 10.0.13 (demo; clears the transitive `SQLitePCLRaw.lib.e_sqlite3`
+  2.1.11 advisory GHSA-2m69-gcr7-jv3q), `Microsoft.AspNetCore.Mvc.Testing` 10.0.13, and test
+  tooling (`Microsoft.NET.Test.Sdk` 18.11.0, `xunit.runner.visualstudio` 4.0.1,
+  `coverlet.collector` 10.1.0, `FluentAssertions` 8.11.0, `Xunit.SkippableFact` 1.5.85).
+  `NetDid` stays at 3.1.0 (latest). The pinned JavaScript interop peer is unchanged.
+
 ### Migration
 
 Remove caveat constructor/creation parameters and use `expires`, `allowedAction`, and

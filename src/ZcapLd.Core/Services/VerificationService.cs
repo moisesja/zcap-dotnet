@@ -84,9 +84,12 @@ public class VerificationService : IVerificationService
     /// <see cref="NullLogger"/>. The optional <paramref name="relationshipResolver"/> performs
     /// controller authorization by resolving the controller's DID document and checking the relevant
     /// verification relationship (<c>capabilityInvocation</c> / <c>capabilityDelegation</c>) —
-    /// Issue #65 — resolved from the explicit argument, else the supplied
-    /// <paramref name="didResolver"/> if it also implements <see cref="IVerificationRelationshipResolver"/>,
-    /// else a <c>did:key</c>-backed default. The optional <paramref name="freshnessClockSkew"/>
+    /// Issue #65 — resolved in this precedence: the explicit argument; else the supplied
+    /// <paramref name="didResolver"/> when it also implements <see cref="IVerificationRelationshipResolver"/>
+    /// (<see cref="DidKeyResolver"/> does, and <see cref="CompositeDidResolver"/> routes the check to
+    /// the adapter registered for the controller's DID method — Issue #148); else a
+    /// <c>did:key</c>-only default that denies every non-<c>did:key</c> controller. Pass the explicit
+    /// argument only to override what the resolver self-provides. The optional <paramref name="freshnessClockSkew"/>
     /// tolerates a signed <c>proof.created</c> being up to that far in the future (Issue #71; default
     /// <see cref="DefaultFreshnessClockSkew"/>). The optional <paramref name="policy"/> enables opt-in
     /// verifier-side SHOULD checks (Issue #73; default <see cref="VerificationPolicy.Default"/>).
@@ -128,7 +131,9 @@ public class VerificationService : IVerificationService
     /// and checks the requested verification relationship. <c>did:key</c> derives the DID from the
     /// key and lists it under every relationship, so this is the correct default for the common
     /// case. Non-<c>did:key</c> controllers require a method-appropriate
-    /// <see cref="IVerificationRelationshipResolver"/> supplied via the constructor / DI.
+    /// <see cref="IVerificationRelationshipResolver"/>: either supplied via the constructor / DI, or
+    /// self-provided by the <c>didResolver</c> — a <see cref="CompositeDidResolver"/> routes the check
+    /// to the adapter registered for the controller's method (Issue #148).
     /// </summary>
     internal static IVerificationRelationshipResolver CreateDefaultRelationshipResolver() =>
         new DefaultVerificationRelationshipResolver(new DidKeyMethod(new DefaultKeyGenerator()));
@@ -1485,8 +1490,8 @@ public class VerificationService : IVerificationService
                     // controller) stays at Warning.
                     _logger.Log(
                         IsExpectedResolutionError(result.ResolutionError) ? LogLevel.Debug : LogLevel.Warning,
-                        "Controller '{Controller}' could not be resolved during {Relationship} authorization: {Error}",
-                        controller, relationship, result.ResolutionError);
+                        "Controller '{Controller}' could not be resolved during {Relationship} authorization: {Error} — {Message}",
+                        controller, relationship, result.ResolutionError, result.Message);
                     break;
                 default: // NotAuthorized
                     _logger.LogDebug(
