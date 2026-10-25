@@ -18,9 +18,9 @@ tags (publishing to NuGet is irreversible for a version number). Branch: `releas
 - [x] Branch `release-5.0.0` from `origin/main` (b783970).
 - [x] Date CHANGELOG 5.0.0; add #148 note to `src/ZcapLd.Core/PACKAGE_README.md`.
 - [x] Preflight on the branch: clean Release build, full tests, pack, verify packages.
-- [ ] PR → CI green → merge commit.
-- [ ] Tag `core-v5.0.0` and `aspnet-v5.0.0` on the merge commit and push.
-- [ ] Watch both release workflows; verify nuget.org and a scratch consumer.
+- [x] PR → CI green → merge commit.
+- [x] Tag `core-v5.0.0` and `aspnet-v5.0.0` on the merge commit and push.
+- [x] Watch both release workflows; verify nuget.org and a scratch consumer.
 
 ## Results
 
@@ -30,3 +30,28 @@ packages.
 Branch preflight (with the release-prep edits): 488 Core + 11 ASP.NET pass (Release, clean,
 `--no-incremental`); both packages 5.0.0, AssemblyVersion/FileVersion 5.0.0.0; the packed Core
 README carries the multi-method note; dependencies unchanged; no vulnerable packages.
+
+## Release outcome (2026-10-25)
+
+- PR #152 merged as 23a38b4 after core, aspnet and interop CI passed. Annotated tags
+  `core-v5.0.0` and `aspnet-v5.0.0` point at 23a38b4.
+- `release-core-nuget` and `release-aspnet-nuget` succeeded; logs show "Your package was
+  pushed" for both `.nupkg` and both `.snupkg`. nuget.org indexed both 5.0.0 packages about
+  seven minutes later.
+- Packages downloaded from nuget.org: version 5.0.0, source commit 23a38b4, expected
+  dependencies, Core README carries the multi-method note, NuGet.org repository signature valid.
+- Consumer smoke test (plain `net10.0` console project, isolated package cache, restored from
+  nuget.org): delegation chain `Valid`, delegated invocation `Valid` through
+  `CompositeDidResolver`, non-controller invocation `UnauthorizedController`.
+
+### Finding: not usable where reflection-based JSON is disabled (pre-existing)
+
+The same smoke test as a .NET 10 file-based app (`dotnet run smoke.cs`) fails on the first
+delegation with "Capability/proof JSON could not be inspected safely." File-based apps default
+to native-AOT settings, including `System.Text.Json.JsonSerializer.IsReflectionEnabledByDefault
+= false`, so `ZcapJsonOptions.Default` serialization throws `InvalidOperationException`
+("Reflection-based serialization has been disabled…"). ZcapLd.Core 4.2.0 throws the same
+exception, and the library does not declare `IsAotCompatible`/`IsTrimmable`, so this is a
+pre-existing limitation, not a 5.0.0 regression. 5.0.0 does make the diagnosis worse:
+`CapabilityProfile.GetRejectionReason` catches the `InvalidOperationException` and reports the
+generic inspection message. The owner chose to track it: issue #154.
