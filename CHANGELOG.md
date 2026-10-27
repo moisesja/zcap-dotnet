@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- `MapZcapRevocationEndpoints` decoded the `{*capabilityId}` route value a second time although
+  ASP.NET Core had already decoded it once (keeping `%2F`). Every root id
+  (`urn:zcap:root:https%3A%2F%2F…`) therefore read as a different id: `GET` reported a revoked root
+  as not revoked and `POST` could not revoke a root (#155). Both endpoints now recover the id from
+  the raw request target and decode it exactly once; a host without a raw target (the in-memory
+  `TestServer`) falls back to the once-decoded route value. Clients still send
+  `encodeURIComponent(capabilityId)`.
+
+### Security
+
+- Revoking a root capability now authorizes against the trusted root (the explicit root or the
+  configured `IRootCapabilityResolver`), never the request's copy. A root-only chain has no
+  delegation proof, so a caller could previously present a known root id with their own
+  `controller` and have it revoked (#155). Whether an id names a root is decided by the verifier's
+  trust store, not by the request's `parentCapability`: a known root id is anchored however the
+  request shapes it, and a root-shaped or `urn:zcap:root:`-named capability the verifier cannot
+  resolve fails closed. Root revocation therefore requires a root resolver or the explicit-root
+  overload.
+
 ## [5.0.0] - 2026-10-25
 
 ### Security and breaking changes (#149)

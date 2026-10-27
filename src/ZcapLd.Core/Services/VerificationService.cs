@@ -1909,17 +1909,54 @@ public class VerificationService : IVerificationService
     }
 
     /// <summary>
+    /// The root the verifier trusts under <paramref name="capabilityId"/>, if any: the explicit root
+    /// when its id matches, else whatever the configured <see cref="IRootCapabilityResolver"/> returns.
+    /// Null means the verifier does not know this id as a root. Resolver faults propagate so the
+    /// caller fails closed.
+    /// </summary>
+    private async Task<Capability?> FindTrustedRootAsync(string capabilityId, Capability? explicitRoot)
+    {
+        if (explicitRoot is not null && string.Equals(explicitRoot.Id, capabilityId, StringComparison.Ordinal))
+        {
+            return explicitRoot;
+        }
+
+        return _rootResolver is null ? null : await _rootResolver.ResolveRootAsync(capabilityId);
+    }
+
+    /// <summary>
     /// True when <paramref name="verificationMethod"/> may revoke <paramref name="capability"/> —
     /// i.e. it controls the capability or any ancestor in its delegation chain. Cryptographically
     /// verifies the chain before trusting any controller fields; a forged or invalid chain yields
-    /// false. <paramref name="verificationMethod"/> is the authenticated proof verification method
-    /// (or a bare DID); authentication is performed by the caller.
+    /// false. A root is authorized against the trusted root (explicit or resolved), never the
+    /// caller's copy. <paramref name="verificationMethod"/> is the authenticated proof verification
+    /// method (or a bare DID); authentication is performed by the caller.
     /// </summary>
     private async Task<bool> IsRevokerAuthorizedAsync(
         Capability capability, string verificationMethod, Capability? explicitRoot)
     {
         try
         {
+            // A root is a trust anchor and is never taken from the request. Whether the id names a root
+            // is decided by the verifier's own trust (the explicit root or the configured resolver), not
+            // by the request's shape: an id the verifier knows as a root is authorized against that
+            // trusted root however the request presents it. A root-only chain has no delegation proof,
+            // so a root-shaped body naming the caller as controller — or a delegated-shaped body that
+            // merely borrows a root's id under the caller's own, validly signed chain — would otherwise
+            // let anyone who knows a root id revoke it (Issue #155). A root-shaped or urn:zcap:root:-
+            // named capability the verifier cannot resolve has nothing trusted to authorize against.
+            var trustedRoot = await FindTrustedRootAsync(capability.Id, explicitRoot);
+            if (trustedRoot is not null)
+            {
+                // Binds the trusted root to the id (and, for the standard form, to its encoded target).
+                capability = await ResolveRootCapabilityAsync(capability.Id, trustedRoot);
+            }
+            else if (string.IsNullOrEmpty(capability.ParentCapability) ||
+                     capability.Id.StartsWith(RootIdPrefix, StringComparison.Ordinal))
+            {
+                return false;
+            }
+
             // Build the chain once, then verify it cryptographically before trusting controller fields.
             // Without that verification, a caller passing a crafted Capability with a tampered controller
             // could authorize themselves to revoke a legitimate capability. (VerifyBuiltChainAsync reuses

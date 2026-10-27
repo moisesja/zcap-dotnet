@@ -47,7 +47,21 @@ Default endpoint contract:
   (authentication) and that the signer controls the capability or an ancestor (authorization).
   Returns `200` on success, `403` when unauthenticated/unauthorized, `400` on a malformed body or a
   route/body capability-id mismatch. There is **no** bare-`revokerDid` path.
-- `GET /zcaps/revocations/{*capabilityId}`: query revocation status
+- `GET /zcaps/revocations/{*capabilityId}`: query revocation status; anonymous, returns only
+  `{ capabilityId, isRevoked }`.
+
+`{*capabilityId}` is `encodeURIComponent(capabilityId)`, one level of percent-encoding that the
+endpoint decodes exactly once. A root id already contains escapes (`urn:zcap:root:https%3A%2F%2F…`),
+so it is encoded twice in the URL; that is correct and the endpoint echoes the exact id back. The id
+is recovered from the raw request target (Kestrel populates it), so ids containing `/` are
+unambiguous. On a host without a raw target (the in-memory `TestServer`) the endpoint falls back to
+the route value, in which an encoded `/` stays `%2F`; send such ids with literal slashes there.
+Intermediaries must forward the request target byte-for-byte: a proxy that decodes and re-encodes
+the path turns `%2541` into `%41` and reintroduces the double decode.
+
+Revoking a root over `POST` authorizes against the root the server's `IRootCapabilityResolver`
+returns for that id, never the body's copy: a root-only chain has no delegation proof, so the body's
+`controller` is never trusted. A root the server cannot resolve is not revocable.
 
 Runnable demo:
 

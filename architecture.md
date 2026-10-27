@@ -112,12 +112,24 @@ be parseable when present and cannot exceed allowed clock skew; requiring it is
 optional. Invocation/revocation `created` additionally has a lower freshness bound
 based on the nonce window. Revocation authorization intentionally exempts applicable
 expiration-ceiling/created policies so removing authority remains possible; it does
-not exempt unsupported caveats.
+not exempt unsupported caveats. Revoking a root authorizes against the trusted root
+(explicit or resolved), never the request's copy: a root-only chain has no delegation
+proof, so the caller's `controller` is never consulted. Whether an id is a root is decided
+by the verifier's trust store, not by the request's shape, and an unresolvable root-shaped
+or `urn:zcap:root:`-named id fails closed. Revocation records are keyed by capability id
+and delegated ids are self-asserted, so a delegator can mint a capability bearing any
+delegated id it knows under its own chain and revoke that id; a revocation of a delegated
+id is only as trustworthy as the delegators under its root.
 
 ASP.NET registers `AddZcapServices`, custom signer/resolver/root/nonce/revocation
 implementations, and `MapZcapRevocationEndpoints`. The revoke POST authenticates a
 signed request and caps its body. Anonymous status GET returns only ID and revoked
-state. Free-form revocation `reason`/`metadata` are informational under RDFC, not
+state. Both endpoints address a capability as `{prefix}/{encodeURIComponent(id)}` and
+recover the id from the raw request target, decoded exactly once; ASP.NET Core's route
+value is already decoded except for `%2F`, so decoding it again corrupted every root
+id (#155). A host without a raw target (TestServer) falls back to the route value, and
+an intermediary that decodes and re-encodes the path reintroduces the double decode.
+Free-form revocation `reason`/`metadata` are informational under RDFC, not
 signature-bound policy.
 
 Replicated verifiers must share authoritative revocation and replay stores. The

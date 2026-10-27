@@ -13,6 +13,17 @@ dotnet run --project examples/ZcapLd.RevocationEndpointsDemo/ZcapLd.RevocationEn
 - `POST /zcaps/revocations/{url-encoded-capability-id}`
 - `GET /zcaps/revocations/{url-encoded-capability-id}`
 
+`{url-encoded-capability-id}` is `encodeURIComponent(capabilityId)`, decoded exactly once by the
+endpoint. A root id already contains escapes, so it is encoded twice in the URL:
+
+| capability id | request path |
+|---|---|
+| `urn:uuid:12345` | `/zcaps/revocations/urn%3Auuid%3A12345` |
+| `urn:zcap:root:https%3A%2F%2Fexample.com%2Fresource` | `/zcaps/revocations/urn%3Azcap%3Aroot%3Ahttps%253A%252F%252Fexample.com%252Fresource` |
+
+Revoking a root over `POST` requires that root to be registered with the host's
+`IRootCapabilityResolver`; the body's copy of the root is never trusted for authorization.
+
 ## Example Requests
 
 Revocation requires **proof of possession** — there is no bare-`revokerDid` path. The body carries the

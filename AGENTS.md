@@ -52,7 +52,9 @@ Community Group draft; interoperability claims are limited to the tested cases.
   of inferring authority from key resolution; an explicit relationship resolver takes
   precedence. Never persist private keys in Core.
 - **Revocation and replay** use pluggable stores shared across verifier replicas.
-  Revocation requests must prove possession of an authorized key. Distribution to
+  Revocation requests must prove possession of an authorized key. A root revocation is
+  authorized against the trusted resolved root, never the request's copy; whether an id is a
+  root is decided by the resolver/explicit root, not by the request's shape. Distribution to
   independent verifiers is a deployment responsibility. HTTP-signature invocation
   transport (#119), gRPC hosting and WASM remain separate work.
 
@@ -153,6 +155,8 @@ bash interop/run-interop.sh
   `AddZcapRevocationSupport` and `AddZcapReplayProtection` provide integrations.
   Revocation POST verifies a signed request and caps the body at 1 MB. Anonymous GET
   returns only `capabilityId` and `isRevoked`. No capability-controlled HTTP fetch occurs.
+  Both endpoints take `encodeURIComponent(capabilityId)` and decode it exactly once from the
+  raw request target (the route value is already decoded except `%2F`; never decode it again).
 
 ## Workflow Orchestration
 

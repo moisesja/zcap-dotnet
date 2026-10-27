@@ -181,6 +181,11 @@ public interface IVerificationService
     /// expiration, but never unsupported vocabulary. Only null arguments throw; other failures
     /// return false.
     /// </para>
+    /// <para>
+    /// A root capability (no <c>parentCapability</c>) is authorized against the trusted root the
+    /// configured <see cref="IRootCapabilityResolver"/> returns for its id, never against the
+    /// supplied copy; without a resolvable root the call returns false (Issue #155).
+    /// </para>
     /// </remarks>
     /// <param name="capability">The capability to revoke, with its full delegation chain.</param>
     /// <param name="signedRevocation">The signed request from <see cref="ISigningService.SignRevocationAsync"/>.</param>
@@ -190,8 +195,10 @@ public interface IVerificationService
 
     /// <summary>
     /// Revokes a capability using an explicit trusted root when no root resolver is configured.
-    /// The chain references this root by ID. All authentication, authorization, replay and audit
-    /// semantics of <see cref="RevokeCapabilityAsync(Capability, Invocation)"/> apply.
+    /// The chain references this root by ID; when <paramref name="capability"/> is itself a root,
+    /// it must have this root's id and is authorized against this root, not the supplied copy.
+    /// All authentication, authorization, replay and audit semantics of
+    /// <see cref="RevokeCapabilityAsync(Capability, Invocation)"/> apply.
     /// </summary>
     /// <param name="capability">The capability to revoke, with its full delegation chain (for authorization).</param>
     /// <param name="signedRevocation">The signed revocation request (from <see cref="ISigningService.SignRevocationAsync"/>).</param>
