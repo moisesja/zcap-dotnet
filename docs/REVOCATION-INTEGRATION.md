@@ -61,7 +61,8 @@ the path turns `%2541` into `%41` and reintroduces the double decode.
 
 Revoking a root over `POST` authorizes against the root the server's `IRootCapabilityResolver`
 returns for that id, never the body's copy: a root-only chain has no delegation proof, so the body's
-`controller` is never trusted. A root the server cannot resolve is not revocable.
+`controller` is never trusted. A root the server cannot resolve is not revocable. Non-root ids are
+not anchored; see the shared-store note below.
 
 Runnable demo:
 
@@ -135,7 +136,10 @@ var revocationService = new RevocationService(new InMemoryRevocationStore());
 
 ### Strategy B: Relational/NoSQL Store
 
-Implement `IRevocationStore` and register it:
+Implement `IRevocationStore` and register it. Compare capability ids ordinally: exact,
+case-sensitive and unnormalized. A case-insensitive or normalizing key, such as a default
+SQL Server or MySQL collation, maps distinct ids onto one record, so one id's revocation would
+apply to another. Use a binary or case-sensitive collation.
 
 ```csharp
 public sealed class SqlRevocationStore : IRevocationStore
@@ -188,6 +192,15 @@ state, through a shared `IRevocationStore` or an explicitly configured trusted
 revocation service. Account for cache invalidation and fail-closed behavior during
 store outages. Short expirations can bound exposure but do not provide immediate
 revocation.
+
+Sharing a store also shares exposure. Records are keyed by bare capability id, so anyone
+with a valid chain under any root a verifier trusts can force-revoke non-root ids: delegated
+ids under any trusted root, and custom root ids that another verifier sharing the store
+trusts. Only roots the revoking verifier resolves are anchored. Until records are scoped,
+use `urn:zcap:root:` ids for roots, give every verifier that shares a store the same root
+resolver contents, and do not share a verifier or store between parties that must not be
+able to revoke each other's capabilities. See
+[Revocation scope](../architecture.md#revocation-scope-known-limitation).
 
 For delegation involving independently operated verifiers, the deployment must
 agree on who owns revocation state and how updates reach every verifier. Neither

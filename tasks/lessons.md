@@ -1,5 +1,24 @@
 # Lessons Learned
 
+## 2026-10-26 — PR #156 review: enforce what the docs promise, and state a limitation's full reach
+
+- Every new API-doc promise needs a negative test in the same change. The explicit-root
+  overload doc said a revoked root "must have this root's id", but nothing enforced it, and
+  `RevokeCapabilityAsync(B, signedByB, unrelatedA)` returned true. Write the doc sentence,
+  then the test that breaks if the sentence is false.
+- Adding a lookup to a path can contradict an interface's documented contract elsewhere.
+  `IRootCapabilityResolver` said it was consulted only without an explicit root; the new
+  leaf-id lookup made a resolver fault fail explicit-root revocations. Before adding a
+  dependency call, grep the interface docs for "only when"/"never" claims about it, and
+  update the contract plus add failure-mode tests.
+- Describe a known security limitation by its widest demonstrated reach, not the first
+  example found. "Siblings under the same root" understated a bare-id collision that also
+  works across roots on one verifier and across verifiers sharing a store. Before writing a
+  disclaimer, probe the obvious generalizations (other roots, other verifiers, custom ids)
+  and write down what reproduces.
+- Probe a reviewer's base-versus-head claims in a throwaway `git worktree` at the base
+  commit, so regressions and pre-existing behavior are separated with evidence.
+
 ## 2026-10-25 — Release 5.0.0: smoke-test packages as a consumer would, and quote zsh loops
 
 - Run a post-publish smoke test against the package restored from nuget.org with an isolated

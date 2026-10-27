@@ -27,6 +27,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   request shapes it, and a root-shaped or `urn:zcap:root:`-named capability the verifier cannot
   resolve fails closed. Root revocation therefore requires a root resolver or the explicit-root
   overload.
+- The explicit-root `RevokeCapabilityAsync` overload now scopes the call to its root: a root may
+  be revoked through it only when it is that root, matching the existing rule that a delegated
+  chain must end at it. Previously any root the resolver knew could be revoked through an
+  unrelated explicit root.
+- Behavior change: when an `IRootCapabilityResolver` is configured, revocation consults it for the
+  id being revoked even on the explicit-root overload, so a forged delegation cannot borrow a
+  trusted root's id. A resolver fault fails the revocation closed; the request can be retried
+  because its nonce is not consumed. Without a configured resolver nothing changes. Resolvers
+  must return null for unknown ids: one that throws instead now blocks delegated revocations. A
+  result whose id differs from the requested id is treated as "not a root".
+- An unresolvable `urn:zcap:root:` id is refused in any casing, since the `urn` scheme and the
+  namespace are case-insensitive. `IRevocationStore` now documents that ids are compared
+  ordinally; a case-insensitive backend would let a re-cased id land on a root's record.
+- Known limitation, not fixed here: revocation records are keyed by bare capability id. Anyone
+  with a valid chain under any trusted root can force-revoke non-root ids, including delegated
+  ids under other roots and custom root ids trusted only by another verifier sharing the store.
+  See "Revocation scope" in `architecture.md` for deployment guidance.
 
 ## [5.0.0] - 2026-10-25
 

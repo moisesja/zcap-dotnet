@@ -1910,9 +1910,10 @@ public class VerificationService : IVerificationService
 
     /// <summary>
     /// The root the verifier trusts under <paramref name="capabilityId"/>, if any: the explicit root
-    /// when its id matches, else whatever the configured <see cref="IRootCapabilityResolver"/> returns.
-    /// Null means the verifier does not know this id as a root. Resolver faults propagate so the
-    /// caller fails closed.
+    /// when its id matches, else the configured <see cref="IRootCapabilityResolver"/>'s root with
+    /// exactly that id. Null means the verifier does not know this id as a root; a resolver result
+    /// with a different id (a resolver that returns its one root for any id) is also "not a root".
+    /// Resolver faults propagate so the caller fails closed.
     /// </summary>
     private async Task<Capability?> FindTrustedRootAsync(string capabilityId, Capability? explicitRoot)
     {
@@ -1921,7 +1922,15 @@ public class VerificationService : IVerificationService
             return explicitRoot;
         }
 
-        return _rootResolver is null ? null : await _rootResolver.ResolveRootAsync(capabilityId);
+        if (_rootResolver is null)
+        {
+            return null;
+        }
+
+        var resolved = await _rootResolver.ResolveRootAsync(capabilityId);
+        return resolved is not null && string.Equals(resolved.Id, capabilityId, StringComparison.Ordinal)
+            ? resolved
+            : null;
     }
 
     /// <summary>
@@ -1929,8 +1938,9 @@ public class VerificationService : IVerificationService
     /// i.e. it controls the capability or any ancestor in its delegation chain. Cryptographically
     /// verifies the chain before trusting any controller fields; a forged or invalid chain yields
     /// false. A root is authorized against the trusted root (explicit or resolved), never the
-    /// caller's copy. <paramref name="verificationMethod"/> is the authenticated proof verification
-    /// method (or a bare DID); authentication is performed by the caller.
+    /// caller's copy, and an explicit root admits only itself as a revocable root.
+    /// <paramref name="verificationMethod"/> is the authenticated proof verification method (or a
+    /// bare DID); authentication is performed by the caller.
     /// </summary>
     private async Task<bool> IsRevokerAuthorizedAsync(
         Capability capability, string verificationMethod, Capability? explicitRoot)
@@ -1945,15 +1955,31 @@ public class VerificationService : IVerificationService
             // merely borrows a root's id under the caller's own, validly signed chain — would otherwise
             // let anyone who knows a root id revoke it (Issue #155). A root-shaped or urn:zcap:root:-
             // named capability the verifier cannot resolve has nothing trusted to authorize against.
+            //
+            // With an explicit root the resolver is still consulted for the id being revoked: skipping
+            // it would let a forged delegation under the explicit root borrow the id of another root the
+            // resolver trusts. A resolver fault therefore fails the revocation closed; nothing is recorded
+            // and the nonce is not consumed, so the same request can be retried.
             var trustedRoot = await FindTrustedRootAsync(capability.Id, explicitRoot);
             if (trustedRoot is not null)
             {
+                // An explicit root scopes the whole call, exactly as a delegated chain must end at it: a
+                // different root the resolver knows cannot be revoked through it.
+                if (explicitRoot is not null &&
+                    !string.Equals(trustedRoot.Id, explicitRoot.Id, StringComparison.Ordinal))
+                {
+                    return false;
+                }
+
                 // Binds the trusted root to the id (and, for the standard form, to its encoded target).
                 capability = await ResolveRootCapabilityAsync(capability.Id, trustedRoot);
             }
             else if (string.IsNullOrEmpty(capability.ParentCapability) ||
-                     capability.Id.StartsWith(RootIdPrefix, StringComparison.Ordinal))
+                     capability.Id.StartsWith(RootIdPrefix, StringComparison.OrdinalIgnoreCase))
             {
+                // The "urn" scheme and the "zcap" namespace are case-insensitive (RFC 8141), so
+                // URN:ZCAP:ROOT:… is the same reserved form. Refusing every casing keeps such a variant
+                // from reaching a store whose keys compare case-insensitively and landing on a root.
                 return false;
             }
 

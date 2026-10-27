@@ -54,7 +54,10 @@ Community Group draft; interoperability claims are limited to the tested cases.
 - **Revocation and replay** use pluggable stores shared across verifier replicas.
   Revocation requests must prove possession of an authorized key. A root revocation is
   authorized against the trusted resolved root, never the request's copy; whether an id is a
-  root is decided by the resolver/explicit root, not by the request's shape. Distribution to
+  root is decided by the resolver/explicit root, not by the request's shape. An explicit root
+  admits only itself or chains ending at it. Records are keyed by bare id, so any trusted chain
+  can revoke non-root ids across roots and shared stores (architecture.md, "Revocation scope");
+  never describe that limitation as sibling-only. Distribution to
   independent verifiers is a deployment responsibility. HTTP-signature invocation
   transport (#119), gRPC hosting and WASM remain separate work.
 

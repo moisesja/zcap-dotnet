@@ -116,10 +116,11 @@ not exempt unsupported caveats. Revoking a root authorizes against the trusted r
 (explicit or resolved), never the request's copy: a root-only chain has no delegation
 proof, so the caller's `controller` is never consulted. Whether an id is a root is decided
 by the verifier's trust store, not by the request's shape, and an unresolvable root-shaped
-or `urn:zcap:root:`-named id fails closed. Revocation records are keyed by capability id
-and delegated ids are self-asserted, so a delegator can mint a capability bearing any
-delegated id it knows under its own chain and revoke that id; a revocation of a delegated
-id is only as trustworthy as the delegators under its root.
+or `urn:zcap:root:`-named id fails closed. An explicit root scopes the call: only that root,
+or a chain ending at it, can be revoked through it. A configured resolver is still asked
+whether the revoked id names a root, so a resolver fault fails the revocation closed; the
+request can be retried because its nonce is not consumed. Every other id is exposed to
+forced revocation; see [Revocation scope](#revocation-scope-known-limitation).
 
 ASP.NET registers `AddZcapServices`, custom signer/resolver/root/nonce/revocation
 implementations, and `MapZcapRevocationEndpoints`. The revoke POST authenticates a
@@ -136,6 +137,37 @@ Replicated verifiers must share authoritative revocation and replay stores. The
 library does not discover unknown verifiers, distribute revocations between
 independent operators, or poll a capability-supplied URI. See the
 [revocation guide](docs/REVOCATION-INTEGRATION.md).
+
+### Revocation scope (known limitation)
+
+Revocation records are keyed by the bare capability id, not by the root or delegator
+that authorized them, and every verifier checks each chain link by that id. Only roots
+the revoking verifier trusts have anchored ids. Every other id is chosen by whoever signs
+the delegation. Anyone with a valid chain under any root a verifier trusts, whether a
+root controller or any delegate, can mint a delegated capability that carries another
+capability's id and revoke it. The demonstrated reach is:
+
+- delegated ids under the same root;
+- delegated ids under any other root the same verifier trusts, with no shared store involved;
+- custom root ids (not `urn:zcap:root:`) that another verifier sharing the store trusts
+  but the revoking verifier does not know.
+
+The effect is forced revocation, not an authority grant. It crosses tenants whenever one
+verifier or one revocation store serves several root owners, and capability ids are not
+secret. Fixing it means scoping records to their authorizing root and delegator, which
+changes the store interface; it is tracked as a follow-up to #155. Until then:
+
+- use `urn:zcap:root:` ids for roots, because an unresolvable id in that form is refused;
+- co-host roots on one verifier, or share one revocation store, only among parties
+  trusted not to revoke each other's capabilities;
+- give every verifier that shares a store the same root resolver contents, so custom
+  root ids are anchored everywhere.
+
+Two contracts keep the anchoring sound. Stores compare ids ordinally; a case-insensitive
+key would let `URN:ZCAP:ROOT:…` or a re-cased custom id land on a root's record, and the
+reserved prefix is therefore refused in every casing unless it resolves. Root resolvers
+return null for unknown ids rather than throwing, because revocation looks up the revoked
+id and a fault fails the revocation closed.
 
 ## Concurrency and limits
 

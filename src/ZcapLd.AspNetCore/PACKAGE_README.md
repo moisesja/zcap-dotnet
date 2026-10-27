@@ -51,6 +51,10 @@ the path turns `%2541` into `%41` and reintroduces the double decode.
 
 Revoking a root over `POST` authorizes against the root the configured `IRootCapabilityResolver`
 returns for that id, never the body's copy, so a root the server cannot resolve is not revocable.
+Other ids are not anchored: records are keyed by bare capability id, so anyone with a valid chain
+under any trusted root can force-revoke non-root ids, including delegated ids under other roots.
+Do not share a host or revocation store between parties that must not be able to revoke each
+other's capabilities. See [Revocation scope](https://github.com/moisesja/zcap-dotnet/blob/main/architecture.md#revocation-scope-known-limitation).
 
 To customize route prefix:
 

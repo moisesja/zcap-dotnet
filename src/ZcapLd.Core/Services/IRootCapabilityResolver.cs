@@ -17,9 +17,14 @@ namespace ZcapLd.Core.Services;
 /// to supply it (the relying party / resource owner inherently knows its own root zcaps).
 /// </para>
 /// <para>
-/// This mirrors the reference implementation's <c>getRootCapability</c> hook. It is consulted only
-/// when a verify/revoke call is made <i>without</i> an explicitly supplied root capability; an explicit
-/// root always takes precedence. When neither is available the verifier fails closed.
+/// This mirrors the reference implementation's <c>getRootCapability</c> hook. To resolve a chain's root
+/// it is consulted only when a verify/revoke call is made <i>without</i> an explicitly supplied root
+/// capability; an explicit root always takes precedence. When neither is available the verifier fails
+/// closed. Revocation also asks the resolver whether the id being revoked names a root, even when an
+/// explicit root is supplied (unless the id is the explicit root's own), so a forged delegation cannot
+/// borrow a trusted root's id. Most such ids are delegated capabilities, so return <see langword="null"/>
+/// for an unknown id rather than throwing: a fault from that lookup fails the revocation closed
+/// (Issue #155). A result whose id differs from the requested id is treated as unknown there.
 /// </para>
 /// <para>
 /// <b>Performance:</b> resolution happens while the verifier builds the chain — before the leaf's
