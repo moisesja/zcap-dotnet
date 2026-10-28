@@ -277,7 +277,7 @@ public class CapabilityProfileTests
         var (root, leaf) = await Chain();
         leaf.AdditionalProperties = new()
         {
-            ["https://example.com/extension"] = JsonSerializer.SerializeToElement(new int[65_536])
+            ["extension"] = JsonSerializer.SerializeToElement(new int[65_536])
         };
         var proofResult = await Verifier().VerifyCapabilityProofDetailedAsync(leaf, root);
         var chainResult = await Verifier().VerifyCapabilityChainDetailedAsync(leaf, root);
@@ -361,11 +361,20 @@ public class CapabilityProfileTests
     [Theory]
     [InlineData("caveat")]
     [InlineData("@context")]
-    public async Task GeneratedRevocationProof_MustMeetVerifierProfile(string reservedKey)
+    [InlineData("jira:id")]
+    public async Task RevocationMetadataKeys_AreLiteralData(string key)
     {
-        var (_, leaf) = await Chain();
-        await Assert.ThrowsAsync<CapabilityValidationException>(() => _signing.SignRevocationAsync(
-            leaf.Id, _owner, leaf.InvocationTarget, metadata: new Dictionary<string, string> { [reservedKey] = "unsupported" }));
+        // revocationMetadata is a JSON literal under the revocation context: its member names are
+        // data, not JSON-LD keys, so the signer and the verifier both accept and record them.
+        var (root, leaf) = await Chain();
+        var store = new InMemoryRevocationStore();
+        var verifier = new VerificationService(_dids, new RevocationService(store), new InMemoryNonceStore(),
+            relationshipResolver: _dids, rootResolver: _dids);
+        var request = await _signing.SignRevocationAsync(
+            leaf.Id, _owner, leaf.InvocationTarget, metadata: new Dictionary<string, string> { [key] = "data" });
+
+        (await verifier.RevokeCapabilityAsync(leaf, request, root)).Should().BeTrue();
+        (await store.GetByCapabilityIdAsync(leaf.Id))!.Metadata.Should().ContainKey(key).WhoseValue.Should().Be("data");
     }
 
     [Fact]

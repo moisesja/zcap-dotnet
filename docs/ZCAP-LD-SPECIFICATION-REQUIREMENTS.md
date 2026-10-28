@@ -90,7 +90,9 @@ as capability policy.
 Equivalent keys `https://w3id.org/security#caveat` and `sec:caveat` are also rejected.
 The bounded scan includes capability/proof extension JSON: `@nest`, `@graph`,
 `@included` and objects sharing the capability ID can otherwise add the same RDF
-predicate. Capability and proof contexts are limited to zcap/v1 and supported suite
+predicate. Keys that are JSON-LD keywords (other than `@context`) or IRIs are refused
+in every profile, because they can restate `allowedAction` or `expires` where the
+verifier's model does not read them. Capability and proof contexts are limited to zcap/v1 and supported suite
 contexts; inline aliases and unrelated offline vocabularies are refused even by
 signing and standalone proof verification. This is a deliberate profile restriction.
 Reserved caveat/context keys inside proof extensions are screened at signing too.

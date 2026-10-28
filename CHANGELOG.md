@@ -63,16 +63,32 @@ Planned as 6.0.0 (breaking: new interface/constructor parameters and in-stack si
   outcomes. For example, an extension member no context defines (`"note": "x"`) could be added to a
   capability or proof after signing and still verify. Now verification returns `InvalidSignature`
   and signing throws DataProofs' `ProofGenerationException` (inner `JsonLdDataLossException`).
-  A capability whose `@context` is `zcap/v1` alone can no longer be signed or verified:
-  that context does not define the suite's `type`, `created`, `proofPurpose` or `verificationMethod`,
-  so its proof options were largely unsigned. `CapabilityService` always emits `[zcap/v1, suite]`,
-  and for that shape the signing bytes are unchanged.
+  A capability whose `@context` is `zcap/v1` alone can no longer be signed, and an RDFC proof over
+  it no longer verifies: that context does not define the suite's `type`, `created`, `proofPurpose`
+  or `verificationMethod`, so its proof options were largely unsigned. `CapabilityService` always
+  emits `[zcap/v1, suite]`, and for that shape the signing bytes are unchanged. (DataProofs' legacy
+  verifier still also accepts a proof made with its JCS variant, which binds every member verbatim.)
 - Signed revocation requests now bind their purpose, `reason` and `metadata`. No published context
   defines `capabilityRevocation`, `revocationReason` or `revocationMetadata`, so RDFC dropped all
   three, and DataProofs 1.5.0 refuses them. The library now adds its own revocation context
   (`urn:zcap-dotnet:revocation-context:v1`, served from memory) when it canonicalizes a revocation
   request. The wire shape is unchanged, but the signing bytes change, and editing `reason` or
   `metadata` now invalidates the request. They remain informational, never authorization inputs.
+- **A delegatee could remove its own `allowedAction` and invoke any action** (reproduced on the
+  released ZcapLd.Core 5.0.0). JSON-LD lets the same signed triples be written as
+  `"@nest": {"allowedAction": […]}`, as an
+  `@included` node carrying the capability's id, or under the full IRI
+  `https://w3id.org/security#allowedAction`. The delegator's signature still verified, but the
+  verifier read `allowedAction` from its model, saw none, and treated the capability as
+  unrestricted when the parent had no `allowedAction` (the default root shape). This worked on the
+  envelope and Data Integrity invocation APIs, at any depth, and also hid `expires` from standalone
+  proof verification. Keys that are JSON-LD keywords (other than `@context`) or IRIs are now
+  refused in capability and proof JSON in every profile (`MalformedCapability`); before, only a
+  verifier with a caveat registry refused them.
+- A signed revocation `reason` or `metadata` could be erased in transit by rewriting it in a form
+  that signs the same statements (`["…"]`, `{"@value": "…"}`, `@nest`). The request was still
+  accepted and the record stored no reason. A revocation request whose reason is not a string, or
+  whose metadata is not an object of strings, is now refused.
 - Caveat type names that are ZCAP or suite context terms are refused at registration.
 - In a proof set the chain walk took the parent from the first delegation proof but accepted
   any proof's signature, so a junk first proof could choose the parent that a valid proof was

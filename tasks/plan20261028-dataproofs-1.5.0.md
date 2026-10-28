@@ -74,15 +74,69 @@ from #157.
 ## Steps
 
 - [x] Bump pins; build (4 pre-existing warnings, unchanged)
-- [ ] Revocation context (loader, `LegacyProofCrypto`, oracle) + tests (tampered reason/purpose now break the signature)
-- [ ] `CanonicalIri.IsSignedTarget` simplification + test for `https://host?q`
-- [ ] `LenientRdfcCanonicalizer`, `RawProofSigner`, DI stripped-context test, golden vectors (cross-checked on 1.4.0)
-- [ ] Production canonicalizer refuses lossy inputs (layer test)
-- [ ] Docs: CHANGELOG, CAVEAT-PROFILE, architecture, AGENTS, READMEs where relevant
-- [ ] Verify: build, all tests, example, interop, Release packs; ablation of the revocation-context guard
-- [ ] Adversarial review of the revocation-context change
+- [x] Revocation context (loader, `LegacyProofCrypto`, oracle) + tests (tampered reason/purpose now break the signature)
+- [x] `CanonicalIri.IsSignedTarget` simplification + test for `https://host?q`
+- [x] `LenientRdfcCanonicalizer`, `RawProofSigner`, DI stripped-context test, golden vectors (cross-checked on 1.4.0)
+- [x] Production canonicalizer refuses lossy inputs (layer test)
+- [x] Docs: CHANGELOG, CAVEAT-PROFILE, architecture, AGENTS, READMEs where relevant
+- [x] Verify: build, all tests, example, interop, Release packs; ablation of the revocation-context guard
+- [x] Adversarial review of the revocation-context change (findings fixed below)
 - [ ] Commit and push to PR #160
 
 ## Results
 
-(filled in below as work completes)
+- Commit e14c28e. Clean build: the same 4 pre-existing warnings. Tests: 657 Core and 37 ASP.NET
+  pass (7 new: the revocation golden, 4 lossy-input layer cases, lenient/production byte parity,
+  and a query-without-path target).
+- Golden values: capability payload `34C3D9D9…`, proofValue `z3zjEx6a…`. The same values come out
+  with DataProofs 1.4.0 swapped back in. Revocation payload `71BB1368…`. The invocation golden is
+  unchanged.
+- Interop: 12/12 plus 118 profile checks against `@digitalbazaar/zcap`. The example runs
+  (EpsilonBudget, revocation). Release packs build.
+- Ablations:
+  - removing the revocation context fails 58 Core and 19 ASP.NET tests;
+  - loosening `IsSignedTarget` fails 6 tests.
+- Probe: an undefined extension member (`"note"`) added to a signed capability used to verify; it now
+  returns `InvalidSignature`, and signing throws `ProofGenerationException`. Noted in the CHANGELOG.
+
+### Adversarial review of e14c28e
+
+An isolated red-team agent found nothing new in e14c28e itself:
+
+- Cross-purpose replay between revocation, invocation and delegation is refuted, because the
+  purpose IRI is signed.
+- A wire `@context` on a revocation request is discarded.
+- No DataProofs exception escapes a verify API.
+
+It did find one critical pre-existing bypass and three smaller issues:
+
+1. **CRITICAL, pre-existing.** I reproduced it on the released ZcapLd.Core 5.0.0 and on main.
+   - **The attack:** a delegatee rewrites its own `allowedAction` as `"@nest": {…}`, as an
+     `@included` node with its own id, or under the full IRI key. The triples are identical, so the
+     delegator's signature still verifies. The model sees no `allowedAction`, so every action is
+     allowed under a root that has none.
+   - **Scope:** the envelope and Data Integrity APIs, at any depth. The same trick also hid
+     `expires` from standalone proof verification.
+   - **Fix:** `CapabilityProfile` refuses `:` keys and keywords other than `@context` in every
+     profile; before, only a verifier with a caveat registry refused them. `revocationMetadata` is
+     exempt, because it is a JSON literal. `RestatedTermTests` covers this.
+2. **Revocation `reason`/`metadata` could be erased** by rewriting them as `["…"]`,
+   `{"@value": …}` or `@nest`. The verifier now refuses any shape other than a string reason and
+   an object of strings for metadata.
+3. **Two binding tests asserted only `IsValid == false`** and passed thanks to DataProofs alone.
+   They now assert `MalformedCapability`.
+4. **The docs overstated "RDFC only".** DataProofs' legacy verifier also tries the JCS variant.
+   This is pre-existing and not a forgery, because JCS signs bytes verbatim. CHANGELOG, AGENTS and
+   test comments are corrected. Follow-up candidate: verify the RDFC variant only.
+
+Not fixed: a malformed modeled proof member (`"domain": 123`) returns `CouldNotVerify` instead
+of `MalformedCapability`. It is pre-existing, low severity and fails closed; follow-up candidate.
+
+Verification after the fixes:
+
+- **Ablations:** removing the keyword rule fails 7 tests; removing the shape check fails the
+  array-erasure case.
+- **The red team's PoCs:** all 9 exploit PoCs are now blocked, and the 4 refutation PoCs still
+  pass.
+- **Tests and interop:** 668 Core and 37 ASP.NET tests pass, and interop passes 12/12 plus 118
+  profile checks.

@@ -187,7 +187,8 @@ public class SignedBindingTests
 
         var result = await CreateAttenuatingVerifier().VerifyInvocationDetailedAsync(invocation, delegated);
 
-        result.IsValid.Should().BeFalse("a bracketed target is dropped from the signed graph");
+        result.Outcome.Should().Be(VerificationOutcome.MalformedCapability,
+            "a bracketed target is dropped from a lenient signed graph, so zcap refuses it before the signature");
     }
 
     [Fact(DisplayName = "Signing refuses an invocation target RDF cannot bind")]
@@ -254,7 +255,7 @@ public class SignedBindingTests
         var forged = CapabilityJson.Edit(delegated, json => { json.Remove("proof"); json["controller"] = "did:example:holder[1]"; });
         forged.Proof = await RawProofSigner.SignCapabilityAsync(_didProvider, forged, rootDid, new object[] { root.Id });
 
-        (await CreateVerifier().VerifyCapabilityChainDetailedAsync(forged)).IsValid.Should().BeFalse();
+        (await CreateVerifier().VerifyCapabilityChainDetailedAsync(forged)).Outcome.Should().Be(VerificationOutcome.MalformedCapability);
     }
 
     [Theory(DisplayName = "Id spellings that sign as a different id are refused (invisible characters, dot segments)")]

@@ -83,9 +83,10 @@ The rules below refuse all of these first, with a specific outcome:
 
    In this domain dotNetRDF's JSON literal equals RFC 8785, so two different values never sign
    alike. Other stacks that implement JSON-LD 1.1 `@json` produce the same bytes.
-4. With a registry configured, scanned capability and proof JSON may not contain a key with `:`,
-   a keyword other than `@context`, a key named after a caveat type, or a `type` naming a caveat
-   type outside a caveat entry. `sec:caveat` and the full caveat IRI are always rejected.
+4. Scanned capability and proof JSON may not contain a key with `:` or a keyword other than
+   `@context`, in any profile. With a registry configured, it may not contain a key named after a
+   caveat type, or a `type` naming a caveat type outside a caveat entry. `sec:caveat` and the full
+   caveat IRI are always rejected.
 5. Parameter names may not be `id`, `type`, or a term of the zcap or supported suite contexts.
    Such a name would redefine a protected term or read as ZCAP vocabulary. Classes that capture
    extension data cannot be registered.

@@ -21,9 +21,11 @@ Community Group draft; interoperability claims are limited to the tested cases.
   A child cannot widen actions or extend the parent's expiration.
 - **Native restrictions** use `expires`, `allowedAction` and target narrowing. Without a
   `CaveatTypeRegistry`, reject `caveat`, `https://w3id.org/security#caveat` and
-  `sec:caveat`, including null/empty values, ancestors and extension JSON. Capability/proof
-  contexts are limited to zcap/v1, supported suite contexts and registered caveat contexts;
-  inline aliases and unrelated vocabularies are rejected.
+  `sec:caveat`, including null/empty values, ancestors and extension JSON. In every profile,
+  capability/proof JSON may not use `:` keys or keywords other than `@context`: `@nest`,
+  `@included` or a full-IRI key restates a signed term the model does not read, which let a holder
+  drop its own `allowedAction`. Capability/proof contexts are limited to zcap/v1, supported suite
+  contexts and registered caveat contexts; inline aliases and unrelated vocabularies are rejected.
 - **Custom caveats (#157)** are an opt-in, non-interoperable extension profile
   ([docs/CAVEAT-PROFILE.md](docs/CAVEAT-PROFILE.md)). They are the only sanctioned caveat
   path. Every parameter must be signed through the generated per-type context, and every
@@ -128,8 +130,10 @@ bash interop/run-interop.sh
   Context-less documents (envelope invocations, signed revocations) are canonicalized under
   zcap/v1 plus the proof's suite context, so `created`/`proofPurpose` are signed (#157). Revocations
   also get `urn:zcap-dotnet:revocation-context:v1`, which defines their purpose, reason and metadata.
-  DataProofs ≥ 1.5.0 refuses undefined terms and dropped or respelled IRIs. Adversarial tests forge
-  with `LenientRdfcCanonicalizer` (test helper) so they keep proving zcap's own checks reject first.
+  DataProofs ≥ 1.5.0 refuses undefined terms and dropped or respelled IRIs. That is a second layer
+  only for RDFC: its legacy verifier also accepts the JCS variant, which signs bytes verbatim.
+  Adversarial tests forge with `LenientRdfcCanonicalizer` (test helper) and assert zcap's specific
+  outcome, so they keep proving zcap's own checks reject first.
 - **Identifiers (#157)**: RDFC normalizes IRIs, so keys must be the signed form. Capability,
   chain, invocation, document and revocation-request ids must be absolute IRIs equal to
   `Uri.AbsoluteUri` (`CanonicalIri`). Never key revocation, replay or budgets on a variant.

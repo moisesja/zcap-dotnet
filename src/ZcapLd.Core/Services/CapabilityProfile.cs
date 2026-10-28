@@ -19,6 +19,9 @@ internal static class CapabilityProfile
     // bounding work on arbitrary extension data and programmatically constructed cycles.
     internal const int MaxInspectionDepth = 64;
     internal const int MaxInspectionValues = 65_536;
+    internal const string KeywordKeyMessage =
+        "Capability and proof JSON may not use JSON-LD keywords (other than @context) or IRIs as keys: they " +
+        "can restate signed terms the verifier does not read.";
     internal const string InspectionLimitMessage =
         "Capability/proof inspection exceeds the depth (64) or visited-value (65536) limit.";
 
@@ -134,22 +137,32 @@ internal static class CapabilityProfile
             return true;
         }
 
+        // Proof extensions. A revocation's metadata is a JSON literal under the revocation context:
+        // its member names are data, not JSON-LD keys.
         bool CheckProperties(Dictionary<string, JsonElement>? properties, int depth)
-            => properties == null || properties.All(property => CheckProperty(property.Key, property.Value, depth));
+            => properties == null || properties.All(property =>
+                property.Key == Proof.RevocationMetadataField
+                    ? property.Value.ValueKind == JsonValueKind.Object
+                    : CheckProperty(property.Key, property.Value, depth));
 
         bool CheckProperty(string name, JsonElement value, int depth)
         {
             if (name == CaveatCodec.Property || CaveatAliases.Contains(name)) return false;
+            // A JSON-LD keyword or an IRI used as a key restates a term the model does not read:
+            // "@nest": {"allowedAction": …}, an "@included" node with the capability's id, or
+            // "https://w3id.org/security#allowedAction" signs the same triples as allowedAction, so a
+            // holder could hide a signed restriction (actions, expiry) from the verifier.
+            if (name.Contains(':') || (name.StartsWith('@') && name != "@context"))
+                return Fail(Malformed(KeywordKeyMessage));
             if (registry is not null && !IsAllowedUnderCaveatProfile(name, value)) return false;
             return name == "@context" ? CheckContext(value) : Check(value, depth + 1);
         }
 
         // With caveats enabled the scanned JSON may not reach caveat vocabulary any other way: no
-        // absolute/compact IRI keys or JSON-LD keywords (besides @context), no property named after a
-        // caveat type, and no type naming a caveat type outside a caveat entry.
+        // property named after a caveat type, and no type naming a caveat type outside a caveat entry.
         bool IsAllowedUnderCaveatProfile(string name, JsonElement value)
         {
-            if (name.Contains(':') || (name.StartsWith('@') && name != "@context") || registry!.Resolve(name) is not null)
+            if (registry!.Resolve(name) is not null)
                 return false;
             if (name != "type") return true;
             return value.ValueKind switch

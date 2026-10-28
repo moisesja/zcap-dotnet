@@ -73,8 +73,12 @@ compact `caveat` key is rejected (including null/empty values) unless a registry
 Then it is admitted only at a capability's top level, and `CaveatCodec` checks it: registered
 types, declared parameters only, the type's context in that object's own `@context`, and JSON
 literal rules (RFC 8785 numbers in a JCS-equal domain, no null, bounded size). Each of these
-refuses an input RDFC would otherwise drop from the signature. Under a registry, `:` keys,
-keywords other than `@context`, and caveat type names outside caveat entries are refused too.
+refuses an input RDFC would otherwise drop from the signature. In every profile, `:` keys and
+keywords other than `@context` are refused: `"@nest": {"allowedAction": …}`, an `@included` node
+with the capability's id, or a full-IRI key signs the same triples as the term itself, so a holder
+could otherwise hide a signed `allowedAction` or `expires` from the model. Under a registry, caveat
+type names outside caveat entries are refused too. A revocation's `revocationMetadata` is a JSON
+literal, so its member names are not checked.
 Contexts on capabilities/proofs must be zcap/v1, a supported proof suite or a registered caveat
 context; inline aliases and unrelated vocabularies are refused.
 Generated proofs pass the same profile gate before signing. Standalone proof verification applies the

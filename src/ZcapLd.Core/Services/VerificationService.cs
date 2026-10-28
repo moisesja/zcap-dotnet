@@ -2200,6 +2200,8 @@ public class VerificationService : IVerificationService
                 !string.Equals(proof.CapabilityAction, signedRevocation.CapabilityAction, StringComparison.Ordinal) ||
                 !string.Equals(proof.InvocationTarget, signedRevocation.InvocationTarget, StringComparison.Ordinal))
                 return false;
+            if (!TryReadSignedRevocationDetails(proof, out var reason, out var metadata))
+                return false;
 
             // AUTHENTICATE: the signature proves the caller holds verificationMethod's private key.
             if (!await VerifyInvocationSignatureAsync(signedRevocation))
@@ -2218,7 +2220,6 @@ public class VerificationService : IVerificationService
             // below rejects it — harmless. (INonceStore has no release primitive, so reordering is
             // the minimal robust fix.)
             var revokerDid = proof.VerificationMethod.Split('#')[0];
-            var (reason, metadata) = ExtractSignedRevocationDetails(proof);
             if (!await RevokeCapabilityCoreAsync(capability.Id, revokerDid, reason, metadata))
                 return false;
 
@@ -2368,30 +2369,34 @@ public class VerificationService : IVerificationService
     }
 
     /// <summary>
-    /// Extracts informational reason/metadata. The revocation context makes RDFC sign them, but they
-    /// are free-form and must not be used for authorization.
+    /// Reads the informational reason/metadata, which the revocation context makes RDFC sign. They
+    /// must not be used for authorization. Only the shapes the signer emits are accepted: a reason
+    /// written as an array (<c>["…"]</c>) signs the same statement, so the record would silently lose it.
     /// </summary>
-    private static (string? Reason, IDictionary<string, string>? Metadata) ExtractSignedRevocationDetails(Proof proof)
+    private static bool TryReadSignedRevocationDetails(
+        Proof proof, out string? reason, out IDictionary<string, string>? metadata)
     {
-        string? reason = null;
-        IDictionary<string, string>? metadata = null;
+        reason = null;
+        metadata = null;
+        if (proof.AdditionalProperties is not { } extra)
+            return true;
 
-        if (proof.AdditionalProperties is { } extra)
+        if (extra.TryGetValue(Proof.RevocationReasonField, out var reasonElement))
         {
-            if (extra.TryGetValue(Proof.RevocationReasonField, out var reasonElement) &&
-                reasonElement.ValueKind == JsonValueKind.String)
-            {
-                reason = reasonElement.GetString();
-            }
-
-            if (extra.TryGetValue(Proof.RevocationMetadataField, out var metadataElement) &&
-                metadataElement.ValueKind == JsonValueKind.Object)
-            {
-                metadata = metadataElement.Deserialize<Dictionary<string, string>>(ZcapJsonOptions.Default);
-            }
+            if (reasonElement.ValueKind != JsonValueKind.String)
+                return false;
+            reason = reasonElement.GetString();
         }
 
-        return (reason, metadata);
+        if (extra.TryGetValue(Proof.RevocationMetadataField, out var metadataElement))
+        {
+            if (metadataElement.ValueKind != JsonValueKind.Object ||
+                metadataElement.EnumerateObject().Any(entry => entry.Value.ValueKind != JsonValueKind.String))
+                return false;
+            metadata = metadataElement.Deserialize<Dictionary<string, string>>(ZcapJsonOptions.Default);
+        }
+
+        return true;
     }
 
     /// <summary>
