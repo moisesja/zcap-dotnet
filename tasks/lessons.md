@@ -1,5 +1,15 @@
 # Lessons Learned
 
+## 2026-10-27 — Issue #157: restoring removed functionality keeps its prior public/wire shape
+
+- I proposed a new wire term (`extensionCaveat`) and Core-shipped definitions; the owner wanted
+  "what existed before" — the `caveat` property and consumer-defined `Caveat` subclasses. When
+  restoring something that was removed, start from the removed API and wire shape and change only
+  what security forces (here: per-type pinned contexts and handler-based enforcement), and say
+  explicitly which parts differ and why.
+- Have an independent agent attack the design before implementing auth code: it found
+  pre-existing proof-set and envelope-signing gaps the new feature would have inherited.
+
 ## 2026-10-27 — PR #156 re-review: a deny-test must reach the guard it names
 
 - Recurrence of the 2026-06-05 isolation rule. The test meant to pin the explicit-root
