@@ -41,5 +41,10 @@ share authoritative revocation state; there is no automatic polling of a URI
 supplied by a capability holder. `INonceStore` must likewise be shared when replay
 protection spans verifier instances.
 
+Revocation records are keyed by bare capability id. Only roots the revoking verifier
+resolves are anchored, so anyone with a valid chain under any trusted root can force-revoke
+other ids, including delegated ids under other roots and custom root ids trusted by another
+verifier sharing the store. See [Revocation scope](https://github.com/moisesja/zcap-dotnet/blob/main/architecture.md#revocation-scope-known-limitation).
+
 See [the repository](https://github.com/moisesja/zcap-dotnet) for the full guide,
 policy options, examples and live JavaScript interoperability tests.

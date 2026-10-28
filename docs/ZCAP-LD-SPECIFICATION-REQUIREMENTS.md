@@ -107,7 +107,10 @@ Signed revocation requests prove key possession and authorize a controller of
 the capability or an ancestor. Every link is checked for revocation. Store records
 until expiry and share authoritative state across verifier replicas. Distribution
 to independently operated or unknown verifiers requires an explicit deployment
-protocol; it is not supplied by the spec's endpoint model.
+protocol; it is not supplied by the spec's endpoint model. Records are keyed by bare
+capability id and are not yet scoped to their authorizing root, so only roots the
+revoking verifier trusts are protected from forced revocation; see
+[Revocation scope](../architecture.md#revocation-scope-known-limitation).
 
 The verifier offers opt-in expiration ceilings (three months by default), required
 delegation `created`, and unknown-root-field rejection. Expiration ceiling and

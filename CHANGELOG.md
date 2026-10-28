@@ -5,6 +5,46 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- `MapZcapRevocationEndpoints` decoded the `{*capabilityId}` route value a second time although
+  ASP.NET Core had already decoded it once (keeping `%2F`). Every root id
+  (`urn:zcap:root:https%3A%2F%2F…`) therefore read as a different id: `GET` reported a revoked root
+  as not revoked and `POST` could not revoke a root (#155). Both endpoints now recover the id from
+  the raw request target and decode it exactly once; a host without a raw target (the in-memory
+  `TestServer`) falls back to the once-decoded route value. Clients still send
+  `encodeURIComponent(capabilityId)`.
+
+### Security
+
+- Revoking a root capability now authorizes against the trusted root (the explicit root or the
+  configured `IRootCapabilityResolver`), never the request's copy. A root-only chain has no
+  delegation proof, so a caller could previously present a known root id with their own
+  `controller` and have it revoked (#155). Whether an id names a root is decided by the verifier's
+  trust store, not by the request's `parentCapability`: a known root id is anchored however the
+  request shapes it, and a root-shaped or `urn:zcap:root:`-named capability the verifier cannot
+  resolve fails closed. Root revocation therefore requires a root resolver or the explicit-root
+  overload.
+- The explicit-root `RevokeCapabilityAsync` overload now scopes the call to its root: a root may
+  be revoked through it only when it is that root, matching the existing rule that a delegated
+  chain must end at it. Previously any root the resolver knew could be revoked through an
+  unrelated explicit root.
+- Behavior change: when an `IRootCapabilityResolver` is configured, revocation consults it for the
+  id being revoked even on the explicit-root overload, so a forged delegation cannot borrow a
+  trusted root's id. A resolver fault fails the revocation closed; the request can be retried
+  because its nonce is not consumed. Without a configured resolver nothing changes. Resolvers
+  must return null for unknown ids: one that throws instead now blocks delegated revocations. A
+  result whose id differs from the requested id is treated as "not a root".
+- An unresolvable `urn:zcap:root:` id is refused in any casing, since the `urn` scheme and the
+  namespace are case-insensitive. `IRevocationStore` now documents that ids are compared
+  ordinally; a case-insensitive backend would let a re-cased id land on a root's record.
+- Known limitation, not fixed here: revocation records are keyed by bare capability id. Anyone
+  with a valid chain under any trusted root can force-revoke non-root ids, including delegated
+  ids under other roots and custom root ids trusted only by another verifier sharing the store.
+  See "Revocation scope" in `architecture.md` for deployment guidance. Tracked in #158.
+
 ## [5.0.0] - 2026-10-25
 
 ### Security and breaking changes (#149)

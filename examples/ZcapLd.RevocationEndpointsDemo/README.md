@@ -13,6 +13,17 @@ dotnet run --project examples/ZcapLd.RevocationEndpointsDemo/ZcapLd.RevocationEn
 - `POST /zcaps/revocations/{url-encoded-capability-id}`
 - `GET /zcaps/revocations/{url-encoded-capability-id}`
 
+`{url-encoded-capability-id}` is `encodeURIComponent(capabilityId)`, decoded exactly once by the
+endpoint. A root id already contains escapes, so it is encoded twice in the URL:
+
+| capability id | request path |
+|---|---|
+| `urn:uuid:12345` | `/zcaps/revocations/urn%3Auuid%3A12345` |
+| `urn:zcap:root:https%3A%2F%2Fexample.com%2Fresource` | `/zcaps/revocations/urn%3Azcap%3Aroot%3Ahttps%253A%252F%252Fexample.com%252Fresource` |
+
+Revoking a root over `POST` requires that root to be registered with the host's
+`IRootCapabilityResolver`; the body's copy of the root is never trusted for authorization.
+
 ## Example Requests
 
 Revocation requires **proof of possession** — there is no bare-`revokerDid` path. The body carries the
@@ -81,3 +92,9 @@ This demo submits signed revocations to the target verifier and persists them in
 SQLite. It does not poll capability-supplied URLs. All production verifier replicas
 must share authoritative revocation state. See the repository revocation guide for
 multi-verifier deployment considerations.
+
+Records are keyed by bare capability id. Anyone with a valid chain under any root this host
+trusts can force-revoke non-root ids, including delegated ids under other trusted roots. Do
+not share this host or its database between parties that must not be able to revoke each
+other's capabilities. See
+[Revocation scope](../../architecture.md#revocation-scope-known-limitation).

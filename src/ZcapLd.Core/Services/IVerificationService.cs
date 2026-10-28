@@ -181,6 +181,17 @@ public interface IVerificationService
     /// expiration, but never unsupported vocabulary. Only null arguments throw; other failures
     /// return false.
     /// </para>
+    /// <para>
+    /// Whether <paramref name="capability"/> names a root is decided by the configured
+    /// <see cref="IRootCapabilityResolver"/>, not by its shape. A known root id is authorized against
+    /// the resolved root, never the supplied copy. A root-shaped or <c>urn:zcap:root:</c> id that does
+    /// not resolve returns false (Issue #155).
+    /// </para>
+    /// <para>
+    /// Known limitation: records are keyed by bare capability id, so anyone with a valid chain under
+    /// any trusted root can revoke a non-root id, including one under another root or one trusted only
+    /// by another verifier sharing the store. See "Revocation scope" in <c>architecture.md</c>.
+    /// </para>
     /// </remarks>
     /// <param name="capability">The capability to revoke, with its full delegation chain.</param>
     /// <param name="signedRevocation">The signed request from <see cref="ISigningService.SignRevocationAsync"/>.</param>
@@ -190,8 +201,19 @@ public interface IVerificationService
 
     /// <summary>
     /// Revokes a capability using an explicit trusted root when no root resolver is configured.
-    /// The chain references this root by ID. All authentication, authorization, replay and audit
-    /// semantics of <see cref="RevokeCapabilityAsync(Capability, Invocation)"/> apply.
+    /// The explicit root scopes the call: a delegated capability's chain must end at it, and a root
+    /// may be revoked only when it is this root, authorized against this root rather than the
+    /// supplied copy. Any other root, including one the resolver knows, returns false.
+    /// <para>
+    /// When an <see cref="IRootCapabilityResolver"/> is configured it is still consulted for the id
+    /// being revoked, unless that id is the explicit root's own, so a forged delegation under the
+    /// explicit root cannot borrow another trusted root's id. A resolver fault (including a resolver
+    /// that throws for unknown ids instead of returning null) returns false; the request can be
+    /// retried because its nonce is not consumed. Without a configured resolver nothing else is
+    /// consulted.
+    /// </para>
+    /// All authentication, authorization, replay and audit semantics of
+    /// <see cref="RevokeCapabilityAsync(Capability, Invocation)"/> apply.
     /// </summary>
     /// <param name="capability">The capability to revoke, with its full delegation chain (for authorization).</param>
     /// <param name="signedRevocation">The signed revocation request (from <see cref="ISigningService.SignRevocationAsync"/>).</param>

@@ -192,6 +192,10 @@ Use `ZcapLd.AspNetCore` when your runtime is ASP.NET and you want ready-made min
 - Map routes via `MapZcapRevocationEndpoints(...)`
 - POST a signed `{ capability, signedRevocation }`; the endpoint returns `403` if unauthenticated/unauthorized
 - Override route prefix when needed (for example `/wallet/revocations`)
+- Address a capability as `/zcaps/revocations/{encodeURIComponent(capabilityId)}`; the endpoint decodes it
+  exactly once, so a root id (`urn:zcap:root:https%3A%2F%2F…`) is encoded twice in the URL
+- Revoking a root over `POST` authorizes against the root the server's `IRootCapabilityResolver` returns,
+  never the body's copy
 
 ### Expose Revocation in Other Ways
 
