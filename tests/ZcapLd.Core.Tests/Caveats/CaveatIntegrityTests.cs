@@ -89,6 +89,26 @@ public class CaveatIntegrityTests
         (await ChainOutcomeAsync(edit => edit["caveat"]![0]!.AsObject().Remove("maxEpsilon"))).Should().Be(VerificationOutcome.MalformedCapability);
     }
 
+    [Fact(DisplayName = "Revocation, which skips caveat policy, still refuses an undeclared parameter")]
+    public async Task UndeclaredParameter_RefusedOnRevocationPath()
+    {
+        // Revocation does not deserialize caveats, so only the declared-parameter check can catch this.
+        var (variant, chain) = await SignedVariantAsync(edit => edit["caveat"]![0]!["maxEpsilonOverride"] = 100);
+        var request = await _bed.Signing.SignRevocationAsync(variant.Id, chain.OrchestratorDid, variant.InvocationTarget);
+
+        (await _bed.Verifier.RevokeCapabilityAsync(variant, request)).Should().BeFalse();
+        (await _bed.Verifier.IsCapabilityRevokedAsync(variant.Id)).Should().BeFalse();
+    }
+
+    [Fact(DisplayName = "Positive control: revocation accepts the same re-signed grant without the extra parameter")]
+    public async Task ResignedUnchanged_Revocable()
+    {
+        var (variant, chain) = await SignedVariantAsync(_ => { });
+        var request = await _bed.Signing.SignRevocationAsync(variant.Id, chain.OrchestratorDid, variant.InvocationTarget);
+
+        (await _bed.Verifier.RevokeCapabilityAsync(variant, request)).Should().BeTrue();
+    }
+
     [Fact(DisplayName = "Undefined vocabulary: a caveat without its type context is refused even when signed")]
     public async Task MissingTypeContext_Malformed()
         => (await ChainOutcomeAsync(edit => edit["@context"]!.AsArray().RemoveAt(2))).Should().Be(VerificationOutcome.MalformedCapability);

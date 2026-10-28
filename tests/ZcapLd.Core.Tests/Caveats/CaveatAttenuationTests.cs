@@ -32,7 +32,7 @@ public class CaveatAttenuationTests
             Controller = controller,
             InvocationTarget = parent.InvocationTarget,
             AllowedAction = parent.AllowedAction,
-            Expires = ZcapTimestamps.Format(DateTime.UtcNow.AddHours(1)),
+            Expires = parent.Expires, // equal to the parent's, so only caveats can violate attenuation
             AdditionalProperties = caveats.Length == 0
                 ? null
                 : new Dictionary<string, JsonElement> { ["caveat"] = JsonSerializer.SerializeToElement(caveats) },
