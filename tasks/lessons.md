@@ -1,5 +1,15 @@
 # Lessons Learned
 
+## 2026-10-27 — PR #156 re-review: a deny-test must reach the guard it names
+
+- Recurrence of the 2026-06-05 isolation rule. The test meant to pin the explicit-root
+  resolver lookup forged a `urn:zcap:root:` id, which the reserved-prefix guard also refuses,
+  so ignoring the resolver's answer left every test green. When two guards overlap, the input
+  must be one that only the named guard rejects (here a custom root id), and the ablation must
+  disable that guard, not a neighbor: last round I ablated the scope check, never the lookup.
+- Give such a test a positive control that differs from the attack in one field only (the
+  same forged delegation with its own id), so a pass cannot come from an unrelated gate.
+
 ## 2026-10-26 — PR #156 review: enforce what the docs promise, and state a limitation's full reach
 
 - Every new API-doc promise needs a negative test in the same change. The explicit-root

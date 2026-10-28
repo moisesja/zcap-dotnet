@@ -146,8 +146,10 @@ public class VerificationServiceRootRevocationTests
         var signed = await _signingService.SignRevocationAsync(forged.Id, delegate_, forged.InvocationTarget);
 
         (await _verifier.RevokeCapabilityAsync(forged, signed)).Should().BeFalse();
+        // The urn:zcap:root: guard alone would also refuse this id; the custom-root case further down
+        // pins the resolver lookup itself.
         (await _verifier.RevokeCapabilityAsync(forged, signed, root)).Should().BeFalse(
-            "the explicit-root overload still consults the resolver for the id being revoked");
+            "a known root's id is refused through the explicit-root overload too");
         (await _verifier.IsCapabilityRevokedAsync(victimRoot.Id)).Should().BeFalse();
     }
 
@@ -248,6 +250,41 @@ public class VerificationServiceRootRevocationTests
     // The revocation path asks a configured resolver whether the id being revoked names a root, even
     // when an explicit root is supplied; skipping that would reopen the borrowed-root-id forgery. A
     // resolver fault fails closed and is retryable. Without a configured resolver nothing is consulted.
+
+    [Fact]
+    public async Task RevokeCapability_ExplicitRootOverload_DelegationBorrowingAKnownCustomRootId_FailsAndDoesNotRevoke()
+    {
+        // A custom root id has no reserved prefix, so only the resolver lookup refuses this forgery. The
+        // forged delegation is validly signed under explicit root A and differs from the control only in
+        // borrowing victim root B's id (PR #156 review).
+        var attacker = _didProvider.GenerateDidKey();
+        var rootA = await _capabilityService.CreateRootCapabilityAsync(attacker, "https://attacker.example/explicit-custom");
+        var victimRoot = _didProvider.RegisterRoot(new Capability
+        {
+            Context = "https://w3id.org/zcap/v1",
+            Id = "https://victim.example/custom-root",
+            Controller = _didProvider.GenerateDidKey(),
+            InvocationTarget = "https://victim.example/resource"
+        });
+
+        async Task<bool> RevokeThroughRootAAsync(string id)
+        {
+            var delegation = ForgeDelegation(id, attacker, rootA.Id, rootA.InvocationTarget);
+            delegation.Proof = await _signingService.SignCapabilityAsync(
+                delegation, attacker, "capabilityDelegation", new object[] { rootA.Id });
+            var signed = await _signingService.SignRevocationAsync(delegation.Id, attacker, delegation.InvocationTarget);
+            return await _verifier.RevokeCapabilityAsync(delegation, signed, rootA);
+        }
+
+        var controlId = "urn:uuid:" + Guid.NewGuid();
+        (await RevokeThroughRootAAsync(controlId)).Should().BeTrue(
+            "the same delegation with an id of its own is genuine and revocable through root A");
+        (await _verifier.IsCapabilityRevokedAsync(controlId)).Should().BeTrue();
+
+        (await RevokeThroughRootAAsync(victimRoot.Id)).Should().BeFalse(
+            "the resolver knows this id as root B, and the explicit root admits only itself");
+        (await _verifier.IsCapabilityRevokedAsync(victimRoot.Id)).Should().BeFalse();
+    }
 
     [Fact]
     public async Task RevokeCapability_ExplicitRootWithFailingResolver_FailsClosedThenSucceedsOnRetry()
