@@ -47,3 +47,39 @@ var revoke = await signing.SignRevocationAsync(delegated.Id, signerDid: owner, i
     reason: "Agent access withdrawn");
 Console.WriteLine($"Signed revocation accepted: {await verifier.RevokeCapabilityAsync(delegated, revoke)}");
 Console.WriteLine($"Descendant rejected after revocation: {!await verifier.VerifyCapabilityChainAsync(leaf)}");
+
+// Custom caveats (#157) are an opt-in extension profile, not part of ZCAP-LD v0.4: other ZCAP
+// implementations reject capabilities that carry them. Register the type on every service.
+var caveatTypes = new CaveatTypeRegistry().Register<EpsilonBudgetCaveat>("EpsilonBudget");
+var clinicalSigning = new SigningService(dids, dids, caveatTypes);
+var clinicalCapabilities = new CapabilityService(clinicalSigning, caveatTypes);
+var clinicalVerifier = new VerificationService(dids, revocations, new InMemoryNonceStore(),
+    caveats: caveatTypes, caveatHandlers: new ICaveatHandler[] { new EpsilonBudgetLedger() });
+
+var records = dids.RegisterRoot(await clinicalCapabilities.CreateRootCapabilityAsync(owner, "https://example.com/fhir"));
+var orchestration = await clinicalCapabilities.DelegateCapabilityAsync(records, agent, new[] { "query", "cohort-query" },
+    DateTime.UtcNow.AddDays(1), caveats: new Caveat[] { new EpsilonBudgetCaveat { MaxEpsilon = 8 } });
+var genomics = await clinicalCapabilities.DelegateCapabilityAsync(orchestration, assistant, new[] { "query", "cohort-query" },
+    DateTime.UtcNow.AddHours(4), caveats: new Caveat[] { new EpsilonBudgetCaveat { MaxEpsilon = 3 } });
+
+async Task<VerificationOutcome> QueryAsync(Capability grant, string action)
+{
+    var request = clinicalCapabilities.CreateInvocation(grant, action);
+    request.Proof = await clinicalSigning.SignInvocationAsync(request, assistant);
+    return (await clinicalVerifier.VerifyInvocationDetailedAsync(request, grant)).Outcome;
+}
+
+Console.WriteLine($"Budget 3: query (cost 1): {await QueryAsync(genomics, "query")}");
+Console.WriteLine($"Budget 3: cohort-query (cost 2): {await QueryAsync(genomics, "cohort-query")}");
+Console.WriteLine($"Budget 3: one more query: {await QueryAsync(genomics, "query")}");
+
+// Chain verification authenticates caveats but never authorizes them; only invocation enforces.
+var chainResult = await clinicalVerifier.VerifyCapabilityChainDetailedAsync(genomics);
+Console.WriteLine($"Chain check: {chainResult.Outcome}, budgets {string.Join(" > ",
+    chainResult.Caveats!.Select(g => ((EpsilonBudgetCaveat)g.Caveat).MaxEpsilon))}");
+
+// The budget is signed: raising it after delegation breaks the orchestrator's signature.
+var raised = System.Text.Json.JsonSerializer.Deserialize<Capability>(
+    System.Text.Json.JsonSerializer.Serialize(genomics, ZcapLd.Core.Cryptography.ZcapJsonOptions.Default)
+        .Replace("\"maxEpsilon\":3,", "\"maxEpsilon\":30,"), ZcapLd.Core.Cryptography.ZcapJsonOptions.Default)!;
+Console.WriteLine($"Raised budget after signing: {(await clinicalVerifier.VerifyCapabilityChainDetailedAsync(raised)).Outcome}");
