@@ -30,6 +30,8 @@
     <Compile Include="../ZcapLd.Core.Tests/Helpers/InMemoryDidProvider.cs" Link="Helpers/InMemoryDidProvider.cs" />
     <Compile Include="../ZcapLd.Core.Tests/Helpers/StaticDidDocumentResolver.cs" Link="Helpers/StaticDidDocumentResolver.cs" />
     <Compile Include="../ZcapLd.Core.Tests/Helpers/StaticDidWebAdapter.cs" Link="Helpers/StaticDidWebAdapter.cs" />
+    <Compile Include="../ZcapLd.Core.Tests/Helpers/CaveatFixtures.cs" Link="Helpers/CaveatFixtures.cs" />
+    <Compile Include="../ZcapLd.Core.Tests/Helpers/TestRoots.cs" Link="Helpers/TestRoots.cs" />
   </ItemGroup>
 
 </Project>

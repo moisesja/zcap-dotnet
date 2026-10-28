@@ -1,0 +1,6 @@
+{
+  "id": "urn:zcap:root:https%3A%2F%2Fclinical.example%2Ffhir%2FObservation",
+  "@context": "https://w3id.org/zcap/v1",
+  "controller": "did:key:z6MkneMkZqwqRiU5mJzSG3kDwzt9P8C59N4NGTfBLfSGE7c7",
+  "invocationTarget": "https://clinical.example/fhir/Observation"
+}
