@@ -126,19 +126,23 @@ bash interop/run-interop.sh
   clone helpers and the test oracle. Signing self-verifies against the resolved key.
   `ZcapSuiteCatalog` is the closed suite metadata source, not a plugin registry.
   Context-less documents (envelope invocations, signed revocations) are canonicalized under
-  zcap/v1 plus the proof's suite context, so `created`/`proofPurpose` are signed (#157).
+  zcap/v1 plus the proof's suite context, so `created`/`proofPurpose` are signed (#157). Revocations
+  also get `urn:zcap-dotnet:revocation-context:v1`, which defines their purpose, reason and metadata.
+  DataProofs ≥ 1.5.0 refuses undefined terms and dropped or respelled IRIs. Adversarial tests forge
+  with `LenientRdfcCanonicalizer` (test helper) so they keep proving zcap's own checks reject first.
 - **Identifiers (#157)**: RDFC normalizes IRIs, so keys must be the signed form. Capability,
   chain, invocation, document and revocation-request ids must be absolute IRIs equal to
   `Uri.AbsoluteUri` (`CanonicalIri`). Never key revocation, replay or budgets on a variant.
-  dotNetRDF also silently drops IRIs .NET deems malformed (`[`, `]`, a second `#`) and rewrites
-  others .NET leaves alone (encoded dot segments, invisible trailing segments). Ids must be
+  dotNetRDF also drops IRIs .NET deems malformed (`[`, `]`, a second `#`) and rewrites others .NET
+  leaves alone (encoded dot segments, invisible trailing segments); DataProofs 1.5.0 refuses both,
+  but zcap checks first. Ids must be
   `CanonicalIri.IsCanonical` and targets `IsSignedTarget`, both decided by canonicalizing the IRI
   itself; controllers and verification methods must be `IsBindable`. Never predict RDFC's IRI form
   from `System.Uri`.
 - **Serialization**: `ZcapJsonOptions.Default` preserves union shapes, opaque timestamp
-  strings and extension data, and rejects duplicate JSON properties. RDFC can drop
-  undefined terms: extension preservation alone does not make a field authenticated.
-  Revocation `reason`/`metadata` are informational, never authorization inputs.
+  strings and extension data, and rejects duplicate JSON properties. A field is authenticated
+  only if a context defines it; DataProofs 1.5.0 refuses undefined terms rather than dropping them.
+  Revocation `reason`/`metadata` are signed but informational, never authorization inputs.
 - **Profile rejection**: `CapabilityProfile` inspects capability/proof extensions,
   embedded ancestry and every proof-set member with depth/work bounds. Invocation
   and revocation checks cover every capability representation. An application

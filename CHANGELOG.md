@@ -55,7 +55,24 @@ Planned as 6.0.0 (breaking: new interface/constructor parameters and in-stack si
   prefix matching under target attenuation. A trailing segment of invisible characters in an
   http(s) id (`…/7/%C2%AD`) signed as `…/7/` and evaded revocation and replay keys. Ids and targets
   must now be signed exactly as written: the verifier canonicalizes them with the same RDFC
-  canonicalizer, caching the result. A bare-authority target may gain its root `/`.
+  canonicalizer, caching the result. A query needs a path: write `https://host/?q`, not
+  `https://host?q`, which RDFC signed as the former.
+- RDFC canonicalization now fails closed (DataProofs 1.5.0, from dataproofs-dotnet#36): input with
+  an undefined term or an IRI that would be dropped or respelled is refused (`JsonLdDataLossException`)
+  instead of being left out of the signature. zcap's own checks still run first and report specific
+  outcomes. For example, an extension member no context defines (`"note": "x"`) could be added to a
+  capability or proof after signing and still verify. Now verification returns `InvalidSignature`
+  and signing throws DataProofs' `ProofGenerationException` (inner `JsonLdDataLossException`).
+  A capability whose `@context` is `zcap/v1` alone can no longer be signed or verified:
+  that context does not define the suite's `type`, `created`, `proofPurpose` or `verificationMethod`,
+  so its proof options were largely unsigned. `CapabilityService` always emits `[zcap/v1, suite]`,
+  and for that shape the signing bytes are unchanged.
+- Signed revocation requests now bind their purpose, `reason` and `metadata`. No published context
+  defines `capabilityRevocation`, `revocationReason` or `revocationMetadata`, so RDFC dropped all
+  three, and DataProofs 1.5.0 refuses them. The library now adds its own revocation context
+  (`urn:zcap-dotnet:revocation-context:v1`, served from memory) when it canonicalizes a revocation
+  request. The wire shape is unchanged, but the signing bytes change, and editing `reason` or
+  `metadata` now invalidates the request. They remain informational, never authorization inputs.
 - Caveat type names that are ZCAP or suite context terms are refused at registration.
 - In a proof set the chain walk took the parent from the first delegation proof but accepted
   any proof's signature, so a junk first proof could choose the parent that a valid proof was
@@ -64,8 +81,13 @@ Planned as 6.0.0 (breaking: new interface/constructor parameters and in-stack si
 
 ### Changed
 
-- `DataProofsDotnet.Core`/`Rdfc`/`Legacy` 1.3.0 → 1.4.0 (emitted bytes unchanged). `NetCid`
-  1.6.0 is now a direct dependency (RFC 8785). NetCrypto 1.7.1 is already the latest release.
+- `DataProofsDotnet.Core`/`Rdfc`/`Legacy` 1.3.0 → 1.5.0 (see Security for the fail-closed
+  canonicalization; accepted input signs the same bytes). `NetDid.Core`/`Method.Key` 3.1.0 → 4.0.0:
+  its breaking change concerns did:webvh witness files, which zcap does not use.
+  `Microsoft.Extensions.Logging.Abstractions`, `Microsoft.AspNetCore.Mvc.Testing` and
+  `Microsoft.Data.Sqlite` 10.0.13 → 10.0.14 (NetDid 4.0.0 requires 10.0.14), and
+  `Microsoft.SourceLink.GitHub` 10.0.402 → 10.0.403. `NetCid` 1.6.0 is now a direct dependency
+  (RFC 8785). NetCrypto 1.7.1 is already the latest release. The JavaScript interop peer is unchanged.
 - Breaking API: `ICapabilityService.DelegateCapabilityAsync` gains a trailing `caveats`
   parameter. `SigningService`, `CapabilityService` and `VerificationService` constructors gain
   optional caveat parameters. `VerificationOutcome` gains three members (appended).

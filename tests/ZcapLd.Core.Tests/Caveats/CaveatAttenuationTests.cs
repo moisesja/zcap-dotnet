@@ -131,7 +131,7 @@ public class CaveatAttenuationTests
         var attacker = _bed.Keys.GenerateDidKey();
         var child = Child(chain.Orchestrator, attacker, new { maxEpsilon = 100, type = "EpsilonBudget" });
         var proof = await RawProofSigner.SignCapabilityAsync(_bed.Keys, child, attacker, ChainFor(chain, chain.Orchestrator),
-            new RdfcDocumentCanonicalizer(_bed.Registry));
+            new LenientRdfcCanonicalizer(_bed.Registry));
         proof.VerificationMethod = await _bed.Keys.GetVerificationMethodAsync(chain.OrchestratorDid);
         child.Proof = proof;
 

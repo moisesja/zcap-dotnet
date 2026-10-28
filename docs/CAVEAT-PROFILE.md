@@ -60,8 +60,10 @@ parameter set under the same type name; any mismatch fails closed.
 
 ### Integrity rules (enforced when signing and when verifying)
 
-RDFC silently drops whatever the context does not define. Every rule below exists to refuse
-exactly those inputs:
+A lenient RDFC processor silently drops whatever the context does not define, and DataProofs
+before 1.5.0 did the same. DataProofs 1.5.0 refuses undefined terms and dropped or respelled IRIs,
+but it cannot see a `null` (expansion discards it) or how a number inside a JSON literal is spelled.
+The rules below refuse all of these first, with a specific outcome:
 
 1. `caveat` appears only at the top level of a capability object (the verified capability, an
    embedded `capabilityChain` parent, or an invocation's embedded capability). That object's
@@ -131,8 +133,9 @@ handler's context contains only authenticated data:
 
 There is deliberately no property bag. **The resource is responsible for:**
 
-- **Trusted cost.** Derive the cost from the signed action and target. Fields of a Data
-  Integrity application document that the contexts do not define are not signed. Encode
+- **Trusted cost.** Derive the cost from the signed action and target. A Data Integrity
+  application document is signed (DataProofs 1.5.0 refuses fields its contexts do not define), but
+  the library neither interprets it nor passes it to handlers. Encode
   request-dependent cost basis in the target (v0.4 query narrowing) or the action. The Data
   Integrity form pins both to the relying party's expected action and targets. On the envelope
   form the resource must perform exactly `invocation.CapabilityAction` and `InvocationTarget`.
@@ -154,11 +157,11 @@ There is deliberately no property bag. **The resource is responsible for:**
 
 ## Identifiers
 
-RDFC normalizes IRIs through `System.Uri`, so a variant id would verify as the signed one. It
-also silently drops an IRI that .NET does not consider well formed, such as one containing `[`,
-`]` or a second `#`. A malformed id removes the whole node from the signed graph; a malformed target
-or controller removes that triple. The rules below apply in every profile, at signing and at
-verification:
+dotNetRDF normalizes IRIs through `System.Uri`, so a variant id would verify as the signed one. It
+also drops an IRI that .NET does not consider well formed, such as one containing `[`, `]` or a
+second `#`: a malformed id removes the whole node from the signed graph, and a malformed target or
+controller removes that triple. DataProofs 1.5.0 refuses both. The rules below check first, in every
+profile, at signing and at verification:
 
 - Capability ids, `parentCapability`, `capabilityChain` ids, invocation ids and revocation request
   ids must be signed exactly as written. The verifier checks this by canonicalizing the id itself,
@@ -166,14 +169,15 @@ verification:
   characters (`…/7/%C2%AD` signs as `…/7/`).
 - Capability and invocation targets must be signed exactly as written. That rules out dot segments,
   literal or percent-encoded (`/%2E%2E/`), which would move the signed target outside the
-  delegated path. The only accepted difference is the root `/` added to a bare authority
-  (`https://example.com`).
+  delegated path. A query needs a path: `https://example.com/?q`, not `https://example.com?q`.
+  A bare authority (`https://example.com`) is signed as written.
 - Controllers and verification methods must be well-formed absolute IRIs. Percent-encode `[` and
   `]`, for example `?filter%5Bid%5D=123`.
-- `capabilityRevocation` is not a term in the suite's `proofPurpose` context, so a revocation
-  request's purpose is not itself signed. The signed `capabilityAction` `"revoke"` and the
-  revocation-only verification path separate it from invocations, and each path accepts exactly
-  one purpose.
+- No published context defines a revocation request's `capabilityRevocation` purpose or its
+  `revocationReason` and `revocationMetadata` extensions. The library adds its own context,
+  `urn:zcap-dotnet:revocation-context:v1` (served from memory, never on the wire), when it
+  canonicalizes a revocation request, so all three are signed. Each verification path still accepts
+  exactly one purpose.
 
 ## Registering types
 
@@ -223,5 +227,6 @@ signatures). See `examples/ZcapLd.Examples/EpsilonBudget.cs` for a complete ledg
   against the fixtures in [`caveat-profile-v1/`](caveat-profile-v1/README.md).
   zcap-py 0.6.0's legacy signing contract is not assumed compatible.
 - Other zcap-dotnet changes in 6.0.0 that affect migration: envelope invocations and signed
-  revocations are now canonicalized under the suite context as well, so `created` is signed. A
-  5.x client and a 6.x server cannot exchange them. Ids must be normalized absolute IRIs.
+  revocations are now canonicalized under the suite context as well, so `created` is signed, and
+  revocations also under the revocation context, so their purpose, reason and metadata are signed.
+  A 5.x client and a 6.x server cannot exchange them. Ids must be normalized absolute IRIs.

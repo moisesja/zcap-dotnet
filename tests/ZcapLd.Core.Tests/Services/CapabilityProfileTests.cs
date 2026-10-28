@@ -48,7 +48,7 @@ public class CapabilityProfileTests
     {
         var proof = cap.Proof!.Primary;
         var bytes = ProofSigningPayloadBuilder.CanonicalizeCapabilityPayload(
-            ProofSigningPayloadBuilder.CloneCapabilityWithoutProof(cap), proof);
+            ProofSigningPayloadBuilder.CloneCapabilityWithoutProof(cap), proof, LenientRdfcCanonicalizer.Instance);
         proof.ProofValue = MultibaseCodec.Encode((await _dids.SignAsync(signer, bytes)).Signature);
     }
 
@@ -219,7 +219,7 @@ public class CapabilityProfileTests
         }
         // Sign below the public boundary to exercise verification of a valid legacy signature.
         var bytes = ProofSigningPayloadBuilder.CanonicalizeInvocationPayload(
-            ProofSigningPayloadBuilder.CloneInvocationWithoutProof(request), request.Proof!);
+            ProofSigningPayloadBuilder.CloneInvocationWithoutProof(request), request.Proof!, LenientRdfcCanonicalizer.Instance);
         request.Proof!.ProofValue = MultibaseCodec.Encode((await _dids.SignAsync(_owner, bytes)).Signature);
         (await verifier.RevokeCapabilityAsync(leaf, request, root)).Should().BeFalse();
         (await store.GetByCapabilityIdAsync(leaf.Id)).Should().BeNull();

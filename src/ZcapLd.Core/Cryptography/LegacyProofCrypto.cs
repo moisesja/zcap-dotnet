@@ -47,7 +47,7 @@ internal sealed class LegacyProofCrypto
         var suite = Resolve(proofOptions.Type)
             ?? throw new CryptographicException($"No legacy cryptosuite for proof type: {proofOptions.Type}");
 
-        var document = BuildDocumentElement(documentWithoutProof, proofOptions.Type);
+        var document = BuildDocumentElement(documentWithoutProof, proofOptions);
         var diProofOptions = ToDataIntegrityProof(proofOptions);
 
         var proof = await suite.CreateProofAsync(document, diProofOptions, signer).ConfigureAwait(false);
@@ -81,7 +81,7 @@ internal sealed class LegacyProofCrypto
             return false;
         }
 
-        var document = BuildDocumentElement(documentWithoutProof, proof.Type);
+        var document = BuildDocumentElement(documentWithoutProof, proof);
         var diProof = ToDataIntegrityProof(proof);
         return suite.VerifyProof(document, diProof, publicKey).Verified;
     }
@@ -106,17 +106,32 @@ internal sealed class LegacyProofCrypto
             ? new Ed25519Signature2020Cryptosuite(LegacyCanonicalization.Rdfc, _rdfCanonicalizer)
             : new EcdsaSecp256r1Signature2019Cryptosuite(LegacyCanonicalization.Rdfc, _rdfCanonicalizer);
 
+    /// <summary>
+    /// The contexts a context-less document (an envelope invocation or a signed revocation) and its
+    /// proof options are canonicalized under. The proof options share them, and only the suite context
+    /// defines <c>created</c>, <c>proofPurpose</c> and <c>verificationMethod</c>: with zcap/v1 alone RDFC
+    /// dropped them, so a captured request could be re-stamped to pass freshness (#157). A revocation
+    /// also needs zcap-dotnet's revocation context, which defines its purpose and its reason/metadata
+    /// extensions. Invocation bytes do not change, because an unused term adds no statement.
+    /// </summary>
+    internal static string[] EnvelopeContext(Proof proof)
+    {
+        if (ZcapSuiteCatalog.GetByProofType(proof.Type)?.ContextUrl is not { } suiteContext)
+            return [ZcapContext];
+
+        return string.Equals(proof.ProofPurpose, Proof.CapabilityRevocationPurpose, StringComparison.Ordinal)
+            ? [ZcapContext, suiteContext, RdfcContextDocumentLoader.RevocationContextUrl]
+            : [ZcapContext, suiteContext];
+    }
+
     // Serializes the document with zcap's JSON options. RDFC-1.0 canonicalization is always used;
-    // for a context-less document (invocations and signed revocations) inject the ZCAP-LD context
-    // and the proof's suite context. The proof options are canonicalized under this same context,
-    // and only the suite context defines created, proofPurpose and verificationMethod: with zcap/v1
-    // alone RDFC dropped them, so a captured request could be re-stamped to pass freshness (#157).
+    // a context-less document gets EnvelopeContext.
     //
     // Invariant: the only zcap documents that arrive here with an "@context" already present are
     // Capabilities and Data Integrity application documents, whose contexts the verifier checks
     // before trusting them — so an existing "@context" is left as-is. Invocations never set
     // "@context" in the model; this handles the serialized-without-context case.
-    private static JsonElement BuildDocumentElement(object documentWithoutProof, string? proofType)
+    private static JsonElement BuildDocumentElement(object documentWithoutProof, Proof proof)
     {
         var element = JsonSerializer.SerializeToElement(documentWithoutProof, ZcapJsonOptions.Default);
 
@@ -124,9 +139,7 @@ internal sealed class LegacyProofCrypto
             && !element.TryGetProperty("@context", out _))
         {
             var node = JsonObject.Create(element)!;
-            node["@context"] = ZcapSuiteCatalog.GetByProofType(proofType)?.ContextUrl is { } suiteContext
-                ? new JsonArray(ZcapContext, suiteContext)
-                : ZcapContext;
+            node["@context"] = new JsonArray(EnvelopeContext(proof).Select(c => (JsonNode?)c).ToArray());
             return JsonSerializer.SerializeToElement(node, ZcapJsonOptions.Default);
         }
 

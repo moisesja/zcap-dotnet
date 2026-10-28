@@ -58,7 +58,9 @@ public class ProofGoldenVectorTests
         // canonical payload (and therefore the signature) is reproducible.
         var capability = new Capability
         {
-            Context = "https://w3id.org/zcap/v1",
+            // The context CapabilityService emits. With zcap/v1 alone the suite's proof terms were
+            // never signed, and DataProofs 1.5.0 refuses to canonicalize it.
+            Context = new object[] { "https://w3id.org/zcap/v1", "https://w3id.org/security/suites/ed25519-2020/v1" },
             Id = "urn:uuid:00000000-0000-0000-0000-0000000000de",
             ParentCapability = "urn:zcap:root:https%3A%2F%2Fexample.com%2Fapi%2Fresource",
             Controller = did,
@@ -82,7 +84,7 @@ public class ProofGoldenVectorTests
 
         // 2. The exact signature — the byte-compatibility lock for the RDFC-1.0 signing stack.
         proof.ProofValue.Should().Be(
-            "zaBYygkT813o6D6LWvMvoougMwgcvNVUvfB1PKBhE54Q5EqyHENknRzBtsm4CQ6ofh9pTYH7whvJp7YWuwLLYqgG",
+            "z3zjEx6aEWsyw5sAxGHXsDCQk85vcNT25saZSGSpMwNSR8rHnwoBx6EFEhnW673pgx2quErTfpuxjct4Q6cFNrX4n",
             "the end-to-end Ed25519 signature over the RDFC-1.0 payload must be byte-stable — a changed " +
             "value means a canonicalizer/crypto swap broke the wire format");
 

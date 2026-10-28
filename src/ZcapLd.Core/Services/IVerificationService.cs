@@ -171,7 +171,7 @@ public interface IVerificationService
     /// signer, a replayed request, or any infrastructure error (DID resolution, network, crypto)
     /// returns <c>false</c>. Unsupported caveats remain rejected on this path.
     /// The recorded <c>RevokedBy</c> is the authenticated verification method's bare DID,
-    /// never a caller-asserted identity. Reason and metadata are informational under RDFC.
+    /// never a caller-asserted identity. Reason and metadata are signed but informational.
     /// Replay protection keys on the request's <c>id</c>; mint a fresh ID for each request.
     /// Storage precedes nonce consumption so a failed store write can be retried. A false
     /// result from the subsequent replay check does not roll back a completed write.

@@ -328,8 +328,8 @@ public class SigningService : ISigningService
             CapabilityAction = invocation.CapabilityAction
         };
 
-        // Preserve extension fields on the wire. Free-form revocation reason/metadata are
-        // informational: undefined terms do not become tamper-evident merely by serialization.
+        // Preserve extension fields on the wire. Revocation reason/metadata are signed under the
+        // revocation context (LegacyProofCrypto.EnvelopeContext) but remain informational.
         if (additionalProperties is { Count: > 0 })
         {
             proof.AdditionalProperties = new Dictionary<string, JsonElement>(additionalProperties, StringComparer.Ordinal);

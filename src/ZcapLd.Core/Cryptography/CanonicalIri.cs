@@ -8,13 +8,13 @@ namespace ZcapLd.Core.Cryptography;
 
 /// <summary>
 /// Identifies IRIs that an RDFC-1.0 signature binds exactly as written (#157). JSON-LD expansion in
-/// dotNetRDF rewrites IRIs before they are signed: it lowercases the scheme and host, drops a default
-/// port, decodes some percent-escapes, removes dot segments (including encoded ones and trailing
-/// segments of invisible characters) and trims whitespace. It silently drops an IRI .NET does not
-/// consider well formed (for example one containing <c>[</c>, <c>]</c> or a second <c>#</c>): as a
-/// subject the whole node, as a value the triple. A string the verifier compares or keys on is
-/// therefore trusted only when it is exactly the form the signature binds. Rather than predict that
-/// form, this asks the same canonicalizer and caches the answer per string.
+/// dotNetRDF rewrites IRIs: it lowercases the scheme and host, drops a default port, decodes some
+/// percent-escapes, removes dot segments (including encoded ones and trailing segments of invisible
+/// characters) and trims whitespace. It drops an IRI .NET does not consider well formed (for example
+/// one containing <c>[</c>, <c>]</c> or a second <c>#</c>). DataProofs 1.5.0 refuses to canonicalize
+/// either case, so a signature never covers a respelled IRI. This check runs first, so a string the
+/// verifier compares or keys on is refused with a specific outcome before any cryptography. Rather than
+/// predict the canonicalizer, it asks it, and caches the answer per string.
 /// </summary>
 internal static class CanonicalIri
 {
@@ -24,11 +24,11 @@ internal static class CanonicalIri
 
     internal const string BindableMessage =
         "must be a well-formed absolute IRI (for example, percent-encode [ and ]), because the signature " +
-        "silently omits any other value";
+        "cannot bind any other value";
 
     internal const string TargetMessage =
         "must be a well-formed absolute IRI exactly as the signature binds it (no dot segments, encoded or " +
-        "not; lowercase scheme and host; percent-encode [ and ])";
+        "not; lowercase scheme and host; a path before any query; percent-encode [ and ])";
 
     private const string ProbePredicate = "urn:zcap-dotnet:iri-probe#value";
     private const int MaxCachedForms = 8192;
@@ -53,27 +53,13 @@ internal static class CanonicalIri
            && string.Equals(SignedForm(value), value, StringComparison.Ordinal);
 
     /// <summary>
-    /// True for an invocation target the signature binds as written. The one tolerated rewrite is the
-    /// root <c>/</c> RDF adds to a bare authority (<c>https://example.com</c>), which names the same resource.
+    /// True for an invocation target the signature binds as written. Unlike an id it need not equal
+    /// <see cref="Uri.AbsoluteUri"/>: a bare authority (<c>https://example.com</c>) is signed as written.
     /// </summary>
     internal static bool IsSignedTarget([NotNullWhen(true)] string? value)
-    {
-        if (!IsBindable(value) || SignedForm(value) is not { } signed)
-            return false;
-        if (string.Equals(signed, value, StringComparison.Ordinal))
-            return true;
+        => IsBindable(value) && string.Equals(SignedForm(value), value, StringComparison.Ordinal);
 
-        var authority = value.IndexOf("://", StringComparison.Ordinal);
-        if (authority < 0)
-            return false;
-        var pathStart = value.IndexOfAny(new[] { '/', '?', '#' }, authority + 3);
-        if (pathStart >= 0 && value[pathStart] == '/')
-            return false;
-        var withRoot = pathStart < 0 ? value + "/" : value.Insert(pathStart, "/");
-        return string.Equals(signed, withRoot, StringComparison.Ordinal);
-    }
-
-    /// <summary>The IRI RDFC signs for <paramref name="value"/> as subject and object, or null if those differ or it is dropped.</summary>
+    /// <summary>The IRI RDFC signs for <paramref name="value"/> as subject and object, or null if those differ or it is refused.</summary>
     private static string? SignedForm(string value)
     {
         if (SignedForms.TryGetValue(value, out var cached))

@@ -6,7 +6,8 @@ namespace ZcapLd.Core.Cryptography;
 
 /// <summary>
 /// A DataProofs.Rdfc <see cref="IDocumentLoader"/> that serves ZCAP-LD's JSON-LD contexts
-/// (<c>zcap/v1</c>, <c>ed25519-2020/v1</c>) from embedded assembly resources, delegating any
+/// (<c>zcap/v1</c>, <c>ed25519-2020/v1</c>, and zcap-dotnet's revocation context) from embedded
+/// assembly resources, delegating any
 /// other context to DataProofs' <see cref="OfflineDocumentLoader"/>. Offline and fail-closed:
 /// no ambient network I/O during signing or verification.
 /// </summary>
@@ -26,6 +27,15 @@ internal sealed class RdfcContextDocumentLoader : IDocumentLoader
     /// <summary>A loader that also serves the generated context of every registered caveat type (#157).</summary>
     public RdfcContextDocumentLoader(CaveatTypeRegistry? caveats) => _caveats = caveats;
 
+    /// <summary>
+    /// zcap-dotnet's own context for signed revocation requests. It defines the
+    /// <c>capabilityRevocation</c> proof purpose and the <c>revocationReason</c> /
+    /// <c>revocationMetadata</c> proof extensions, which no published context defines, so that RDFC
+    /// signs them instead of refusing (DataProofs 1.5.0) or dropping (earlier) them. It is never on the
+    /// wire: <see cref="LegacyProofCrypto.EnvelopeContext"/> adds it to a revocation request.
+    /// </summary>
+    internal const string RevocationContextUrl = "urn:zcap-dotnet:revocation-context:v1";
+
     // Context URL → embedded resource name. Ordinal keying so URL matching is exact.
     private static readonly IReadOnlyDictionary<string, string> ResourceByUrl =
         new Dictionary<string, string>(StringComparer.Ordinal)
@@ -34,6 +44,8 @@ internal sealed class RdfcContextDocumentLoader : IDocumentLoader
                 "ZcapLd.Core.Cryptography.Contexts.zcap-v1.jsonld",
             ["https://w3id.org/security/suites/ed25519-2020/v1"] =
                 "ZcapLd.Core.Cryptography.Contexts.ed25519-2020-v1.jsonld",
+            [RevocationContextUrl] =
+                "ZcapLd.Core.Cryptography.Contexts.zcap-dotnet-revocation-v1.jsonld",
         };
 
     private static readonly Assembly ResourceAssembly = typeof(RdfcContextDocumentLoader).Assembly;

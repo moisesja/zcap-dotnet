@@ -214,18 +214,15 @@ URLs as trusted revocation policy.
 - `RevocationService` treats expired revocation records as inactive and deletes them on read.
 - For production, implement authorization policy in your endpoint/service boundary to validate who is allowed to revoke.
 
-### Security note — `reason`/`metadata` are informational, not tamper-evident (4.0.0)
+### Security note — `reason`/`metadata` are signed but informational (6.0.0)
 
-As of 4.0.0 zcap signs proofs with RDFC-1.0 only. RDFC drops JSON-LD terms that are not defined in a
-served context from the canonical N-Quads, and the free-form `reason`/`metadata` you pass to
-`SignRevocationAsync` are not zcap-context terms — so they are **not covered by the signature**. They
-are recorded on the `RevocationRecord` for audit, but an actor who already holds a validly-signed
-revocation request can alter them without invalidating it.
+From 4.0.0 to 5.x, RDFC-1.0 dropped the `reason`/`metadata` you pass to `SignRevocationAsync` from
+the signature, because no served context defined them. Since 6.0.0 the library canonicalizes every
+revocation request under its own revocation context (`urn:zcap-dotnet:revocation-context:v1`), which
+defines them and the `capabilityRevocation` purpose. Editing either one now invalidates the request.
 
-What **is** cryptographically bound and cannot be forged or altered: the capability being revoked
-(`capability`), the `revoke` action (`capabilityAction`), the `invocationTarget`, and the revoker's
-identity (authenticated by key possession; `RevokedBy` is the verification method that signed the
-request, never client-asserted). A revocation therefore cannot be forged, retargeted to a different
-capability, or attributed to another party — only the human-readable note is unbound. If you need
-`reason`/`metadata` to be tamper-evident, do not rely on the proof for it (e.g. record them in an
-authenticated server-side audit log). (Pre-4.0.0 JCS builds did bind these fields.)
+They are still informational: they are recorded on the `RevocationRecord` for audit, and never
+decide authorization. Authorization rests on the bound capability (`capability`), the `revoke`
+action (`capabilityAction`), the `invocationTarget` and the revoker's identity, authenticated by key
+possession (`RevokedBy` is the verification method that signed the request, never client-asserted).
+Revocation requests signed by 5.x do not verify under 6.0, and vice versa.

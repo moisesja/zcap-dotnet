@@ -346,7 +346,7 @@ dotnet pack src/ZcapLd.AspNetCore/ZcapLd.AspNetCore.csproj -c Release
 - No default `IDidSigner` ships in the core package — consumers must provide their own (HSM/KMS/Key Vault).
 - `InMemoryDidProvider` (in examples and tests) stores private keys in plaintext memory and is NOT for production use.
 - Canonicalization is RDFC-1.0 (W3C RDF Dataset Canonicalization) only — the format that interoperates with `@digitalbazaar/zcap`. JCS support was removed in 4.0.0; there is no canonicalization option. Known W3C JSON-LD contexts are embedded for offline operation.
-- Cryptography is provided by [NetCrypto](https://www.nuget.org/packages/NetCrypto) (Ed25519 / P-256 sign + verify), reached via [NetDid](https://www.nuget.org/packages/NetDid.Core) 3.1.0 for W3C-compliant did:key resolution; multibase via [NetCid](https://www.nuget.org/packages/NetCid); RDFC-1.0 via [DataProofsDotnet.Rdfc](https://www.nuget.org/packages/DataProofsDotnet.Rdfc).
+- Cryptography is provided by [NetCrypto](https://www.nuget.org/packages/NetCrypto) (Ed25519 / P-256 sign + verify), reached via [NetDid](https://www.nuget.org/packages/NetDid.Core) 4.0.0 for W3C-compliant did:key resolution; multibase via [NetCid](https://www.nuget.org/packages/NetCid); RDFC-1.0 via [DataProofsDotnet.Rdfc](https://www.nuget.org/packages/DataProofsDotnet.Rdfc).
 - Ed25519 and P-256 are the supported signature suites; cryptography is delegated to NetCrypto (via DataProofs), not extended through a zcap API.
 
 ### Cross-stack interop caveats (`@digitalbazaar/zcap`)

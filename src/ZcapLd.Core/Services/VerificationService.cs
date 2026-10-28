@@ -2368,8 +2368,8 @@ public class VerificationService : IVerificationService
     }
 
     /// <summary>
-    /// Extracts informational reason/metadata. These free-form terms are not bound by RDFC
-    /// under the served contexts and must not be used for authorization.
+    /// Extracts informational reason/metadata. The revocation context makes RDFC sign them, but they
+    /// are free-form and must not be used for authorization.
     /// </summary>
     private static (string? Reason, IDictionary<string, string>? Metadata) ExtractSignedRevocationDetails(Proof proof)
     {

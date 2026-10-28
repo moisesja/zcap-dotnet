@@ -6,7 +6,9 @@ namespace ZcapLd.Core.Tests.Helpers;
 /// <summary>
 /// Signs an RDFC-1.0 payload with a raw key, bypassing <c>SigningService</c>'s issuer-side checks.
 /// An attacker uses their own signer, so adversarial tests must be able to produce a valid
-/// signature over input the library would refuse to sign.
+/// signature over input the library would refuse to sign. By default the payload comes from
+/// <see cref="LenientRdfcCanonicalizer"/>, as on an attacker's lenient stack, so a document
+/// DataProofs refuses to canonicalize still gets the signature such a stack would produce.
 /// </summary>
 internal static class RawProofSigner
 {
@@ -26,7 +28,8 @@ internal static class RawProofSigner
             ProofValue = string.Empty,
         };
         var payload = ProofSigningPayloadBuilder.CanonicalizeCapabilityPayload(
-            ProofSigningPayloadBuilder.CloneCapabilityWithoutProof(capability), proof, canonicalizer);
+            ProofSigningPayloadBuilder.CloneCapabilityWithoutProof(capability), proof,
+            canonicalizer ?? LenientRdfcCanonicalizer.Instance);
         proof.ProofValue = MultibaseCodec.Encode((await keys.SignAsync(signerDid, payload)).Signature);
         return proof;
     }
@@ -47,7 +50,7 @@ internal static class RawProofSigner
             ProofValue = string.Empty,
         };
         var payload = ProofSigningPayloadBuilder.CanonicalizeInvocationPayload(
-            ProofSigningPayloadBuilder.CloneInvocationWithoutProof(invocation), proof);
+            ProofSigningPayloadBuilder.CloneInvocationWithoutProof(invocation), proof, LenientRdfcCanonicalizer.Instance);
         proof.ProofValue = MultibaseCodec.Encode((await keys.SignAsync(signerDid, payload)).Signature);
         return proof;
     }

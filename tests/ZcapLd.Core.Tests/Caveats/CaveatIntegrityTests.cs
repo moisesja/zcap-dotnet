@@ -25,7 +25,7 @@ public class CaveatIntegrityTests
         if (resign)
         {
             variant.Proof = await RawProofSigner.SignCapabilityAsync(_bed.Keys, variant, chain.OrchestratorDid,
-                new object[] { chain.Root.Id, chain.Orchestrator }, new RdfcDocumentCanonicalizer(_bed.Registry));
+                new object[] { chain.Root.Id, chain.Orchestrator }, new LenientRdfcCanonicalizer(_bed.Registry));
         }
         return (variant, chain);
     }

@@ -149,8 +149,8 @@ recover the id from the raw request target, decoded exactly once; ASP.NET Core's
 value is already decoded except for `%2F`, so decoding it again corrupted every root
 id (#155). A host without a raw target (TestServer) falls back to the route value, and
 an intermediary that decodes and re-encodes the path reintroduces the double decode.
-Free-form revocation `reason`/`metadata` are informational under RDFC, not
-signature-bound policy.
+Revocation `reason`/`metadata` are signed under zcap-dotnet's revocation context
+but remain informational, never authorization policy.
 
 Replicated verifiers must share authoritative revocation and replay stores. The
 library does not discover unknown verifiers, distribute revocations between

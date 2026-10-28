@@ -1,0 +1,11 @@
+{
+  "@context": {
+    "@protected": true,
+    "capabilityRevocation": "urn:zcap-dotnet:revocation:v1#capabilityRevocation",
+    "revocationReason": "urn:zcap-dotnet:revocation:v1#revocationReason",
+    "revocationMetadata": {
+      "@id": "urn:zcap-dotnet:revocation:v1#revocationMetadata",
+      "@type": "@json"
+    }
+  }
+}

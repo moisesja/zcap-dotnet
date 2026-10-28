@@ -351,10 +351,20 @@ public class VerificationServiceRootRevocationTests
         forged.Proof = await RawProofSigner.SignCapabilityAsync(
             _didProvider, forged, holder, new object[] { rootA.Id, delegation });
 
-        var request = await _signingService.SignRevocationAsync(forged.Id, holder, forged.InvocationTarget);
-        (await verifier.RevokeCapabilityAsync(forged, request)).Should().BeFalse();
-        var explicitRequest = await _signingService.SignRevocationAsync(forged.Id, holder, forged.InvocationTarget);
-        (await verifier.RevokeCapabilityAsync(forged, explicitRequest, rootA)).Should().BeFalse();
+        // DataProofs refuses to sign a revocation of the recased id too, so again use the attacker's signer.
+        async Task<Invocation> RevocationRequest()
+        {
+            var revocation = new Invocation
+            {
+                Capability = forged.Id, CapabilityAction = Invocation.RevokeAction, InvocationTarget = forged.InvocationTarget,
+            };
+            revocation.Proof = await RawProofSigner.SignInvocationAsync(
+                _didProvider, revocation, holder, Proof.CapabilityRevocationPurpose);
+            return revocation;
+        }
+
+        (await verifier.RevokeCapabilityAsync(forged, await RevocationRequest())).Should().BeFalse();
+        (await verifier.RevokeCapabilityAsync(forged, await RevocationRequest(), rootA)).Should().BeFalse();
 
         (await verifier.IsCapabilityRevokedAsync(rootB.Id)).Should().BeFalse();
         store.Count.Should().Be(0);

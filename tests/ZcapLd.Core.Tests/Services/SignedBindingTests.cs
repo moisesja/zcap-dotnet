@@ -294,6 +294,21 @@ public class SignedBindingTests
         (await CreateVerifier().VerifyInvocationDetailedAsync(invocation, delegated)).Outcome.Should().Be(VerificationOutcome.Valid);
     }
 
+    [Fact(DisplayName = "A query without a path is refused before signing, because RDFC would respell it")]
+    public async Task QueryWithoutPathTarget_Refused()
+    {
+        var (_, delegated, _, _) = await DelegateAsync("https://bare.example.com");
+
+        var create = () => _capabilityService.CreateInvocation(delegated, "read", "https://bare.example.com?x=1");
+        var delegateQuery = () => _capabilityService.DelegateCapabilityAsync(delegated, _didProvider.GenerateDidKey(),
+            new[] { "read" }, DateTime.UtcNow.AddHours(1), invocationTarget: "https://bare.example.com?x=1");
+
+        create.Should().Throw<ArgumentException>().WithMessage("*a path before any query*");
+        await delegateQuery.Should().ThrowAsync<ArgumentException>().WithMessage("*a path before any query*");
+        _capabilityService.CreateInvocation(delegated, "read", "https://bare.example.com/?x=1")
+            .InvocationTarget.Should().Be("https://bare.example.com/?x=1");
+    }
+
     [Fact(DisplayName = "A verification method RDF cannot bind is refused")]
     public async Task UnbindableVerificationMethod_Refused()
     {
