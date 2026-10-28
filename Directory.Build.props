@@ -3,6 +3,6 @@
     <!-- Shared major version: #149 removes typed caveats and invocation context APIs,
          rejects unsupported caveat fields, and defaults target verification to exact matches.
          Supported capability proof bytes remain unchanged (RDFC-1.0). -->
-    <ZcapLdVersion>5.0.0</ZcapLdVersion>
+    <ZcapLdVersion>6.0.0</ZcapLdVersion>
   </PropertyGroup>
 </Project>
