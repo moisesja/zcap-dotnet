@@ -108,6 +108,9 @@ public enum VerificationOutcome
     /// The capability and its whole chain are authentic and within their parents' authority, but the
     /// chain carries caveats that only invocation verification enforces, so this result is not an
     /// authorization (#157). <see cref="VerificationResult.Caveats"/> lists the authenticated caveats.
+    /// Standalone proof verification also returns it, without caveats, for a valid link that carries
+    /// caveats or, when a caveat registry is configured, sits below the first delegation level (its
+    /// embedded parent is not verified there, so inherited caveats cannot be ruled out).
     /// </summary>
     CaveatEnforcementRequired,
 }

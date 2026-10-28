@@ -152,6 +152,35 @@ public class CaveatAttenuationTests
         (await InvokeAsync(child, holder)).IsValid.Should().BeFalse();
     }
 
+    [Fact(DisplayName = "Standalone proof check of a deep link never reports Valid under a registry (red-team F3)")]
+    public async Task StandaloneDeepLink_HiddenAncestorCaveat_NotValid()
+    {
+        var chain = await _bed.BuildChainAsync();
+        var holder = _bed.Keys.GenerateDidKey();
+        // The orchestrator embeds a copy of its grant with the budget stripped and signs a caveat-free child.
+        var stripped = CapabilityJson.Edit(chain.Orchestrator, json =>
+        {
+            json.Remove("caveat");
+            json["@context"]!.AsArray().RemoveAt(2);
+        });
+        var child = await SignAsync(Child(stripped, holder), chain.OrchestratorDid, new object[] { chain.Root.Id, stripped });
+
+        (await _bed.Verifier.VerifyCapabilityProofDetailedAsync(child)).Outcome
+            .Should().Be(VerificationOutcome.CaveatEnforcementRequired);
+        (await _bed.Verifier.VerifyCapabilityChainDetailedAsync(child)).Outcome.Should().Be(VerificationOutcome.InvalidSignature);
+    }
+
+    [Fact(DisplayName = "Positive control: a caveat-free first-level link is valid standalone under a registry")]
+    public async Task StandaloneFirstLevel_CaveatFree_Valid()
+    {
+        var owner = _bed.Keys.GenerateDidKey();
+        var root = await TestRoots.CreateAndRegisterRootAsync(_bed.Capabilities, _bed.Keys, owner, "https://first.example/r");
+        var delegated = await _bed.Capabilities.DelegateCapabilityAsync(root, _bed.Keys.GenerateDidKey(), new[] { "read" },
+            DateTime.UtcNow.AddHours(1));
+
+        (await _bed.Verifier.VerifyCapabilityProofDetailedAsync(delegated)).Outcome.Should().Be(VerificationOutcome.Valid);
+    }
+
     [Fact(DisplayName = "A chain under a different root is refused when the relying party pins its root")]
     public async Task RootSubstitution_RefusedByPin()
     {

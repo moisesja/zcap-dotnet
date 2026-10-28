@@ -62,14 +62,15 @@ public sealed class TagCaveat : Caveat
 
 /// <summary>
 /// Resource-side test adapter for <see cref="EpsilonBudgetCaveat"/>: costs come from the signed
-/// action, every grant in the chain is debited atomically (siblings share ancestor budgets),
-/// ceilings are read from the presented grants, and debits are idempotent per invocation id.
+/// action, every grant in the chain is debited atomically (siblings share ancestor budgets), and
+/// ceilings are read from the presented grants. It does not cache decisions by invocation id: the
+/// verifier's replay check already delivers each live nonce at most once, and an invoker-chosen id
+/// can return with a different action after the nonce window.
 /// </summary>
 public sealed class InMemoryEpsilonLedger : ICaveatHandler
 {
     private readonly object _gate = new();
     private readonly Dictionary<string, decimal> _spent = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, (CaveatDecision Decision, decimal Cost)> _byInvocation = new(StringComparer.Ordinal);
     private readonly IReadOnlyDictionary<string, decimal> _costByAction;
     private int _calls;
     private int _releases;
@@ -97,37 +98,28 @@ public sealed class InMemoryEpsilonLedger : ICaveatHandler
 
         lock (_gate)
         {
-            if (_byInvocation.TryGetValue(context.InvocationId, out var previous))
-                return Task.FromResult(previous.Decision);
-
             foreach (var grant in context.Grants)
             {
                 var ceiling = (decimal)((EpsilonBudgetCaveat)grant.Caveat).MaxEpsilon;
                 if (_spent.GetValueOrDefault(grant.GrantKey) + cost > ceiling)
-                {
-                    var denied = CaveatDecision.Deny($"Epsilon budget of {grant.CapabilityId} is exhausted.");
-                    _byInvocation[context.InvocationId] = (denied, 0m);
-                    return Task.FromResult(denied);
-                }
+                    return Task.FromResult(CaveatDecision.Deny($"Epsilon budget of {grant.CapabilityId} is exhausted."));
             }
 
             foreach (var grant in context.Grants)
                 _spent[grant.GrantKey] = _spent.GetValueOrDefault(grant.GrantKey) + cost;
-            _byInvocation[context.InvocationId] = (CaveatDecision.Satisfied, cost);
             return Task.FromResult(CaveatDecision.Satisfied);
         }
     }
 
+    // Only called for a context this handler allowed in the same invocation, so refund its cost.
     public Task ReleaseAsync(CaveatEnforcementContext context)
     {
         Interlocked.Increment(ref _releases);
+        var cost = _costByAction[context.CapabilityAction];
         lock (_gate)
         {
-            if (_byInvocation.Remove(context.InvocationId, out var previous) && previous.Decision.IsSatisfied)
-            {
-                foreach (var grant in context.Grants)
-                    _spent[grant.GrantKey] -= previous.Cost;
-            }
+            foreach (var grant in context.Grants)
+                _spent[grant.GrantKey] -= cost;
         }
 
         return Task.CompletedTask;

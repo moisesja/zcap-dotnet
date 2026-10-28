@@ -21,7 +21,9 @@ public interface IVerificationService
     /// particular, on a deep delegation only the <i>leaf</i> link's <c>created</c> is checked here; an
     /// intermediate ancestor's <c>created</c> — like its signature — is gated only by the full-chain
     /// path. For an authorization decision, use <see cref="VerifyCapabilityChainAsync(Capability)"/> (full chain)
-    /// or <see cref="VerifyInvocationAsync(Invocation, Capability)"/>.
+    /// or <see cref="VerifyInvocationAsync(Invocation, Capability)"/>. With a caveat registry (#157), a
+    /// link that carries caveats or sits below the first delegation level is reported as
+    /// <see cref="VerificationOutcome.CaveatEnforcementRequired"/> rather than valid.
     /// </para>
     /// </summary>
     /// <param name="capability">The capability whose delegation proof to verify</param>

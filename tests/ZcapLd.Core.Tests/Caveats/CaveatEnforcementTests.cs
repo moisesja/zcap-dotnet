@@ -189,6 +189,49 @@ public class CaveatEnforcementTests
         _bed.Ledger.Calls.Should().Be(0);
     }
 
+    [Fact(DisplayName = "An invocation id reused after the nonce window is charged again (red-team F1)")]
+    public async Task ReusedIdAfterNonceWindow_IsCharged()
+    {
+        var verifier = new VerificationService(_bed.Keys, new RevocationService(_bed.Revocations), new InMemoryNonceStore(),
+            nonceWindow: TimeSpan.FromMilliseconds(400), relationshipResolver: _bed.Keys, rootResolver: _bed.Keys,
+            caveats: _bed.Registry, caveatHandlers: new[] { _bed.Ledger });
+        var chain = await _bed.BuildChainAsync(agentBudget: 3);
+        async Task<VerificationOutcome> InvokeWithIdAsync(string id, string action)
+        {
+            var invocation = _bed.Capabilities.CreateInvocation(chain.Agent, action);
+            invocation.Id = id;
+            invocation.Proof = await _bed.Signing.SignInvocationAsync(invocation, chain.AgentDid);
+            return (await verifier.VerifyInvocationDetailedAsync(invocation, chain.Agent)).Outcome;
+        }
+
+        var ids = Enumerable.Range(0, 3).Select(_ => $"urn:uuid:{Guid.NewGuid()}").ToArray();
+        foreach (var id in ids)
+            (await InvokeWithIdAsync(id, "query")).Should().Be(VerificationOutcome.Valid);
+        await Task.Delay(700);
+
+        // New invocations reuse the approved ids with a costlier action after the nonces expired.
+        foreach (var id in ids)
+            (await InvokeWithIdAsync(id, "query-large")).Should().Be(VerificationOutcome.CaveatNotSatisfied,
+                "the budget is spent; an old approval must not be reused for a new request");
+    }
+
+    [Fact(DisplayName = "A handler timeout (TaskCanceledException) still releases earlier allowances (red-team F2)")]
+    public async Task HandlerCanceled_Releases()
+    {
+        var region = new ScriptedCaveatHandler("Region", _ => throw new TaskCanceledException("ledger timeout"));
+        var bed = new CaveatTestBed(new InMemoryEpsilonLedger(), region);
+        var chain = await bed.BuildChainAsync();
+        var regional = await bed.Capabilities.DelegateCapabilityAsync(chain.Agent, chain.AgentDid, new[] { "query" },
+            DateTime.UtcNow.AddHours(1), caveats: new Caveat[] { new RegionCaveat { Allowed = new[] { "us" } } });
+
+        var result = await bed.Verifier.VerifyInvocationDetailedAsync(await bed.InvokeAsync(regional, chain.AgentDid), regional);
+
+        result.Outcome.Should().Be(VerificationOutcome.CouldNotVerify);
+        bed.Ledger.Releases.Should().Be(1);
+        var grants = (await bed.Verifier.VerifyCapabilityChainDetailedAsync(regional)).Caveats!;
+        grants.Where(g => g.Caveat is EpsilonBudgetCaveat).Should().AllSatisfy(g => bed.Ledger.Spent(g.GrantKey).Should().Be(0));
+    }
+
     [Fact(DisplayName = "A null decision from a handler denies")]
     public async Task NullDecision_Denies()
     {

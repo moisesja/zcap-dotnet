@@ -66,8 +66,9 @@ exactly those inputs:
 1. `caveat` appears only at the top level of a capability object (the verified capability, an
    embedded `capabilityChain` parent, or an invocation's embedded capability). That object's
    own `@context` lists the context of every caveat type it carries. A root never carries one.
-2. `caveat` is an array of 1–16 objects. Each object has a single string `type` naming a
-   registered type (`^[A-Za-z][A-Za-z0-9_]{0,63}$`), plus only that type's declared parameters.
+2. `caveat` is an array of 1–16 objects, at most 64 KiB of JSON. Each object has a single string
+   `type` naming a registered type (`^[A-Za-z][A-Za-z0-9_]{0,63}$`), plus only that type's declared
+   parameters.
    There is no `id`, no `@` keyword and no undeclared key, and at most one caveat per type.
 3. Parameter values are JSON literals with:
    - no `null` (DataProofs' JCS fallback strips nulls);
@@ -102,7 +103,7 @@ and refuses to widen.
 | --- | --- |
 | `VerifyInvocation*` (envelope) and `VerifyCapabilityInvocation*` (Data Integrity) | `Valid` only after every caveat type's handler allows it |
 | `VerifyCapabilityChain*` | `CaveatEnforcementRequired` (not valid), with `VerificationResult.Caveats` |
-| `VerifyCapabilityProof*` | `CaveatEnforcementRequired` (single link; never an authorization) |
+| `VerifyCapabilityProof*` | `CaveatEnforcementRequired` when the link carries caveats, or, with a registry, whenever it is below the first level: its embedded parent is not verified on this path, so inherited caveats cannot be ruled out |
 | `RevokeCapabilityAsync` | Integrity rules only; `Validate`, `IsAttenuationOf` and handlers are skipped so a capability stays revocable |
 
 Outcomes: an unregistered type is `UnsupportedCaveat`. A registered type without a handler is
@@ -132,13 +133,19 @@ There is deliberately no property bag. **The resource is responsible for:**
 
 - **Trusted cost.** Derive the cost from the signed action and target. Fields of a Data
   Integrity application document that the contexts do not define are not signed. Encode
-  request-dependent cost basis in the target (v0.4 query narrowing) or the action.
+  request-dependent cost basis in the target (v0.4 query narrowing) or the action. The Data
+  Integrity form pins both to the relying party's expected action and targets. On the envelope
+  form the resource must perform exactly `invocation.CapabilityAction` and `InvocationTarget`.
 - **Atomic, hierarchical accounting.** Check and debit every grant in `Grants` in one atomic
   operation, so siblings share their ancestors' budgets. Key state by `GrantKey`, a SHA-256 of
   the id path from the root, and not by the issuer-chosen capability id. Read each ceiling from
   the presented grant on every request.
-- **Idempotency and replicas.** Make the operation idempotent by `InvocationId`. Share the nonce
-  store and the ledger across all verifier replicas.
+- **No caching by invocation id.** `InvocationId` is chosen by the invoker. After the nonce store
+  forgets it, the same id can return with a different action. Never reuse a decision keyed by it.
+  The verifier's replay check already lets each invocation reach handlers at most once, as long as
+  the nonce store retains the nonce.
+- **Shared state.** Share the nonce store and the ledger across all verifier replicas, and keep
+  nonce entries for at least the nonce window (the default `InMemoryNonceStore` is per process).
 - **Retries.** The nonce is consumed before handlers run, so a client retries a denied request
   with a new invocation id. Minting new sibling or leaf capabilities does not create new budget:
   every debit also lands on the ancestors' grants.

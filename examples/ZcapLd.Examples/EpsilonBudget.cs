@@ -36,7 +36,6 @@ public sealed class EpsilonBudgetLedger : ICaveatHandler
     // The resource decides what each action costs, from the signed action only.
     private static readonly Dictionary<string, decimal> CostByAction = new() { ["query"] = 1m, ["cohort-query"] = 2m };
     private readonly Dictionary<string, decimal> _spent = new();
-    private readonly HashSet<string> _invocations = new();
     private readonly object _gate = new();
 
     public string CaveatType => "EpsilonBudget";
@@ -46,21 +45,17 @@ public sealed class EpsilonBudgetLedger : ICaveatHandler
         if (!CostByAction.TryGetValue(context.CapabilityAction, out var cost))
             return Task.FromResult(CaveatDecision.Deny($"No privacy cost is defined for '{context.CapabilityAction}'."));
 
+        // No cache by invocation id: the invoker chooses it, and the verifier's replay check already
+        // delivers each live nonce once. Share the nonce store and this ledger across replicas.
         lock (_gate)
         {
-            if (!_invocations.Add(context.InvocationId))
-                return Task.FromResult(CaveatDecision.Satisfied); // idempotent per invocation
-
             // Every grant in the chain is debited, so siblings share their ancestors' budgets.
             // Ceilings come from the presented, signed grants; state is keyed by GrantKey.
             foreach (var grant in context.Grants)
             {
                 var ceiling = (decimal)((EpsilonBudgetCaveat)grant.Caveat).MaxEpsilon;
                 if (_spent.GetValueOrDefault(grant.GrantKey) + cost > ceiling)
-                {
-                    _invocations.Remove(context.InvocationId);
                     return Task.FromResult(CaveatDecision.Deny($"The privacy budget of {grant.CapabilityId} is exhausted."));
-                }
             }
 
             foreach (var grant in context.Grants)

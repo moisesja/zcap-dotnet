@@ -145,6 +145,19 @@ public class CaveatIntegrityTests
         => (await ChainOutcomeAsync(edit => edit["caveat"] = JsonNode.Parse(caveat), resign: false))
             .Should().BeOneOf(VerificationOutcome.MalformedCapability, VerificationOutcome.UnsupportedCaveat);
 
+    [Fact(DisplayName = "Caveat JSON over 64 KiB is refused")]
+    public async Task OversizedCaveats_Malformed()
+        => (await ChainOutcomeAsync(edit =>
+            {
+                edit["caveat"]!.AsArray().Add(new JsonObject
+                {
+                    ["data"] = new JsonArray(Enumerable.Range(0, 20).Select(_ => (JsonNode?)new string('x', 4000)).ToArray()),
+                    ["type"] = "Tag",
+                });
+                edit["@context"]!.AsArray().Add(CaveatTypeRegistry.GetContextUrl("Tag"));
+            }, resign: false))
+            .Should().Be(VerificationOutcome.MalformedCapability);
+
     [Fact(DisplayName = "More than 16 caveats are refused")]
     public async Task TooManyCaveats_Malformed()
         => (await ChainOutcomeAsync(edit => edit["caveat"] = new JsonArray(Enumerable.Range(0, 17).Select(_ => Budget(1)).ToArray()), resign: false))

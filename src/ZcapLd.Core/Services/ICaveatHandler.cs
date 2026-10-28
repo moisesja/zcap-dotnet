@@ -20,9 +20,15 @@ namespace ZcapLd.Core.Services;
 /// signed action and target (never from unsigned request data), check and record consumption
 /// atomically across every grant in <see cref="CaveatEnforcementContext.Grants"/> (siblings share
 /// their ancestors' budgets), key state by <see cref="CaveatGrant.GrantKey"/>, read each ceiling from
-/// the presented grant, make the operation idempotent by <see cref="CaveatEnforcementContext.InvocationId"/>,
-/// and share that state across verifier replicas. The verifier consumes the invocation's nonce before
-/// handlers run, so a client retries a denied invocation with a new invocation id.
+/// the presented grant, and share that state across verifier replicas. Do not cache decisions by
+/// <see cref="CaveatEnforcementContext.InvocationId"/>: the invoker chooses it, and once the nonce
+/// store forgets it the same id can return with a different action. The verifier's replay check
+/// already lets each invocation reach the handlers at most once while the shared nonce store retains
+/// its nonce; keep entries for at least the nonce window. The nonce is consumed before handlers run,
+/// so a client retries a denied invocation with a new invocation id. On the envelope path the resource
+/// must perform exactly the signed <see cref="CaveatEnforcementContext.CapabilityAction"/> and
+/// <see cref="CaveatEnforcementContext.InvocationTarget"/>; the Data Integrity form pins both to the
+/// relying party's expectations.
 /// </remarks>
 public interface ICaveatHandler
 {
@@ -90,7 +96,10 @@ public sealed record CaveatEnforcementContext
     /// <summary>The signed, relying-party-checked invocation target.</summary>
     public required string InvocationTarget { get; init; }
 
-    /// <summary>The invocation id (its replay nonce): a stable idempotency key for this request.</summary>
+    /// <summary>
+    /// The invocation id, which is its replay nonce. The invoker chooses it, so it identifies this
+    /// request only while the nonce store retains it. It is not a key for caching decisions.
+    /// </summary>
     public required string InvocationId { get; init; }
 
     /// <summary>The verification method that signed the invocation.</summary>

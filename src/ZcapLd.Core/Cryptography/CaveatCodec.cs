@@ -29,6 +29,7 @@ internal static class CaveatCodec
     internal const int MaxLiteralDepth = 8;
     internal const int MaxLiteralValues = 1024;
     internal const int MaxStringLength = 4096;
+    internal const int MaxCaveatJsonLength = 64 * 1024;
 
     // Below 1e-4 or with an exponent, dotNetRDF writes JSON-literal numbers as 1E-05 rather than the
     // RFC 8785 0.00001; above 2^53 integers stop being exact doubles.
@@ -100,6 +101,8 @@ internal static class CaveatCodec
             return Malformed(CapabilityProfile.RejectionMessage);
         if (value.ValueKind != JsonValueKind.Array || value.GetArrayLength() is 0 or > MaxCaveats)
             return Malformed($"caveat must be an array of 1 to {MaxCaveats} caveat objects.");
+        if (value.GetRawText().Length > MaxCaveatJsonLength)
+            return Malformed($"caveat JSON exceeds {MaxCaveatJsonLength} characters.");
 
         var budget = MaxLiteralValues;
         var seen = new HashSet<string>(StringComparer.Ordinal);

@@ -325,10 +325,13 @@ public class VerificationService : IVerificationService
                 explicitRoot: explicitRoot);
 
             // A single link never authorizes caveats: only invocation verification enforces them
-            // (#157). A child that dropped its parent's caveat has already failed attenuation.
-            return result.IsValid && capability.AdditionalProperties?.ContainsKey(CaveatCodec.Property) == true
-                ? CaveatEnforcementRequired(grants: null)
-                : result;
+            // (#157). Below the first level the embedded parent's own proof is not verified here,
+            // so its caveats (and its parent's) cannot be trusted to be absent: with caveats
+            // enabled, such a link is never reported as valid on its own.
+            var mayCarryCaveats = capability.AdditionalProperties?.ContainsKey(CaveatCodec.Property) == true ||
+                (_caveats is { IsEmpty: false } &&
+                 capability.Proof?.DelegationProofs().Any(proof => proof.CapabilityChain is { Length: > 1 }) == true);
+            return result.IsValid && mayCarryCaveats ? CaveatEnforcementRequired(grants: null) : result;
         }
         catch (Exception ex)
         {
@@ -1604,7 +1607,7 @@ public class VerificationService : IVerificationService
             {
                 narrows = childCaveat.IsAttenuationOf(parentCaveat.Value!);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (Exception ex)
             {
                 LogFailedClosed(ex, "Caveat {CaveatType} attenuation check failed for {CapabilityId}", type, child.Id);
                 return VerificationResult.Fail(VerificationOutcome.CouldNotVerify,
@@ -1688,8 +1691,11 @@ public class VerificationService : IVerificationService
             {
                 decision = await handler.EnforceAsync(context) ?? CaveatDecision.Deny("The caveat handler returned no decision.");
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (Exception ex)
             {
+                // Every exception, including a TaskCanceledException from a ledger timeout: there is
+                // no caller token on this path, so cancellation is never the caller's (#151). The
+                // earlier handlers' allowances must be released either way.
                 await ReleaseCaveatsAsync(allowed);
                 LogFailedClosed(ex, "Caveat handler for {CaveatType} failed closed for invocation {InvocationId}",
                     group.Key, invocationId);
@@ -1718,7 +1724,7 @@ public class VerificationService : IVerificationService
             {
                 await handler.ReleaseAsync(context);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Caveat handler for {CaveatType} failed to release invocation {InvocationId}",
                     context.CaveatType, context.InvocationId);
@@ -2057,19 +2063,23 @@ public class VerificationService : IVerificationService
     /// True when two <c>capabilityChain</c> values are the same JSON (compared by RFC 8785
     /// canonical form, so an in-memory <see cref="Capability"/> equals its wire JSON).
     /// </summary>
+    // Comparison only, never signing: allow canonical forms larger than NetCid's 1 MB default so a
+    // legitimate maximum-length chain is not refused as CouldNotVerify.
+    private const int MaxComparedJsonBytes = 16 * 1024 * 1024;
+
+    private static byte[] CanonicalForComparison(object value) => NetCid.JcsCanonicalizer.Canonicalize(
+        JsonSerializer.SerializeToElement(value, ZcapJsonOptions.Default), MaxComparedJsonBytes);
+
     private static bool IsSameJson(object first, object second)
-        => NetCid.JcsCanonicalizer.Canonicalize(JsonSerializer.SerializeToElement(first, ZcapJsonOptions.Default)).AsSpan()
-            .SequenceEqual(NetCid.JcsCanonicalizer.Canonicalize(JsonSerializer.SerializeToElement(second, ZcapJsonOptions.Default)));
+        => CanonicalForComparison(first).AsSpan().SequenceEqual(CanonicalForComparison(second));
 
     private static bool IsSameChain(object[]? first, object[] second)
     {
         if (first is null || first.Length != second.Length)
             return false;
 
-        static byte[] Canonical(object[] chain) => NetCid.JcsCanonicalizer.Canonicalize(
-            JsonSerializer.SerializeToElement(chain, ZcapJsonOptions.Default));
-
-        return ReferenceEquals(first, second) || Canonical(first).AsSpan().SequenceEqual(Canonical(second));
+        return ReferenceEquals(first, second) ||
+               CanonicalForComparison(first).AsSpan().SequenceEqual(CanonicalForComparison(second));
     }
 
     /// <summary>
