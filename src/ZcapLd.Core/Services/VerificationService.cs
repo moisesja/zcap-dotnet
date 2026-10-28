@@ -26,7 +26,7 @@ public class VerificationService : IVerificationService
     // Stage C (#108): canonicalization + signature verification delegated to DataProofs' legacy
     // cryptosuites. Suite metadata (proof type, the #68 key-type binding, context URL) comes from the
     // fixed ZcapSuiteCatalog; the canonicalization method is fixed per service instance.
-    private readonly LegacyProofCrypto _legacyProofCrypto = new();
+    private readonly LegacyProofCrypto _legacyProofCrypto;
 
     private readonly TimeSpan _nonceWindow;
     private readonly TimeSpan _freshnessClockSkew;
@@ -34,6 +34,8 @@ public class VerificationService : IVerificationService
     private readonly IVerificationRelationshipResolver _relationshipResolver;
     private readonly IRootCapabilityResolver? _rootResolver;
     private readonly VerificationPolicy _policy;
+    private readonly CaveatTypeRegistry? _caveats;
+    private readonly IReadOnlyDictionary<string, ICaveatHandler> _caveatHandlers;
     private const int MaxChainLength = 10; // Per spec: SHOULD limit to 10
     private const string RootIdPrefix = "urn:zcap:root:";
     private const string ZcapV1Context = "https://w3id.org/zcap/v1";
@@ -95,6 +97,13 @@ public class VerificationService : IVerificationService
     /// verifier-side SHOULD checks (Issue #73; default <see cref="VerificationPolicy.Default"/>).
     /// All proofs are verified under RDFC-1.0 canonicalization (the only canonicalization ZCAP-LD
     /// supports; required for interop with <c>@digitalbazaar/zcap</c>).
+    /// <para>
+    /// The optional <paramref name="caveats"/> registry enables the caveat extension profile (#157):
+    /// capabilities may then carry the registered caveat types, every delegated link must restate and
+    /// narrow its parent's caveats, and invocations are allowed only after the matching
+    /// <paramref name="caveatHandlers"/> agree. Without a registry any caveat is rejected. Each handler
+    /// must name a registered type, at most one handler per type. The registry is frozen.
+    /// </para>
     /// </summary>
     public VerificationService(
         IDidResolver didResolver,
@@ -105,7 +114,9 @@ public class VerificationService : IVerificationService
         IVerificationRelationshipResolver? relationshipResolver = null,
         IRootCapabilityResolver? rootResolver = null,
         TimeSpan? freshnessClockSkew = null,
-        VerificationPolicy? policy = null)
+        VerificationPolicy? policy = null,
+        CaveatTypeRegistry? caveats = null,
+        IEnumerable<ICaveatHandler>? caveatHandlers = null)
     {
         _didResolver = didResolver ?? throw new ArgumentNullException(nameof(didResolver));
         _revocationService = revocationService ?? throw new ArgumentNullException(nameof(revocationService));
@@ -124,6 +135,28 @@ public class VerificationService : IVerificationService
         // it fails closed.
         _rootResolver = rootResolver ?? didResolver as IRootCapabilityResolver;
         _policy = policy ?? VerificationPolicy.Default;
+        caveats?.Freeze();
+        _caveats = caveats;
+        _legacyProofCrypto = new LegacyProofCrypto(caveats);
+        _caveatHandlers = IndexCaveatHandlers(caveats, caveatHandlers);
+    }
+
+    private static IReadOnlyDictionary<string, ICaveatHandler> IndexCaveatHandlers(
+        CaveatTypeRegistry? caveats, IEnumerable<ICaveatHandler>? handlers)
+    {
+        var index = new Dictionary<string, ICaveatHandler>(StringComparer.Ordinal);
+        foreach (var handler in handlers ?? Enumerable.Empty<ICaveatHandler>())
+        {
+            ArgumentNullException.ThrowIfNull(handler, nameof(handlers));
+            if (caveats?.Resolve(handler.CaveatType) is null)
+                throw new ArgumentException(
+                    $"Caveat handler {handler.GetType().FullName} enforces '{handler.CaveatType}', which is not a registered caveat type.",
+                    nameof(handlers));
+            if (!index.TryAdd(handler.CaveatType, handler))
+                throw new ArgumentException($"More than one caveat handler enforces '{handler.CaveatType}'.", nameof(handlers));
+        }
+
+        return index;
     }
 
     /// <summary>
@@ -236,8 +269,8 @@ public class VerificationService : IVerificationService
         if (capability == null)
             throw new ArgumentNullException(nameof(capability));
 
-        if ((CapabilityProfile.GetRejectionReason(capability) ?? CapabilityProfile.GetRejectionReason(explicitRoot)) is { } profileReason)
-            return VerificationResult.Fail(VerificationOutcome.MalformedCapability, profileReason);
+        if ((CapabilityProfile.Validate(capability, caveats: _caveats) ?? CapabilityProfile.Validate(explicitRoot, caveats: _caveats)) is { } profileFailure)
+            return profileFailure;
 
         if (!CanonicalIri.IsCanonical(capability.Id))
             return VerificationResult.Fail(VerificationOutcome.MalformedCapability,
@@ -285,11 +318,17 @@ public class VerificationService : IVerificationService
             // Standalone proof verification requires parent authorization context. For a first-level
             // delegation the parent is the root (referenced by id only), obtained via explicitRoot or
             // the configured resolver inside VerifySingleDelegationProofAsync.
-            return await VerifyDelegationProofAsync(
+            var result = await VerifyDelegationProofAsync(
                 capability,
                 parentCapabilityOverride: null,
                 requireParentAuthorization: true,
                 explicitRoot: explicitRoot);
+
+            // A single link never authorizes caveats: only invocation verification enforces them
+            // (#157). A child that dropped its parent's caveat has already failed attenuation.
+            return result.IsValid && capability.AdditionalProperties?.ContainsKey(CaveatCodec.Property) == true
+                ? CaveatEnforcementRequired(grants: null)
+                : result;
         }
         catch (Exception ex)
         {
@@ -314,7 +353,8 @@ public class VerificationService : IVerificationService
         bool requireParentAuthorization,
         Capability? explicitRoot = null,
         bool applyCreatedCheck = true,
-        object[]? requiredChain = null)
+        object[]? requiredChain = null,
+        bool applyCaveatPolicy = true)
     {
         if (capability.Proof == null)
         {
@@ -346,7 +386,7 @@ public class VerificationService : IVerificationService
 
             var result = await VerifySingleDelegationProofAsync(
                 capability, proof, parentCapabilityOverride, requireParentAuthorization, explicitRoot,
-                applyCreatedCheck);
+                applyCreatedCheck, applyCaveatPolicy);
             if (result.IsValid)
             {
                 return result;
@@ -364,7 +404,8 @@ public class VerificationService : IVerificationService
         Capability? parentCapabilityOverride,
         bool requireParentAuthorization,
         Capability? explicitRoot = null,
-        bool applyCreatedCheck = true)
+        bool applyCreatedCheck = true,
+        bool applyCaveatPolicy = true)
     {
         try
         {
@@ -451,6 +492,12 @@ public class VerificationService : IVerificationService
             {
                 return VerificationResult.Fail(VerificationOutcome.Expired,
                     "Delegated capability has expired.");
+            }
+
+            if (parentCapability != null &&
+                CheckCaveatAttenuation(capability, parentCapability, applyCaveatPolicy) is { } caveatFailure)
+            {
+                return caveatFailure;
             }
 
             return VerificationResult.Valid;
@@ -613,7 +660,7 @@ public class VerificationService : IVerificationService
                 return VerificationResult.Fail(VerificationOutcome.MalformedCapability,
                     "Invocation proof could not be parsed.");
 
-            if (CapabilityProfile.GetProofRejectionReason(proof) is { } proofProfileReason)
+            if (CapabilityProfile.GetProofRejectionReason(proof, _caveats) is { } proofProfileReason)
                 return VerificationResult.Fail(VerificationOutcome.MalformedCapability, proofProfileReason);
 
             if (proof.ProofPurpose != Proof.CapabilityInvocationPurpose)
@@ -700,8 +747,8 @@ public class VerificationService : IVerificationService
             }
 
             // 5. Verify the capability chain (delegation proofs, attenuation, @context, expiry, revocation).
-            if ((CapabilityProfile.GetRejectionReason(capability) ?? CapabilityProfile.GetRejectionReason(explicitRoot)) is { } profileReason)
-                return VerificationResult.Fail(VerificationOutcome.MalformedCapability, profileReason);
+            if ((CapabilityProfile.Validate(capability, caveats: _caveats) ?? CapabilityProfile.Validate(explicitRoot, caveats: _caveats)) is { } profileFailure)
+                return profileFailure;
             var chain = await BuildCapabilityChainAsync(capability, explicitRoot);
             var chainResult = await VerifyBuiltChainAsync(chain);
             if (!chainResult.IsValid)
@@ -714,6 +761,11 @@ public class VerificationService : IVerificationService
                 !expectedRootCapabilityIds.Contains(chain[0].Id, StringComparer.Ordinal))
                 return VerificationResult.Fail(VerificationOutcome.MalformedCapability,
                     $"Resolved root capability '{chain[0].Id}' is not among the relying party's expected roots.");
+
+            // 5b. Caveats (#157): every caveat type needs a handler here, checked before any nonce is used.
+            var caveatGrants = CollectCaveatGrants(chain);
+            if (RequireCaveatHandlers(caveatGrants) is { } unsupportedCaveat)
+                return unsupportedCaveat;
 
             // 6. invocationTarget must be permitted by the leaf capability's target.
             if (!IsValidInvocationTarget(proof.InvocationTarget, capability.InvocationTarget))
@@ -750,6 +802,12 @@ public class VerificationService : IVerificationService
                 return VerificationResult.Fail(VerificationOutcome.Replayed,
                     "Invocation nonce has already been used within the replay window.");
 
+            // 12. Caveat handlers run last, so a replayed or otherwise invalid invocation never reaches them.
+            if (caveatGrants.Count > 0 &&
+                await EnforceCaveatsAsync(caveatGrants, chain, proof.CapabilityAction, proof.InvocationTarget,
+                    nonce, proof.VerificationMethod, createdUtc.Value) is { } caveatFailure)
+                return caveatFailure;
+
             return VerificationResult.Valid;
         }
         catch (Exception ex)
@@ -771,8 +829,9 @@ public class VerificationService : IVerificationService
 
         try
         {
-            if ((CapabilityProfile.GetRejectionReason(invocation.Capability?.EmbeddedCapability) ??
-                CapabilityProfile.GetProofRejectionReason(invocation.Proof)) is { } invocationProfileReason)
+            if (CapabilityProfile.Validate(invocation.Capability?.EmbeddedCapability, caveats: _caveats) is { } invocationProfileFailure)
+                return invocationProfileFailure;
+            if (CapabilityProfile.GetProofRejectionReason(invocation.Proof, _caveats) is { } invocationProfileReason)
                 return VerificationResult.Fail(VerificationOutcome.MalformedCapability, invocationProfileReason);
 
             if (string.IsNullOrWhiteSpace(invocation.Id))
@@ -793,12 +852,17 @@ public class VerificationService : IVerificationService
             // instead of rebuilding it (BuildCapabilityChainAsync
             // throwing is caught by this method's outer fail-closed catch). Propagate the chain's
             // specific failure reason (revoked / attenuation / chain-too-long / …) unchanged.
-            if ((CapabilityProfile.GetRejectionReason(capability) ?? CapabilityProfile.GetRejectionReason(explicitRoot)) is { } profileReason)
-                return VerificationResult.Fail(VerificationOutcome.MalformedCapability, profileReason);
+            if ((CapabilityProfile.Validate(capability, caveats: _caveats) ?? CapabilityProfile.Validate(explicitRoot, caveats: _caveats)) is { } profileFailure)
+                return profileFailure;
             var chain = await BuildCapabilityChainAsync(capability, explicitRoot);
             var chainResult = await VerifyBuiltChainAsync(chain);
             if (!chainResult.IsValid)
                 return chainResult;
+
+            // 1a. Caveats (#157): every caveat type needs a handler here, checked before any nonce is used.
+            var caveatGrants = CollectCaveatGrants(chain);
+            if (RequireCaveatHandlers(caveatGrants) is { } unsupportedCaveat)
+                return unsupportedCaveat;
 
             // 2. Verify invocation proof exists and has correct purpose
             if (invocation.Proof == null || invocation.Proof.ProofPurpose != Proof.CapabilityInvocationPurpose)
@@ -839,6 +903,12 @@ public class VerificationService : IVerificationService
                 if (invocationCapability.EmbeddedCapability is null)
                     return VerificationResult.Fail(VerificationOutcome.MalformedCapability,
                         "Delegated invocation must embed the full delegated capability object.");
+
+                // The invoker signed the embedded copy, the chain was verified from the supplied one,
+                // and caveats are read from the chain: with caveats they must be the same capability.
+                if (caveatGrants.Count > 0 && !IsSameJson(invocationCapability.EmbeddedCapability, capability))
+                    return VerificationResult.Fail(VerificationOutcome.MalformedCapability,
+                        "The invocation's embedded capability differs from the capability being verified.");
             }
 
             // 2c. Proof payload fields MUST be semantically consistent with the invocation body: the
@@ -882,6 +952,12 @@ public class VerificationService : IVerificationService
             if (await _nonceStore.TryMarkAsUsedAsync(invocation.Id, nonceExpiry))
                 return VerificationResult.Fail(VerificationOutcome.Replayed,
                     "Invocation nonce has already been used within the replay window.");
+
+            // 9. Caveat handlers run last, so a replayed or otherwise invalid invocation never reaches them.
+            if (caveatGrants.Count > 0 &&
+                await EnforceCaveatsAsync(caveatGrants, chain, invocation.CapabilityAction, invocation.InvocationTarget,
+                    invocation.Id, invocation.Proof.VerificationMethod, invocationCreatedUtc.Value) is { } caveatFailure)
+                return caveatFailure;
 
             return VerificationResult.Valid;
         }
@@ -1055,10 +1131,17 @@ public class VerificationService : IVerificationService
             // Build the complete chain from leaf to root, then verify it. Split so callers that
             // also need the built chain (revocation authorization, invocation verification)
             // can build once and reuse it instead of rebuilding (see VerifyBuiltChainAsync callers).
-            if ((CapabilityProfile.GetRejectionReason(capability) ?? CapabilityProfile.GetRejectionReason(explicitRoot)) is { } profileReason)
-                return VerificationResult.Fail(VerificationOutcome.MalformedCapability, profileReason);
+            if ((CapabilityProfile.Validate(capability, caveats: _caveats) ?? CapabilityProfile.Validate(explicitRoot, caveats: _caveats)) is { } profileFailure)
+                return profileFailure;
             var chain = await BuildCapabilityChainAsync(capability, explicitRoot);
-            return await VerifyBuiltChainAsync(chain);
+            var result = await VerifyBuiltChainAsync(chain);
+            if (!result.IsValid)
+                return result;
+
+            // A valid chain with caveats is authentic but not authorized: only invocation verification
+            // enforces caveats (#157). The authenticated caveats are returned for inspection.
+            var grants = CollectCaveatGrants(chain);
+            return grants.Count == 0 ? result : CaveatEnforcementRequired(grants);
         }
         catch (Exception ex)
         {
@@ -1092,10 +1175,15 @@ public class VerificationService : IVerificationService
     /// <see langword="false"/> for the same reason as the ceiling — a delegation with a malformed
     /// <c>created</c> must stay revocable.
     /// </para>
+    /// <para>
+    /// <paramref name="applyCaveatPolicy"/> gates caveat policy (<see cref="Caveat.Validate"/> and
+    /// <see cref="Caveat.IsAttenuationOf"/>); the revocation path passes <see langword="false"/> and
+    /// keeps only caveat integrity, which signature verification needs (#157).
+    /// </para>
     /// </summary>
     private async Task<VerificationResult> VerifyBuiltChainAsync(
         List<Capability> chain, bool applyExpirationCeiling = true, bool applyCreatedCheck = true,
-        bool requireDelegatedExpires = true)
+        bool requireDelegatedExpires = true, bool applyCaveatPolicy = true)
     {
         try
         {
@@ -1109,8 +1197,8 @@ public class VerificationService : IVerificationService
             // 2. Revocation check for all capabilities in the chain.
             foreach (var chainCapability in chain)
             {
-                if (CapabilityProfile.GetRejectionReason(chainCapability) is { } profileReason)
-                    return VerificationResult.Fail(VerificationOutcome.MalformedCapability, profileReason);
+                if (CapabilityProfile.Validate(chainCapability, caveats: _caveats) is { } profileFailure)
+                    return profileFailure;
                 if (await IsCapabilityRevokedAsync(chainCapability.Id))
                 {
                     return VerificationResult.Fail(VerificationOutcome.Revoked,
@@ -1160,7 +1248,8 @@ public class VerificationService : IVerificationService
                     parentCapabilityOverride: parent,
                     requireParentAuthorization: true,
                     applyCreatedCheck: applyCreatedCheck,
-                    requiredChain: child.Proof?.FirstDelegationProofWithChain()?.CapabilityChain);
+                    requiredChain: child.Proof?.FirstDelegationProofWithChain()?.CapabilityChain,
+                    applyCaveatPolicy: applyCaveatPolicy);
                 if (!linkResult.IsValid)
                     return linkResult;
 
@@ -1486,6 +1575,155 @@ public class VerificationService : IVerificationService
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// Caveat attenuation for one delegation link (#157): both capabilities' caveats must be
+    /// registered and well formed, and every caveat type the parent carries must be restated by the
+    /// child and narrowed (<see cref="Caveat.IsAttenuationOf"/>). A child may add caveat types.
+    /// With <paramref name="applyPolicy"/> false (revocation) only integrity is checked.
+    /// </summary>
+    private VerificationResult? CheckCaveatAttenuation(Capability child, Capability parent, bool applyPolicy)
+    {
+        if (CaveatCodec.TryRead(child, _caveats, applyPolicy, out var childCaveats) is { } childFailure)
+            return childFailure;
+        if (CaveatCodec.TryRead(parent, _caveats, applyPolicy, out var parentCaveats) is { } parentFailure)
+            return parentFailure;
+        if (!applyPolicy)
+            return null;
+
+        foreach (var parentCaveat in parentCaveats)
+        {
+            var type = parentCaveat.Registration.Type;
+            if (childCaveats.FirstOrDefault(entry => entry.Registration.Type == type)?.Value is not { } childCaveat)
+                return VerificationResult.Fail(VerificationOutcome.AttenuationViolation,
+                    $"Capability '{child.Id}' drops its parent's '{type}' caveat.");
+
+            bool narrows;
+            try
+            {
+                narrows = childCaveat.IsAttenuationOf(parentCaveat.Value!);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                LogFailedClosed(ex, "Caveat {CaveatType} attenuation check failed for {CapabilityId}", type, child.Id);
+                return VerificationResult.Fail(VerificationOutcome.CouldNotVerify,
+                    $"The '{type}' attenuation rule failed: {ex.Message}");
+            }
+
+            if (!narrows)
+                return VerificationResult.Fail(VerificationOutcome.AttenuationViolation,
+                    $"Capability '{child.Id}' widens its parent's '{type}' caveat.");
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// The authenticated caveats of a verified chain, root side first, each keyed by the ids from the
+    /// root to its capability. Empty when no caveat registry is configured.
+    /// </summary>
+    private IReadOnlyList<CaveatGrant> CollectCaveatGrants(List<Capability> chain)
+    {
+        var grants = new List<CaveatGrant>();
+        if (_caveats is null)
+            return grants;
+
+        for (var i = 1; i < chain.Count; i++)
+        {
+            if (CaveatCodec.TryRead(chain[i], _caveats, materialize: true, out var entries) is { } failure)
+                throw new CapabilityValidationException(failure.Message ?? "A verified capability's caveats are invalid.");
+            if (entries.Count == 0)
+                continue;
+            var key = CaveatCodec.GrantKey(chain.Take(i + 1).Select(link => link.Id));
+            grants.AddRange(entries.Select(entry => new CaveatGrant(chain[i].Id, key, entry.Value!)));
+        }
+
+        return grants;
+    }
+
+    /// <summary>The non-authorizing result for a valid chain that carries caveats (#157).</summary>
+    private static VerificationResult CaveatEnforcementRequired(IReadOnlyList<CaveatGrant>? grants)
+        => new()
+        {
+            Outcome = VerificationOutcome.CaveatEnforcementRequired,
+            Message = "The chain is valid but carries caveats, which only invocation verification enforces.",
+            Caveats = grants,
+        };
+
+    /// <summary>Fails when a caveat type in the chain has no handler at this verifier.</summary>
+    private VerificationResult? RequireCaveatHandlers(IReadOnlyList<CaveatGrant> grants)
+        => grants.Select(grant => grant.Caveat.Type).FirstOrDefault(type => !_caveatHandlers.ContainsKey(type)) is { } missing
+            ? VerificationResult.Fail(VerificationOutcome.UnsupportedCaveat,
+                $"No caveat handler is registered for '{missing}', so this verifier cannot enforce it.")
+            : null;
+
+    /// <summary>
+    /// Runs the caveat handlers after every other check has passed, in ordinal type order, stopping at
+    /// the first denial and releasing the handlers that had already allowed the invocation.
+    /// </summary>
+    private async Task<VerificationResult?> EnforceCaveatsAsync(
+        IReadOnlyList<CaveatGrant> grants, List<Capability> chain, string action, string target,
+        string invocationId, string verificationMethod, DateTime created)
+    {
+        var allowed = new List<(ICaveatHandler Handler, CaveatEnforcementContext Context)>();
+        foreach (var group in grants.GroupBy(grant => grant.Caveat.Type).OrderBy(group => group.Key, StringComparer.Ordinal))
+        {
+            var handler = _caveatHandlers[group.Key];
+            var context = new CaveatEnforcementContext
+            {
+                CaveatType = group.Key,
+                Grants = group.ToArray(),
+                Chain = chain.ToArray(),
+                RootCapabilityId = chain[0].Id,
+                CapabilityAction = action,
+                InvocationTarget = target,
+                InvocationId = invocationId,
+                VerificationMethod = verificationMethod,
+                Created = created,
+            };
+
+            CaveatDecision decision;
+            try
+            {
+                decision = await handler.EnforceAsync(context) ?? CaveatDecision.Deny("The caveat handler returned no decision.");
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                await ReleaseCaveatsAsync(allowed);
+                LogFailedClosed(ex, "Caveat handler for {CaveatType} failed closed for invocation {InvocationId}",
+                    group.Key, invocationId);
+                return VerificationResult.Fail(VerificationOutcome.CouldNotVerify,
+                    $"The '{group.Key}' caveat handler failed: {ex.Message}");
+            }
+
+            if (!decision.IsSatisfied)
+            {
+                await ReleaseCaveatsAsync(allowed);
+                return VerificationResult.Fail(VerificationOutcome.CaveatNotSatisfied,
+                    decision.Reason ?? $"The '{group.Key}' caveat is not satisfied.");
+            }
+
+            allowed.Add((handler, context));
+        }
+
+        return null;
+    }
+
+    private async Task ReleaseCaveatsAsync(List<(ICaveatHandler Handler, CaveatEnforcementContext Context)> allowed)
+    {
+        foreach (var (handler, context) in allowed)
+        {
+            try
+            {
+                await handler.ReleaseAsync(context);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogWarning(ex, "Caveat handler for {CaveatType} failed to release invocation {InvocationId}",
+                    context.CaveatType, context.InvocationId);
+            }
+        }
     }
 
     /// <summary>
@@ -1819,6 +2057,10 @@ public class VerificationService : IVerificationService
     /// True when two <c>capabilityChain</c> values are the same JSON (compared by RFC 8785
     /// canonical form, so an in-memory <see cref="Capability"/> equals its wire JSON).
     /// </summary>
+    private static bool IsSameJson(object first, object second)
+        => NetCid.JcsCanonicalizer.Canonicalize(JsonSerializer.SerializeToElement(first, ZcapJsonOptions.Default)).AsSpan()
+            .SequenceEqual(NetCid.JcsCanonicalizer.Canonicalize(JsonSerializer.SerializeToElement(second, ZcapJsonOptions.Default)));
+
     private static bool IsSameChain(object[]? first, object[] second)
     {
         if (first is null || first.Length != second.Length)
@@ -1905,9 +2147,9 @@ public class VerificationService : IVerificationService
 
         try
         {
-            if (!CapabilityProfile.IsSupported(capability) || !CapabilityProfile.IsSupported(explicitRoot) ||
-                !CapabilityProfile.IsSupported(signedRevocation.Capability?.EmbeddedCapability) ||
-                !CapabilityProfile.IsSupportedProof(signedRevocation.Proof))
+            if (!CapabilityProfile.IsSupported(capability, caveats: _caveats) || !CapabilityProfile.IsSupported(explicitRoot) ||
+                !CapabilityProfile.IsSupported(signedRevocation.Capability?.EmbeddedCapability, caveats: _caveats) ||
+                !CapabilityProfile.IsSupportedProof(signedRevocation.Proof, _caveats))
                 return false;
 
             // The request id is the replay nonce and the capability id the revocation key; only their
@@ -2065,9 +2307,11 @@ public class VerificationService : IVerificationService
             // must stay possible for a long-lived, malformed-`created`, or non-expiring delegation —
             // refusing to authorize its removal would be exactly backwards. All three are constraints on
             // accepting/invoking a zcap, not on revoking one.
+            // Caveat policy (Validate, IsAttenuationOf) is skipped for the same reason; caveat integrity
+            // (registered types, declared parameters, signed context) is still required (#157).
             if (!(await VerifyBuiltChainAsync(
                     chain, applyExpirationCeiling: false, applyCreatedCheck: false,
-                    requireDelegatedExpires: false)).IsValid)
+                    requireDelegatedExpires: false, applyCaveatPolicy: false)).IsValid)
                 return false;
 
             // Document-based authorization (Issue #65): the revoker is authorized when ANY link in

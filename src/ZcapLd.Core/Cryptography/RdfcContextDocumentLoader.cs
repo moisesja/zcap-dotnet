@@ -1,5 +1,6 @@
 using System.Reflection;
 using DataProofsDotnet.Rdfc;
+using ZcapLd.Core.Models;
 
 namespace ZcapLd.Core.Cryptography;
 
@@ -17,8 +18,13 @@ namespace ZcapLd.Core.Cryptography;
 /// </remarks>
 internal sealed class RdfcContextDocumentLoader : IDocumentLoader
 {
-    /// <summary>A shared, immutable instance (loading is stateless).</summary>
-    public static RdfcContextDocumentLoader Instance { get; } = new();
+    /// <summary>A shared, immutable instance serving no caveat contexts.</summary>
+    public static RdfcContextDocumentLoader Instance { get; } = new(null);
+
+    private readonly CaveatTypeRegistry? _caveats;
+
+    /// <summary>A loader that also serves the generated context of every registered caveat type (#157).</summary>
+    public RdfcContextDocumentLoader(CaveatTypeRegistry? caveats) => _caveats = caveats;
 
     // Context URL → embedded resource name. Ordinal keying so URL matching is exact.
     private static readonly IReadOnlyDictionary<string, string> ResourceByUrl =
@@ -36,6 +42,11 @@ internal sealed class RdfcContextDocumentLoader : IDocumentLoader
     public LoadedContextDocument Load(Uri url)
     {
         ArgumentNullException.ThrowIfNull(url);
+
+        if (_caveats is not null && _caveats.TryGetByContextUrl(url.AbsoluteUri, out var caveat))
+        {
+            return new LoadedContextDocument(url, caveat.ContextDocument);
+        }
 
         if (ResourceByUrl.TryGetValue(url.AbsoluteUri, out var resourceName))
         {

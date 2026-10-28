@@ -1,5 +1,6 @@
 using System.Text.Json;
 using ZcapLd.Core.Cryptography;
+using ZcapLd.Core.Exceptions;
 using ZcapLd.Core.Models;
 
 namespace ZcapLd.Core.Services;
@@ -11,10 +12,17 @@ namespace ZcapLd.Core.Services;
 public class CapabilityService : ICapabilityService
 {
     private readonly ISigningService _signingService;
+    private readonly CaveatTypeRegistry? _caveats;
 
-    public CapabilityService(ISigningService signingService)
+    /// <summary>Creates a capability service.</summary>
+    /// <param name="signingService">Signs delegations.</param>
+    /// <param name="caveats">Optional caveat types (#157); pass the same registry to the signing
+    /// service. Without it, delegating with caveats or from a caveat-bearing parent is refused.</param>
+    public CapabilityService(ISigningService signingService, CaveatTypeRegistry? caveats = null)
     {
         _signingService = signingService ?? throw new ArgumentNullException(nameof(signingService));
+        caveats?.Freeze();
+        _caveats = caveats;
     }
 
     /// <summary>
@@ -72,7 +80,8 @@ public class CapabilityService : ICapabilityService
         string[] allowedActions,
         DateTime? expires = null,
         string? signerDid = null,
-        string? invocationTarget = null)
+        string? invocationTarget = null,
+        IEnumerable<Caveat>? caveats = null)
     {
         if (parentCapability == null)
         {
@@ -105,7 +114,8 @@ public class CapabilityService : ICapabilityService
         // Validate attenuation rules (delegated capability must be more restrictive)
         ValidateAttenuation(parentCapability, allowedActions, expires);
 
-        CapabilityProfile.EnsureSupported(parentCapability);
+        CapabilityProfile.EnsureSupported(parentCapability, caveats: _caveats);
+        var caveatEntries = BuildCaveats(parentCapability, caveats);
         var target = invocationTarget ?? parentCapability.InvocationTarget;
         if (!Uri.IsWellFormedUriString(target, UriKind.Absolute))
             throw new ArgumentException("Delegated target must be a well-formed absolute URI.",
@@ -117,13 +127,13 @@ public class CapabilityService : ICapabilityService
         var suiteContextUrl = await _signingService.ResolveSuiteContextUrlAsync(effectiveSigner);
 
         // Create the delegated capability (without proof initially)
+        // A caveat type's context is listed only when that caveat is present, so a caveat-free
+        // delegation stays in the standard profile.
         var delegatedCapability = new Capability
         {
-            Context = new object[]
-            {
-                "https://w3id.org/zcap/v1",
-                suiteContextUrl
-            },
+            Context = new object[] { "https://w3id.org/zcap/v1", suiteContextUrl }
+                .Concat(caveatEntries.Keys.Select(CaveatTypeRegistry.GetContextUrl))
+                .ToArray(),
             Id = $"urn:uuid:{Guid.NewGuid()}",
             Controller = newController,
             InvocationTarget = target,
@@ -131,7 +141,13 @@ public class CapabilityService : ICapabilityService
             // Use parent's verbatim Expires string if caller didn't specify one;
             // format the caller-supplied DateTime canonically otherwise.
             Expires = expires.HasValue ? ZcapTimestamps.Format(expires.Value) : parentCapability.Expires,
-            ParentCapability = parentCapability.Id
+            ParentCapability = parentCapability.Id,
+            AdditionalProperties = caveatEntries.Count == 0
+                ? null
+                : new Dictionary<string, JsonElement>(StringComparer.Ordinal)
+                {
+                    [CaveatCodec.Property] = JsonSerializer.SerializeToElement(caveatEntries.Values, ZcapJsonOptions.Default)
+                }
         };
 
         // Build capability chain for the proof
@@ -149,11 +165,53 @@ public class CapabilityService : ICapabilityService
         return delegatedCapability;
     }
 
+    /// <summary>
+    /// The child's caveats keyed by type (ordinal order): the requested ones, validated and checked
+    /// to narrow the parent's, plus every parent caveat the request does not restate, inherited
+    /// verbatim. A child can therefore never drop or widen an inherited caveat.
+    /// </summary>
+    private SortedDictionary<string, JsonElement> BuildCaveats(Capability parent, IEnumerable<Caveat>? requested)
+    {
+        var caveats = requested?.ToList() ?? new List<Caveat>();
+        if (caveats.Any(caveat => caveat is null))
+            throw new ArgumentException("Caveats cannot contain null.", nameof(requested));
+
+        var result = new SortedDictionary<string, JsonElement>(StringComparer.Ordinal);
+        if (_caveats is null)
+        {
+            if (caveats.Count > 0 || parent.AdditionalProperties?.ContainsKey(CaveatCodec.Property) == true)
+                throw new InvalidOperationException(
+                    "Delegating with caveats requires a CaveatTypeRegistry on the CapabilityService and SigningService.");
+            return result;
+        }
+
+        if (CaveatCodec.TryRead(parent, _caveats, materialize: true, out var inherited) is { } failure)
+            throw new CapabilityValidationException(failure.Message ?? "The parent capability's caveats are invalid.");
+
+        foreach (var caveat in caveats)
+        {
+            if (result.ContainsKey(caveat.Type))
+                throw new ArgumentException($"Caveat type '{caveat.Type}' is given more than once.", nameof(requested));
+            var json = CaveatCodec.Write(caveat, _caveats);
+            if (inherited.FirstOrDefault(entry => entry.Registration.Type == caveat.Type)?.Value is { } parentCaveat &&
+                !caveat.IsAttenuationOf(parentCaveat))
+                throw new InvalidOperationException(
+                    $"Caveat '{caveat.Type}' would widen the parent's caveat. Child capabilities cannot expand authority.");
+            result[caveat.Type] = json;
+        }
+
+        foreach (var entry in inherited)
+            result.TryAdd(entry.Registration.Type, entry.Json);
+        if (result.Count > CaveatCodec.MaxCaveats)
+            throw new ArgumentException($"A capability carries at most {CaveatCodec.MaxCaveats} caveats.", nameof(requested));
+        return result;
+    }
+
     /// <inheritdoc />
     public Invocation CreateInvocation(Capability capability, string capabilityAction, string? invocationTarget = null)
     {
         ArgumentNullException.ThrowIfNull(capability);
-        CapabilityProfile.EnsureSupported(capability);
+        CapabilityProfile.EnsureSupported(capability, caveats: _caveats);
         if (string.IsNullOrEmpty(capability.Id))
         {
             throw new ArgumentException("Capability must have an id.", nameof(capability));
@@ -217,7 +275,7 @@ public class CapabilityService : ICapabilityService
     {
         try
         {
-            if (!CapabilityProfile.IsSupported(capability)) return Task.FromResult(false);
+            if (!CapabilityProfile.IsSupported(capability, caveats: _caveats)) return Task.FromResult(false);
 
             // Basic required fields
             if (string.IsNullOrEmpty(capability.Id))

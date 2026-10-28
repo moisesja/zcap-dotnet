@@ -39,6 +39,10 @@ public interface ICapabilityService
     /// Defaults to the parent's first controller; must be one of the parent's controllers.</param>
     /// <param name="invocationTarget">Optional narrower target; defaults to the parent target.
     /// Verifiers must independently opt into target attenuation to accept a narrowed target.</param>
+    /// <param name="caveats">Optional custom caveats (#157), each of a type registered with the
+    /// service's <see cref="CaveatTypeRegistry"/>. A caveat of a type the parent carries must narrow
+    /// it (<see cref="Caveat.IsAttenuationOf"/>); parent caveats not given here are inherited
+    /// unchanged, so a child can never drop or widen one.</param>
     /// <returns>The delegated capability</returns>
     Task<Capability> DelegateCapabilityAsync(
         Capability parentCapability,
@@ -46,7 +50,8 @@ public interface ICapabilityService
         string[] allowedActions,
         DateTime? expires = null,
         string? signerDid = null,
-        string? invocationTarget = null);
+        string? invocationTarget = null,
+        IEnumerable<Caveat>? caveats = null);
 
     /// <summary>
     /// Builds an <b>unsigned</b> <see cref="Invocation"/> for <paramref name="capability"/>, selecting

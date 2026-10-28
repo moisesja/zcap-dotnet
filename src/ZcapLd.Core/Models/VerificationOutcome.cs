@@ -93,4 +93,21 @@ public enum VerificationOutcome
     /// proven valid nor proven invalid. Still denied (fail-closed); the cause is logged (Issue #64).
     /// </summary>
     CouldNotVerify,
+
+    /// <summary>
+    /// A capability carries a caveat type this verifier cannot enforce: the type is not registered in
+    /// its <see cref="CaveatTypeRegistry"/>, or (on invocation) no <see cref="Services.ICaveatHandler"/>
+    /// is registered for it (#157).
+    /// </summary>
+    UnsupportedCaveat,
+
+    /// <summary>A resource's <see cref="Services.ICaveatHandler"/> denied the invocation (#157).</summary>
+    CaveatNotSatisfied,
+
+    /// <summary>
+    /// The capability and its whole chain are authentic and within their parents' authority, but the
+    /// chain carries caveats that only invocation verification enforces, so this result is not an
+    /// authorization (#157). <see cref="VerificationResult.Caveats"/> lists the authenticated caveats.
+    /// </summary>
+    CaveatEnforcementRequired,
 }

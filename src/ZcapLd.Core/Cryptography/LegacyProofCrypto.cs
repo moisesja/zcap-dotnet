@@ -25,14 +25,17 @@ internal sealed class LegacyProofCrypto
 {
     private const string ZcapContext = "https://w3id.org/zcap/v1";
 
-    // RDFC canonicalizer wired with zcap's offline context loader (serves zcap/v1 + ed25519-2020/v1).
-    // RDFC-1.0 (W3C RDF Dataset Canonicalization) is the ONLY canonicalization zcap supports — it is
-    // what makes proofs interoperable with @digitalbazaar/zcap. Shared, immutable, thread-safe.
-    private static readonly DataProofsRdfc.RdfcDocumentCanonicalizer RdfCanonicalizer =
-        new(RdfcContextDocumentLoader.Instance);
+    // RDFC canonicalizer wired with zcap's offline context loader (serves zcap/v1 + ed25519-2020/v1,
+    // plus the generated context of each registered caveat type). RDFC-1.0 (W3C RDF Dataset
+    // Canonicalization) is the ONLY canonicalization zcap supports — it is what makes proofs
+    // interoperable with @digitalbazaar/zcap. Immutable, thread-safe.
+    private readonly DataProofsRdfc.RdfcDocumentCanonicalizer _rdfCanonicalizer;
 
     // Suites are immutable + thread-safe; cache per proofType so each suite's canonicalizer is built once.
     private readonly ConcurrentDictionary<string, ICryptosuite> _suites = new();
+
+    public LegacyProofCrypto(CaveatTypeRegistry? caveats = null)
+        => _rdfCanonicalizer = new(caveats is null ? RdfcContextDocumentLoader.Instance : new RdfcContextDocumentLoader(caveats));
 
     /// <summary>
     /// Signs <paramref name="documentWithoutProof"/> under <paramref name="proofOptions"/> via the
@@ -93,15 +96,15 @@ internal sealed class LegacyProofCrypto
         return proofType switch
         {
             Ed25519Signature2020Cryptosuite.ProofType or EcdsaSecp256r1Signature2019Cryptosuite.ProofType
-                => _suites.GetOrAdd(proofType, static t => Create(t)),
+                => _suites.GetOrAdd(proofType, Create),
             _ => null,
         };
     }
 
-    private static ICryptosuite Create(string proofType)
+    private ICryptosuite Create(string proofType)
         => proofType == Ed25519Signature2020Cryptosuite.ProofType
-            ? new Ed25519Signature2020Cryptosuite(LegacyCanonicalization.Rdfc, RdfCanonicalizer)
-            : new EcdsaSecp256r1Signature2019Cryptosuite(LegacyCanonicalization.Rdfc, RdfCanonicalizer);
+            ? new Ed25519Signature2020Cryptosuite(LegacyCanonicalization.Rdfc, _rdfCanonicalizer)
+            : new EcdsaSecp256r1Signature2019Cryptosuite(LegacyCanonicalization.Rdfc, _rdfCanonicalizer);
 
     // Serializes the document with zcap's JSON options. RDFC-1.0 canonicalization is always used;
     // for a context-less document (invocations and signed revocations) inject the ZCAP-LD context
