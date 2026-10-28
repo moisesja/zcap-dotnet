@@ -257,6 +257,17 @@ public class SignedBindingTests
         (await CreateVerifier().VerifyCapabilityChainDetailedAsync(forged)).IsValid.Should().BeFalse();
     }
 
+    [Fact(DisplayName = "A verification method RDF cannot bind is refused")]
+    public async Task UnbindableVerificationMethod_Refused()
+    {
+        var (_, delegated, _, leafDid) = await DelegateAsync();
+        var invocation = await SignEnvelopeAsync(delegated, leafDid);
+        invocation.Proof!.VerificationMethod += "[0]";
+
+        (await CreateVerifier().VerifyInvocationDetailedAsync(invocation, delegated)).Outcome
+            .Should().Be(VerificationOutcome.MalformedCapability);
+    }
+
     [Fact(DisplayName = "Proof set: the parent comes from the proof that verifies, not a junk proof")]
     public async Task ProofSet_JunkProofCannotChooseTheParent()
     {

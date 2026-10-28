@@ -88,6 +88,8 @@ internal static class CapabilityProfile
                     cap.AdditionalProperties?.ContainsKey("@context") == true ||
                     !CheckCapabilityProperties(cap.AdditionalProperties, cap.Context, depth)) return false;
                 return cap.Proof == null || cap.Proof.Values.All(proof =>
+                    (string.IsNullOrEmpty(proof.VerificationMethod) || CanonicalIri.IsBindable(proof.VerificationMethod) ||
+                     Fail(Malformed($"verificationMethod {CanonicalIri.BindableMessage}."))) &&
                     CheckProperties(proof.AdditionalProperties, depth + 1) &&
                     (proof.CapabilityChain == null || proof.CapabilityChain.All(entry => Check(entry, depth + 1, capabilityLevel: true))) &&
                     Check(proof.Capability?.EmbeddedCapability, depth + 1, capabilityLevel: true));
