@@ -201,8 +201,8 @@ internal static class CapabilityProfile
             return $"Capability id {CanonicalIri.RequirementMessage}.";
         if (!string.IsNullOrEmpty(capability.ParentCapability) && !CanonicalIri.IsCanonical(capability.ParentCapability))
             return $"parentCapability {CanonicalIri.RequirementMessage}.";
-        if (!string.IsNullOrEmpty(capability.InvocationTarget) && !CanonicalIri.IsBindable(capability.InvocationTarget))
-            return $"invocationTarget {CanonicalIri.BindableMessage}.";
+        if (!string.IsNullOrEmpty(capability.InvocationTarget) && !CanonicalIri.IsSignedTarget(capability.InvocationTarget))
+            return $"invocationTarget {CanonicalIri.TargetMessage}.";
         if (capability.Controller?.Values.Any(controller => !CanonicalIri.IsBindable(controller)) == true)
             return $"Every controller {CanonicalIri.BindableMessage}.";
         return null;

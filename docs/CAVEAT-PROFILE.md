@@ -161,9 +161,19 @@ or controller removes that triple. The rules below apply in every profile, at si
 verification:
 
 - Capability ids, `parentCapability`, `capabilityChain` ids, invocation ids and revocation request
-  ids must be well-formed absolute IRIs already in normalized form (`new Uri(id).AbsoluteUri == id`).
-- Capability and invocation targets and controllers must be well-formed absolute IRIs. Percent-encode
-  `[` and `]`, for example `?filter%5Bid%5D=123`.
+  ids must be signed exactly as written. The verifier checks this by canonicalizing the id itself,
+  because dotNetRDF also rewrites forms .NET leaves alone, such as a trailing segment of invisible
+  characters (`…/7/%C2%AD` signs as `…/7/`).
+- Capability and invocation targets must be signed exactly as written. That rules out dot segments,
+  literal or percent-encoded (`/%2E%2E/`), which would move the signed target outside the
+  delegated path. The only accepted difference is the root `/` added to a bare authority
+  (`https://example.com`).
+- Controllers and verification methods must be well-formed absolute IRIs. Percent-encode `[` and
+  `]`, for example `?filter%5Bid%5D=123`.
+- `capabilityRevocation` is not a term in the suite's `proofPurpose` context, so a revocation
+  request's purpose is not itself signed. The signed `capabilityAction` `"revoke"` and the
+  revocation-only verification path separate it from invocations, and each path accepts exactly
+  one purpose.
 
 ## Registering types
 

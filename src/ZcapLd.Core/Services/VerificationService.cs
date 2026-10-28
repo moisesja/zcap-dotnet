@@ -716,9 +716,9 @@ public class VerificationService : IVerificationService
             if (string.IsNullOrEmpty(proof.InvocationTarget))
                 return VerificationResult.Fail(VerificationOutcome.MalformedCapability,
                     "Invocation proof is missing invocationTarget.");
-            if (!CanonicalIri.IsBindable(proof.InvocationTarget))
+            if (!CanonicalIri.IsSignedTarget(proof.InvocationTarget))
                 return VerificationResult.Fail(VerificationOutcome.MalformedCapability,
-                    $"Invocation target {CanonicalIri.BindableMessage}.");
+                    $"Invocation target {CanonicalIri.TargetMessage}.");
 
             // 3a. SECURITY (confused-deputy defense): the relying party declared what it authorizes via
             // expectedAction/expectedTargets. The proof's action/target MUST match exactly — otherwise a
@@ -855,10 +855,10 @@ public class VerificationService : IVerificationService
             }
 
             // A target RDF drops is unsigned and could be rewritten in transit (#157).
-            if (!CanonicalIri.IsBindable(invocation.InvocationTarget))
+            if (!CanonicalIri.IsSignedTarget(invocation.InvocationTarget))
             {
                 return VerificationResult.Fail(VerificationOutcome.MalformedCapability,
-                    $"Invocation target {CanonicalIri.BindableMessage}.");
+                    $"Invocation target {CanonicalIri.TargetMessage}.");
             }
 
             // 1. Verify the capability chain is valid. Build it once here and reuse the same chain

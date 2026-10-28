@@ -257,6 +257,43 @@ public class SignedBindingTests
         (await CreateVerifier().VerifyCapabilityChainDetailedAsync(forged)).IsValid.Should().BeFalse();
     }
 
+    [Theory(DisplayName = "Id spellings that sign as a different id are refused (invisible characters, dot segments)")]
+    [InlineData("https://example.com/caps/7/", "https://example.com/caps/7/%C2%AD")]
+    [InlineData("https://example.com/caps/7/", "https://example.com/caps/7/%E2%80%8B")]
+    [InlineData("https://example.com/caps/7", "https://example.com/caps/7/%2E")]
+    public async Task IdSpellingVariant_Refused(string signedId, string presentedId)
+    {
+        var (root, delegated, rootDid, leafDid) = await DelegateAsync();
+        var original = CapabilityJson.Edit(delegated, json => { json.Remove("proof"); json["id"] = signedId; });
+        original.Proof = await _signingService.SignCapabilityAsync(original, rootDid, "capabilityDelegation", new object[] { root.Id });
+        var verifier = CreateVerifier();
+        var revocation = await _signingService.SignRevocationAsync(original.Id, rootDid, original.InvocationTarget);
+        (await verifier.RevokeCapabilityAsync(original, revocation)).Should().BeTrue();
+
+        var variant = CapabilityJson.Edit(original, json => json["id"] = presentedId);
+
+        (await verifier.VerifyCapabilityChainDetailedAsync(variant)).IsValid.Should().BeFalse("the variant signs as the revoked id");
+        var sign = () => _signingService.SignCapabilityAsync(
+            CapabilityJson.Edit(original, json => { json.Remove("proof"); json["id"] = presentedId; }),
+            rootDid, "capabilityDelegation", new object[] { root.Id });
+        await sign.Should().ThrowAsync<ZcapLd.Core.Exceptions.CapabilityValidationException>();
+
+        var invocation = _capabilityService.CreateInvocation(delegated, "read");
+        invocation.Id = presentedId;
+        invocation.Proof = await RawProofSigner.SignInvocationAsync(_didProvider, invocation, leafDid);
+        (await CreateVerifier().VerifyInvocationDetailedAsync(invocation, delegated)).Outcome
+            .Should().Be(VerificationOutcome.MalformedCapability, "an invocation id variant would be a fresh nonce");
+    }
+
+    [Fact(DisplayName = "Positive control: a bare-authority target is accepted end to end")]
+    public async Task BareAuthorityTarget_Accepted()
+    {
+        var (_, delegated, _, leafDid) = await DelegateAsync("https://bare.example.com");
+        var invocation = await SignEnvelopeAsync(delegated, leafDid);
+
+        (await CreateVerifier().VerifyInvocationDetailedAsync(invocation, delegated)).Outcome.Should().Be(VerificationOutcome.Valid);
+    }
+
     [Fact(DisplayName = "A verification method RDF cannot bind is refused")]
     public async Task UnbindableVerificationMethod_Refused()
     {

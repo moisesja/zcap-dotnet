@@ -116,8 +116,8 @@ public class CapabilityService : ICapabilityService
 
         // Checked before the profile so a bad inherited or explicit target names its argument.
         var target = invocationTarget ?? parentCapability.InvocationTarget;
-        if (!CanonicalIri.IsBindable(target))
-            throw new ArgumentException($"Delegated target {CanonicalIri.BindableMessage}.",
+        if (!CanonicalIri.IsSignedTarget(target))
+            throw new ArgumentException($"Delegated target {CanonicalIri.TargetMessage}.",
                 invocationTarget is null ? nameof(parentCapability) : nameof(invocationTarget));
         CapabilityProfile.EnsureSupported(parentCapability, caveats: _caveats);
         var caveatEntries = BuildCaveats(parentCapability, caveats);
@@ -229,9 +229,9 @@ public class CapabilityService : ICapabilityService
                 "Invocation target cannot be null or empty (the capability has none to default to).",
                 nameof(invocationTarget));
         }
-        if (!CanonicalIri.IsBindable(target))
+        if (!CanonicalIri.IsSignedTarget(target))
         {
-            throw new ArgumentException($"Invocation target {CanonicalIri.BindableMessage}.", nameof(invocationTarget));
+            throw new ArgumentException($"Invocation target {CanonicalIri.TargetMessage}.", nameof(invocationTarget));
         }
 
         // Root capability → reference by id string; delegated → embed the full zcap object so the

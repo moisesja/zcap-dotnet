@@ -398,7 +398,6 @@ public class CapabilityProfileTests
     [InlineData("", "&section=one", false)]
     [InlineData("?section=one", "?view=summary", false)]
     [InlineData("?section=one", "/child", false)]
-    [InlineData("", "/../secret", false)]
     public async Task TargetPolicy_GatesDelegationAndBothInvocationForms(string baseSuffix, string suffix, bool validNarrowing)
     {
         var (root, leaf) = await Chain("https://example.com/r" + baseSuffix);
@@ -427,6 +426,40 @@ public class CapabilityProfileTests
         else
         {
             await Assert.ThrowsAsync<ArgumentException>(() => _caps.DelegateCapabilityAsync(root, _holder, ["read"], DateTime.UtcNow.AddDays(1), invocationTarget: target));
+        }
+    }
+
+    // RDFC signs a target after removing dot segments (literal or percent-encoded), so the signed
+    // target would lie outside the delegated path while the string still passes prefix matching.
+    [Theory]
+    [InlineData("/../secret")]
+    [InlineData("/%2E%2E/secret")]
+    [InlineData("/%2e%2e/secret")]
+    [InlineData("/./child")]
+    [InlineData("/child/.")]
+    public async Task DotSegmentTargets_RefusedAtSigningAndVerification(string suffix)
+    {
+        var (root, leaf) = await Chain("https://example.com/r/public");
+        var target = leaf.InvocationTarget + suffix;
+
+        Assert.Throws<ArgumentException>(() => _caps.CreateInvocation(leaf, "read", target));
+        await Assert.ThrowsAsync<CapabilityValidationException>(() => _signing.SignCapabilityInvocationAsync(
+            InvocationCapability.FromCapability(leaf), "read", target, _holder));
+        await Assert.ThrowsAsync<ArgumentException>(() => _caps.DelegateCapabilityAsync(
+            root, _holder, ["read"], DateTime.UtcNow.AddDays(1), invocationTarget: target));
+
+        // An attacker's own signer can still produce these; the verifier must refuse them.
+        var envelope = _caps.CreateInvocation(leaf, "read");
+        envelope.InvocationTarget = target;
+        envelope.Proof = await RawProofSigner.SignInvocationAsync(_dids, envelope, _holder);
+        var child = Copy(leaf);
+        child.InvocationTarget = target;
+        child.Proof = await RawProofSigner.SignCapabilityAsync(_dids, child, _owner, [root.Id]);
+        foreach (var allow in new[] { false, true })
+        {
+            (await Verifier(allow).VerifyInvocationAsync(envelope, leaf, root)).Should().BeFalse();
+            (await Verifier(allow).VerifyCapabilityChainAsync(child, root)).Should().BeFalse();
+            (await Verifier(allow).VerifyCapabilityProofAsync(child, root)).Should().BeFalse();
         }
     }
 }

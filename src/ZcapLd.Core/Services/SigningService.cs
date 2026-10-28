@@ -238,8 +238,8 @@ public class SigningService : ISigningService
         var verificationMethod = await _resolver.GetVerificationMethodAsync(signerDid);
         var created = ZcapTimestamps.Format(createdOverride ?? DateTime.UtcNow);
 
-        if (!CanonicalIri.IsBindable(invocationTarget))
-            throw new CapabilityValidationException($"The invocation target {CanonicalIri.BindableMessage}.");
+        if (!CanonicalIri.IsSignedTarget(invocationTarget))
+            throw new CapabilityValidationException($"The invocation target {CanonicalIri.TargetMessage}.");
         var document = BuildInvocationRequestDocument(applicationDocument, suite.ContextUrl);
         if (!CanonicalIri.IsCanonical(TryGetString(document, "id")))
             throw new CapabilityValidationException(
@@ -303,8 +303,8 @@ public class SigningService : ISigningService
         if (!CanonicalIri.IsCanonical(invocation.Id))
             throw new CapabilityValidationException(
                 $"The invocation id is the replay nonce and {CanonicalIri.RequirementMessage}.");
-        if (!CanonicalIri.IsBindable(invocation.InvocationTarget))
-            throw new CapabilityValidationException($"The invocation target {CanonicalIri.BindableMessage}.");
+        if (!CanonicalIri.IsSignedTarget(invocation.InvocationTarget))
+            throw new CapabilityValidationException($"The invocation target {CanonicalIri.TargetMessage}.");
         var invocationWithoutProof = ProofSigningPayloadBuilder.CloneInvocationWithoutProof(invocation);
         var resolvedKey = await _resolver.ResolvePublicKeyAsync(signerDid);
         var suite = ZcapSuiteCatalog.GetByKeyType(resolvedKey.KeyType)

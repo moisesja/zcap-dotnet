@@ -50,6 +50,12 @@ Planned as 6.0.0 (breaking: new interface/constructor parameters and in-stack si
   was malformed lost its whole node from the signature (controller, actions and caveats became
   editable). Ids, `parentCapability`, targets and controllers must now be well-formed absolute
   IRIs at signing and verification; percent-encode brackets.
+- dotNetRDF also signs some IRIs in a form .NET does not predict. Encoded dot segments in a target
+  (`…/public/%2E%2E/admin`) signed as a path outside the delegation while the string passed
+  prefix matching under target attenuation. A trailing segment of invisible characters in an
+  http(s) id (`…/7/%C2%AD`) signed as `…/7/` and evaded revocation and replay keys. Ids and targets
+  must now be signed exactly as written: the verifier canonicalizes them with the same RDFC
+  canonicalizer, caching the result. A bare-authority target may gain its root `/`.
 - Caveat type names that are ZCAP or suite context terms are refused at registration.
 - In a proof set the chain walk took the parent from the first delegation proof but accepted
   any proof's signature, so a junk first proof could choose the parent that a valid proof was
