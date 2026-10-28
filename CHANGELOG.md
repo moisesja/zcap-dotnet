@@ -44,6 +44,13 @@ Planned as 6.0.0 (breaking: new interface/constructor parameters and in-stack si
   an invocation could be replayed under a new nonce. Capability ids in a chain,
   `capabilityChain` ids, and invocation, document and revocation-request ids must now be
   absolute IRIs already in `Uri.AbsoluteUri` form; signing refuses other ids.
+- dotNetRDF silently drops IRIs .NET does not consider well formed (for example `[`, `]` or a
+  second `#`). A bracketed invocation target such as `?filter[id]=123` was therefore unsigned and
+  could be rewritten in transit when target attenuation is enabled, and a capability whose own id
+  was malformed lost its whole node from the signature (controller, actions and caveats became
+  editable). Ids, `parentCapability`, targets and controllers must now be well-formed absolute
+  IRIs at signing and verification; percent-encode brackets.
+- Caveat type names that are ZCAP or suite context terms are refused at registration.
 - In a proof set the chain walk took the parent from the first delegation proof but accepted
   any proof's signature, so a junk first proof could choose the parent that a valid proof was
   judged against. A link now verifies only with a proof that signed that same chain, and the

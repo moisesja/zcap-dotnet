@@ -154,10 +154,16 @@ There is deliberately no property bag. **The resource is responsible for:**
 
 ## Identifiers
 
-RDFC normalizes IRIs through `System.Uri`, so a variant id would verify as the signed one. The
-verifier therefore accepts capability ids, `capabilityChain` ids, invocation ids and revocation
-request ids only in normalized absolute form (`new Uri(id).AbsoluteUri == id`), and signing
-refuses other ids. This applies in every profile.
+RDFC normalizes IRIs through `System.Uri`, so a variant id would verify as the signed one. It
+also silently drops an IRI that .NET does not consider well formed, such as one containing `[`,
+`]` or a second `#`. A malformed id removes the whole node from the signed graph; a malformed target
+or controller removes that triple. The rules below apply in every profile, at signing and at
+verification:
+
+- Capability ids, `parentCapability`, `capabilityChain` ids, invocation ids and revocation request
+  ids must be well-formed absolute IRIs already in normalized form (`new Uri(id).AbsoluteUri == id`).
+- Capability and invocation targets and controllers must be well-formed absolute IRIs. Percent-encode
+  `[` and `]`, for example `?filter%5Bid%5D=123`.
 
 ## Registering types
 

@@ -41,6 +41,9 @@ internal sealed class CaveatTypeRegistration
         if (string.IsNullOrEmpty(type) || !CaveatTypeRegistry.NamePattern.IsMatch(type))
             throw new ArgumentException(
                 "A caveat type is an ASCII letter followed by up to 63 ASCII letters, digits or underscores.", nameof(type));
+        if (ReservedTerms.Value.Contains(type))
+            throw new ArgumentException(
+                $"Caveat type '{type}' is a term of the ZCAP or signature-suite contexts.", nameof(type));
         if (clrType.IsAbstract || !typeof(Caveat).IsAssignableFrom(clrType))
             throw new ArgumentException($"{clrType.FullName} must be a concrete Caveat subclass.", nameof(clrType));
 

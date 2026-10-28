@@ -171,6 +171,92 @@ public class SignedBindingTests
             .Should().BeFalse("revocation is keyed by the id string, so a variant id must not verify as the same capability");
     }
 
+    private VerificationService CreateAttenuatingVerifier()
+        => new(_didProvider, new RevocationService(new InMemoryRevocationStore()), new InMemoryNonceStore(),
+            policy: new VerificationPolicy { AllowTargetAttenuation = true });
+
+    [Fact(DisplayName = "Envelope invocation: a target RDF cannot bind is refused, so it cannot be rewritten")]
+    public async Task EnvelopeInvocation_UnbindableTarget_Refused()
+    {
+        var (_, delegated, _, leafDid) = await DelegateAsync();
+        var invocation = _capabilityService.CreateInvocation(delegated, "read");
+        invocation.InvocationTarget = Target + "/Patient?filter[id]=123";
+        // SigningService refuses such targets; an attacker's own signer would not.
+        invocation.Proof = await RawProofSigner.SignInvocationAsync(_didProvider, invocation, leafDid);
+        invocation.InvocationTarget = invocation.Proof.InvocationTarget = Target + "/Admin?filter[id]=999";
+
+        var result = await CreateAttenuatingVerifier().VerifyInvocationDetailedAsync(invocation, delegated);
+
+        result.IsValid.Should().BeFalse("a bracketed target is dropped from the signed graph");
+    }
+
+    [Fact(DisplayName = "Signing refuses an invocation target RDF cannot bind")]
+    public async Task SignInvocation_UnbindableTarget_Throws()
+    {
+        var (_, delegated, _, leafDid) = await DelegateAsync();
+
+        var create = () => _capabilityService.CreateInvocation(delegated, "read", Target + "/x?filter[id]=1");
+        var signDi = () => _signingService.SignCapabilityInvocationAsync(
+            InvocationCapability.FromCapability(delegated), "read", Target + "/x?filter[id]=1", leafDid);
+
+        create.Should().Throw<ArgumentException>();
+        await signDi.Should().ThrowAsync<ZcapLd.Core.Exceptions.CapabilityValidationException>();
+    }
+
+    [Fact(DisplayName = "DI invocation: a target RDF cannot bind is refused, so it cannot be rewritten")]
+    public async Task DataIntegrityInvocation_UnbindableTarget_Refused()
+    {
+        var (_, delegated, _, leafDid) = await DelegateAsync();
+        var signedTarget = Target + "/Observation?filter[patient]=123";
+        var secured = await _signingService.SignCapabilityInvocationAsync(
+            InvocationCapability.FromCapability(delegated), "read", Target + "/Observation?patient=123", leafDid);
+        // Model the attacker's own signer: put a bracketed target in place and re-sign is not possible
+        // through SigningService, so verify the guard directly on the rewritten document.
+        secured["proof"]!["invocationTarget"] = signedTarget;
+
+        (await CreateAttenuatingVerifier().VerifyCapabilityInvocationDetailedAsync(secured, "read", signedTarget)).Outcome
+            .Should().Be(VerificationOutcome.MalformedCapability);
+    }
+
+    [Theory(DisplayName = "Ids RDF drops entirely are refused at signing and verification")]
+    [InlineData("urn:uuid:5c0a1a3e-4d4e-4a8f-9f43-8f3b3f1b6a11[0]")]
+    [InlineData("urn:uuid:5c0a1a3e-4d4e-4a8f-9f43-8f3b3f1b6a11#a#b")]
+    public async Task UnbindableCapabilityId_Refused(string id)
+    {
+        var (root, delegated, rootDid, _) = await DelegateAsync();
+        var forged = CapabilityJson.Edit(delegated, json => { json.Remove("proof"); json["id"] = id; });
+
+        var sign = () => _signingService.SignCapabilityAsync(forged, rootDid, "capabilityDelegation", new object[] { root.Id });
+        await sign.Should().ThrowAsync<ZcapLd.Core.Exceptions.CapabilityValidationException>();
+
+        forged.Proof = await RawProofSigner.SignCapabilityAsync(_didProvider, forged, rootDid, new object[] { root.Id });
+        var stolen = CapabilityJson.Edit(forged, json => json["controller"] = _didProvider.GenerateDidKey());
+        (await CreateVerifier().VerifyCapabilityChainDetailedAsync(stolen)).IsValid.Should().BeFalse();
+        (await CreateVerifier().VerifyCapabilityProofDetailedAsync(stolen)).IsValid.Should().BeFalse();
+    }
+
+    [Fact(DisplayName = "An invocation id RDF drops cannot be varied to replay")]
+    public async Task UnbindableInvocationId_Refused()
+    {
+        var (_, delegated, _, leafDid) = await DelegateAsync();
+        var invocation = _capabilityService.CreateInvocation(delegated, "read");
+        invocation.Id = $"urn:uuid:{Guid.NewGuid()}[0]";
+        invocation.Proof = await RawProofSigner.SignInvocationAsync(_didProvider, invocation, leafDid);
+
+        (await CreateVerifier().VerifyInvocationDetailedAsync(invocation, delegated)).Outcome
+            .Should().Be(VerificationOutcome.MalformedCapability);
+    }
+
+    [Fact(DisplayName = "A controller RDF cannot bind is refused")]
+    public async Task UnbindableController_Refused()
+    {
+        var (root, delegated, rootDid, _) = await DelegateAsync();
+        var forged = CapabilityJson.Edit(delegated, json => { json.Remove("proof"); json["controller"] = "did:example:holder[1]"; });
+        forged.Proof = await RawProofSigner.SignCapabilityAsync(_didProvider, forged, rootDid, new object[] { root.Id });
+
+        (await CreateVerifier().VerifyCapabilityChainDetailedAsync(forged)).IsValid.Should().BeFalse();
+    }
+
     [Fact(DisplayName = "Proof set: the parent comes from the proof that verifies, not a junk proof")]
     public async Task ProofSet_JunkProofCannotChooseTheParent()
     {

@@ -86,6 +86,19 @@ public class CaveatTypeRegistryTests
         act.Should().Throw<ArgumentException>();
     }
 
+    [Theory(DisplayName = "Type names that are ZCAP or suite context terms are refused")]
+    [InlineData("expires")]
+    [InlineData("controller")]
+    [InlineData("caveat")]
+    [InlineData("proofPurpose")]
+    [InlineData("Ed25519Signature2020")]
+    public void Register_ReservedTypeName_Throws(string type)
+    {
+        var act = () => new CaveatTypeRegistry().Register<EpsilonBudgetCaveat>(type);
+
+        act.Should().Throw<ArgumentException>();
+    }
+
     [Fact(DisplayName = "A name longer than 64 characters is refused")]
     public void Register_LongTypeName_Throws()
     {

@@ -130,6 +130,9 @@ bash interop/run-interop.sh
 - **Identifiers (#157)**: RDFC normalizes IRIs, so keys must be the signed form. Capability,
   chain, invocation, document and revocation-request ids must be absolute IRIs equal to
   `Uri.AbsoluteUri` (`CanonicalIri`). Never key revocation, replay or budgets on a variant.
+  dotNetRDF also silently drops IRIs .NET deems malformed (`[`, `]`, a second `#`), so targets,
+  controllers and parent ids must be `CanonicalIri.IsBindable` too; an unbindable id unsigns the
+  whole capability.
 - **Serialization**: `ZcapJsonOptions.Default` preserves union shapes, opaque timestamp
   strings and extension data, and rejects duplicate JSON properties. RDFC can drop
   undefined terms: extension preservation alone does not make a field authenticated.

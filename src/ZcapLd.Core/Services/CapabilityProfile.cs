@@ -82,6 +82,8 @@ internal static class CapabilityProfile
             if (value is null or string) return true;
             if (value is Capability cap)
             {
+                if (BindingFailure(cap) is { } binding)
+                    return Fail(Malformed(binding));
                 if (!CheckContext(cap.Context) ||
                     cap.AdditionalProperties?.ContainsKey("@context") == true ||
                     !CheckCapabilityProperties(cap.AdditionalProperties, cap.Context, depth)) return false;
@@ -187,6 +189,21 @@ internal static class CapabilityProfile
             failure ??= result;
             return false;
         }
+    }
+
+    // Fields RDFC would silently drop (or normalize) cannot be trusted: a malformed id removes the
+    // whole capability from the signed graph, a malformed target or controller removes that triple.
+    private static string? BindingFailure(Capability capability)
+    {
+        if (!string.IsNullOrEmpty(capability.Id) && !CanonicalIri.IsCanonical(capability.Id))
+            return $"Capability id {CanonicalIri.RequirementMessage}.";
+        if (!string.IsNullOrEmpty(capability.ParentCapability) && !CanonicalIri.IsCanonical(capability.ParentCapability))
+            return $"parentCapability {CanonicalIri.RequirementMessage}.";
+        if (!string.IsNullOrEmpty(capability.InvocationTarget) && !CanonicalIri.IsBindable(capability.InvocationTarget))
+            return $"invocationTarget {CanonicalIri.BindableMessage}.";
+        if (capability.Controller?.Values.Any(controller => !CanonicalIri.IsBindable(controller)) == true)
+            return $"Every controller {CanonicalIri.BindableMessage}.";
+        return null;
     }
 
     private static VerificationResult Malformed(string message)
