@@ -43,7 +43,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Known limitation, not fixed here: revocation records are keyed by bare capability id. Anyone
   with a valid chain under any trusted root can force-revoke non-root ids, including delegated
   ids under other roots and custom root ids trusted only by another verifier sharing the store.
-  See "Revocation scope" in `architecture.md` for deployment guidance.
+  See "Revocation scope" in `architecture.md` for deployment guidance. Tracked in #158.
 
 ## [5.0.0] - 2026-10-25
 

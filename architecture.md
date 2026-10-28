@@ -155,7 +155,7 @@ capability's id and revoke it. The demonstrated reach is:
 The effect is forced revocation, not an authority grant. It crosses tenants whenever one
 verifier or one revocation store serves several root owners, and capability ids are not
 secret. Fixing it means scoping records to their authorizing root and delegator, which
-changes the store interface; it is tracked as a follow-up to #155. Until then:
+changes the store interface; it is tracked in #158. Until then:
 
 - use `urn:zcap:root:` ids for roots, because an unresolvable id in that form is refused;
 - co-host roots on one verifier, or share one revocation store, only among parties
