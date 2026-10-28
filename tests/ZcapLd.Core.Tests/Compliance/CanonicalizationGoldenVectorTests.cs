@@ -69,6 +69,8 @@ public class CanonicalizationGoldenVectorTests
         // Locks the RDFC-1.0 signing payload for an INVOCATION (the per-stack byte-stability guard the
         // deleted JCS invocation pin used to provide). Cross-stack invocation interop is separate and
         // deferred (#117); this only pins zcap-dotnet's own invocation signing bytes against drift.
+        // #157 deliberately changed this vector: envelopes are now canonicalized under zcap/v1 plus
+        // the suite context, so created/proofPurpose/verificationMethod are signed (they were dropped).
         var invocation = new Invocation
         {
             Id = "urn:uuid:00000000-0000-0000-0000-0000000000a1",
@@ -91,7 +93,11 @@ public class CanonicalizationGoldenVectorTests
         var payload = ProofSigningPayloadBuilder.CanonicalizeInvocationPayload(
             invocation, proof, new RdfcDocumentCanonicalizer());
         Convert.ToHexString(SHA256.HashData(payload)).Should().Be(
-            "FE2FD435B527FE991644212490FFE362A4070CEF2508C327A5A3F9998756D83C",
+            "A89BAA5F2BFBBF3FC74A08DB5870D9FDDF453611087D87336146ACC811933983",
             "the RDFC-1.0 invocation signing payload must stay byte-stable");
+
+        proof.Created = "2026-06-13T00:00:01.000000Z";
+        ProofSigningPayloadBuilder.CanonicalizeInvocationPayload(invocation, proof, new RdfcDocumentCanonicalizer())
+            .Should().NotEqual(payload, "proof.created must be part of the signed invocation payload");
     }
 }

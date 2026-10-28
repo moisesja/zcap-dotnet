@@ -44,7 +44,7 @@ internal sealed class LegacyProofCrypto
         var suite = Resolve(proofOptions.Type)
             ?? throw new CryptographicException($"No legacy cryptosuite for proof type: {proofOptions.Type}");
 
-        var document = BuildDocumentElement(documentWithoutProof);
+        var document = BuildDocumentElement(documentWithoutProof, proofOptions.Type);
         var diProofOptions = ToDataIntegrityProof(proofOptions);
 
         var proof = await suite.CreateProofAsync(document, diProofOptions, signer).ConfigureAwait(false);
@@ -78,7 +78,7 @@ internal sealed class LegacyProofCrypto
             return false;
         }
 
-        var document = BuildDocumentElement(documentWithoutProof);
+        var document = BuildDocumentElement(documentWithoutProof, proof.Type);
         var diProof = ToDataIntegrityProof(proof);
         return suite.VerifyProof(document, diProof, publicKey).Verified;
     }
@@ -104,17 +104,16 @@ internal sealed class LegacyProofCrypto
             : new EcdsaSecp256r1Signature2019Cryptosuite(LegacyCanonicalization.Rdfc, RdfCanonicalizer);
 
     // Serializes the document with zcap's JSON options. RDFC-1.0 canonicalization is always used;
-    // for a context-less document (invocations) inject the ZCAP-LD context so JSON-LD expansion
-    // produces the right N-Quads.
+    // for a context-less document (invocations and signed revocations) inject the ZCAP-LD context
+    // and the proof's suite context. The proof options are canonicalized under this same context,
+    // and only the suite context defines created, proofPurpose and verificationMethod: with zcap/v1
+    // alone RDFC dropped them, so a captured request could be re-stamped to pass freshness (#157).
     //
     // Invariant: the only zcap documents that arrive here with an "@context" already present are
-    // Capabilities, and zcap controls the model so that context is always zcap/v1 — so when the
-    // guard finds an existing "@context" it is correct to leave it as-is (re-injecting would be a
-    // no-op). Invocations never set "@context" in the model; this handles the serialized-without-
-    // context case. A foreign/non-zcap "@context" cannot occur for a model-built document; if the
-    // model ever gains one, this guard must be revisited (a different context would make RDFC
-    // expansion silently produce the wrong N-Quads).
-    private static JsonElement BuildDocumentElement(object documentWithoutProof)
+    // Capabilities and Data Integrity application documents, whose contexts the verifier checks
+    // before trusting them — so an existing "@context" is left as-is. Invocations never set
+    // "@context" in the model; this handles the serialized-without-context case.
+    private static JsonElement BuildDocumentElement(object documentWithoutProof, string? proofType)
     {
         var element = JsonSerializer.SerializeToElement(documentWithoutProof, ZcapJsonOptions.Default);
 
@@ -122,7 +121,9 @@ internal sealed class LegacyProofCrypto
             && !element.TryGetProperty("@context", out _))
         {
             var node = JsonObject.Create(element)!;
-            node["@context"] = ZcapContext;
+            node["@context"] = ZcapSuiteCatalog.GetByProofType(proofType)?.ContextUrl is { } suiteContext
+                ? new JsonArray(ZcapContext, suiteContext)
+                : ZcapContext;
             return JsonSerializer.SerializeToElement(node, ZcapJsonOptions.Default);
         }
 

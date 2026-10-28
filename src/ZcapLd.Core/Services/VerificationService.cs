@@ -239,6 +239,10 @@ public class VerificationService : IVerificationService
         if ((CapabilityProfile.GetRejectionReason(capability) ?? CapabilityProfile.GetRejectionReason(explicitRoot)) is { } profileReason)
             return VerificationResult.Fail(VerificationOutcome.MalformedCapability, profileReason);
 
+        if (!CanonicalIri.IsCanonical(capability.Id))
+            return VerificationResult.Fail(VerificationOutcome.MalformedCapability,
+                $"Capability id {CanonicalIri.RequirementMessage}.");
+
         if (await IsCapabilityRevokedAsync(capability.Id))
         {
             return VerificationResult.Fail(VerificationOutcome.Revoked,
@@ -261,11 +265,19 @@ public class VerificationService : IVerificationService
         // delegation proof's capabilityChain as id strings (the immediate parent as the embedded
         // object), so sweep the WHOLE chain and reject if ANY ancestor has been revoked — so a
         // revoked root/grandparent fails here too, matching the chain path (the earlier depth-1 fix).
-        var chainProof = capability.Proof?.FirstDelegationProofWithChain();
-        if (chainProof != null && await IsAnyAncestorRevokedAsync(chainProof.CapabilityChain))
+        // Any delegation proof in a set may be the one that verifies, so sweep every proof's chain:
+        // sweeping only the first let a junk first proof hide a revoked ancestor (#157).
+        foreach (var delegationProof in capability.Proof?.DelegationProofs() ?? Enumerable.Empty<Proof>())
         {
-            return VerificationResult.Fail(VerificationOutcome.Revoked,
-                "An ancestor capability in the delegation chain has been revoked.");
+            if (delegationProof.CapabilityChain?.Any(entry => !CanonicalIri.IsCanonical(ExtractCapabilityId(entry))) == true)
+                return VerificationResult.Fail(VerificationOutcome.MalformedCapability,
+                    $"Every capabilityChain id {CanonicalIri.RequirementMessage}.");
+
+            if (await IsAnyAncestorRevokedAsync(delegationProof.CapabilityChain))
+            {
+                return VerificationResult.Fail(VerificationOutcome.Revoked,
+                    "An ancestor capability in the delegation chain has been revoked.");
+            }
         }
 
         try
@@ -301,7 +313,8 @@ public class VerificationService : IVerificationService
         Capability? parentCapabilityOverride,
         bool requireParentAuthorization,
         Capability? explicitRoot = null,
-        bool applyCreatedCheck = true)
+        bool applyCreatedCheck = true,
+        object[]? requiredChain = null)
     {
         if (capability.Proof == null)
         {
@@ -315,10 +328,22 @@ public class VerificationService : IVerificationService
         // suite, unresolvable key, bad signature, unauthorized signer) must not reject the
         // others, and non-delegation proofs in the set are simply ignored here. When every proof
         // fails, surface the last specific reason (the common single-proof case is exact).
+        //
+        // On the chain walk the parent was resolved from one proof's capabilityChain
+        // (requiredChain). Only a proof that signed that same chain may authorize the link;
+        // otherwise a junk proof could choose the parent a different, valid proof is judged
+        // against (#157).
         var lastFailure = VerificationResult.Fail(VerificationOutcome.InvalidDelegation,
             "No capabilityDelegation proof could be verified.");
         foreach (var proof in capability.Proof.DelegationProofs())
         {
+            if (requiredChain is not null && !IsSameChain(proof.CapabilityChain, requiredChain))
+            {
+                lastFailure = VerificationResult.Fail(VerificationOutcome.InvalidDelegation,
+                    "Delegation proof does not carry the capabilityChain its parent was resolved from.");
+                continue;
+            }
+
             var result = await VerifySingleDelegationProofAsync(
                 capability, proof, parentCapabilityOverride, requireParentAuthorization, explicitRoot,
                 applyCreatedCheck);
@@ -595,6 +620,16 @@ public class VerificationService : IVerificationService
                 return VerificationResult.Fail(VerificationOutcome.MalformedCapability,
                     "Proof does not have the capabilityInvocation proofPurpose.");
 
+            // The document id is the replay nonce (step 11). A relative or non-normalized id is not
+            // what RDFC signs, so a captured invocation could be replayed under a new nonce (#157).
+            var nonce = TryGetDocId(securedDocument);
+            if (string.IsNullOrEmpty(nonce))
+                return VerificationResult.Fail(VerificationOutcome.MalformedCapability,
+                    "Secured invocation document is missing an id (required as the replay nonce).");
+            if (!CanonicalIri.IsCanonical(nonce))
+                return VerificationResult.Fail(VerificationOutcome.MalformedCapability,
+                    $"Secured invocation document id {CanonicalIri.RequirementMessage}.");
+
             var applicationDocument = securedDocument.DeepClone()!.AsObject();
             applicationDocument.Remove("proof");
 
@@ -709,11 +744,8 @@ public class VerificationService : IVerificationService
                 return VerificationResult.Fail(VerificationOutcome.UnauthorizedController,
                     "Invoker is not authorized by the capability's controller for capabilityInvocation.");
 
-            // 11. Replay protection keyed on the application document id (the spec's invocation id / nonce).
-            var nonce = TryGetDocId(securedDocument);
-            if (string.IsNullOrEmpty(nonce))
-                return VerificationResult.Fail(VerificationOutcome.MalformedCapability,
-                    "Secured invocation document is missing an id (required as the replay nonce).");
+            // 11. Replay protection keyed on the application document id (the spec's invocation id /
+            // nonce), validated as a signed, normalized IRI before step 1a.
             if (await _nonceStore.TryMarkAsUsedAsync(nonce, DateTime.UtcNow.Add(_nonceWindow)))
                 return VerificationResult.Fail(VerificationOutcome.Replayed,
                     "Invocation nonce has already been used within the replay window.");
@@ -747,6 +779,14 @@ public class VerificationService : IVerificationService
             {
                 return VerificationResult.Fail(VerificationOutcome.MalformedCapability,
                     "Invocation is missing a required id.");
+            }
+
+            // The id is the replay nonce; a variant the signature does not distinguish would be a
+            // fresh nonce for a captured invocation (#157).
+            if (!CanonicalIri.IsCanonical(invocation.Id))
+            {
+                return VerificationResult.Fail(VerificationOutcome.MalformedCapability,
+                    $"Invocation id {CanonicalIri.RequirementMessage}.");
             }
 
             // 1. Verify the capability chain is valid. Build it once here and reuse the same chain
@@ -1119,7 +1159,8 @@ public class VerificationService : IVerificationService
                     child,
                     parentCapabilityOverride: parent,
                     requireParentAuthorization: true,
-                    applyCreatedCheck: applyCreatedCheck);
+                    applyCreatedCheck: applyCreatedCheck,
+                    requiredChain: child.Proof?.FirstDelegationProofWithChain()?.CapabilityChain);
                 if (!linkResult.IsValid)
                     return linkResult;
 
@@ -1232,6 +1273,12 @@ public class VerificationService : IVerificationService
                 throw new CapabilityValidationException("Capability in chain is missing required id.");
             }
 
+            if (!CanonicalIri.IsCanonical(current.Id))
+            {
+                throw new CapabilityValidationException(
+                    $"Capability id '{current.Id}' in chain {CanonicalIri.RequirementMessage}.");
+            }
+
             if (!visitedIds.Add(current.Id))
             {
                 throw new CapabilityValidationException(
@@ -1323,6 +1370,13 @@ public class VerificationService : IVerificationService
         object[] rawChain, Capability current, string chainRootId, Capability? explicitRoot)
     {
         var parentId = current.ParentCapability!;
+
+        // Every id the chain names is a revocation key; only the normalized form is signed.
+        if (rawChain.Any(entry => !CanonicalIri.IsCanonical(ExtractCapabilityId(entry))))
+        {
+            throw new CapabilityValidationException(
+                $"Every capabilityChain id {CanonicalIri.RequirementMessage}.");
+        }
 
         // First-level delegation: the parent IS the root, referenced by id only -> chain is EXACTLY [rootId].
         if (string.Equals(parentId, chainRootId, StringComparison.Ordinal))
@@ -1762,6 +1816,21 @@ public class VerificationService : IVerificationService
     }
 
     /// <summary>
+    /// True when two <c>capabilityChain</c> values are the same JSON (compared by RFC 8785
+    /// canonical form, so an in-memory <see cref="Capability"/> equals its wire JSON).
+    /// </summary>
+    private static bool IsSameChain(object[]? first, object[] second)
+    {
+        if (first is null || first.Length != second.Length)
+            return false;
+
+        static byte[] Canonical(object[] chain) => NetCid.JcsCanonicalizer.Canonicalize(
+            JsonSerializer.SerializeToElement(chain, ZcapJsonOptions.Default));
+
+        return ReferenceEquals(first, second) || Canonical(first).AsSpan().SequenceEqual(Canonical(second));
+    }
+
+    /// <summary>
     /// Extracts the capability id from a <c>capabilityChain</c> element — a bare id string for
     /// root/intermediate ancestors, or the <c>id</c> of an embedded parent object — without a
     /// full model deserialization. Returns null when no id can be read.
@@ -1841,7 +1910,9 @@ public class VerificationService : IVerificationService
                 !CapabilityProfile.IsSupportedProof(signedRevocation.Proof))
                 return false;
 
-            if (string.IsNullOrWhiteSpace(signedRevocation.Id))
+            // The request id is the replay nonce and the capability id the revocation key; only their
+            // normalized forms are bound by the signatures (#157).
+            if (!CanonicalIri.IsCanonical(signedRevocation.Id) || !CanonicalIri.IsCanonical(capability.Id))
                 return false;
 
             var proof = signedRevocation.Proof;

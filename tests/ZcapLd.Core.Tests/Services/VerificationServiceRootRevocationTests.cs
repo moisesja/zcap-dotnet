@@ -347,8 +347,9 @@ public class VerificationServiceRootRevocationTests
 
         var recasedId = "URN:ZCAP:ROOT:" + rootB.Id["urn:zcap:root:".Length..];
         var forged = ForgeDelegation(recasedId, holder, delegation.Id, delegation.InvocationTarget, new[] { "read" });
-        forged.Proof = await _signingService.SignCapabilityAsync(
-            forged, holder, "capabilityDelegation", new object[] { rootA.Id, delegation });
+        // SigningService refuses a non-normalized id, so sign as an attacker's own signer would.
+        forged.Proof = await RawProofSigner.SignCapabilityAsync(
+            _didProvider, forged, holder, new object[] { rootA.Id, delegation });
 
         var request = await _signingService.SignRevocationAsync(forged.Id, holder, forged.InvocationTarget);
         (await verifier.RevokeCapabilityAsync(forged, request)).Should().BeFalse();

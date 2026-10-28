@@ -110,14 +110,19 @@ internal static class ProofSigningPayloadBuilder
     private static byte[] CanonicalizeInvocationRdfc(
         Invocation invocationWithoutProof, Proof proof, IDocumentCanonicalizer canonicalizer)
     {
-        // Invocations don't carry @context on the model, so add the ZCAP-LD default for JSON-LD processing.
+        // Invocations don't carry @context on the model, so add the ZCAP-LD context plus the proof's
+        // suite context (which defines created/proofPurpose/verificationMethod) — mirroring
+        // LegacyProofCrypto.BuildDocumentElement.
         const string ZcapContext = "https://w3id.org/zcap/v1";
+        object context = ZcapSuiteCatalog.GetByProofType(proof.Type)?.ContextUrl is { } suiteContext
+            ? new[] { ZcapContext, suiteContext }
+            : ZcapContext;
 
         var invocationDoc = ToFieldDictionary(invocationWithoutProof);
-        invocationDoc["@context"] = JsonSerializer.SerializeToElement(ZcapContext, ModelSerializerOptions);
+        invocationDoc["@context"] = JsonSerializer.SerializeToElement(context, ModelSerializerOptions);
 
         var proofOptions = ToFieldDictionary(proof, exclude: "proofValue");
-        proofOptions["@context"] = JsonSerializer.SerializeToElement(ZcapContext, ModelSerializerOptions);
+        proofOptions["@context"] = JsonSerializer.SerializeToElement(context, ModelSerializerOptions);
 
         return ConcatenateHashes(
             canonicalizer.Canonicalize(invocationDoc),

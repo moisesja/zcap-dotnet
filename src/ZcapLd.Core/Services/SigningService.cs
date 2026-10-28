@@ -63,6 +63,8 @@ public class SigningService : ISigningService
             throw new ArgumentException("Proof purpose cannot be null or empty", nameof(proofPurpose));
 
         CapabilityProfile.EnsureSupported(capability, capabilityChain);
+        if (!CanonicalIri.IsCanonical(capability.Id))
+            throw new CapabilityValidationException($"Capability id {CanonicalIri.RequirementMessage}.");
         var capabilityWithoutProof = ProofSigningPayloadBuilder.CloneCapabilityWithoutProof(capability);
         var resolvedKey = await _resolver.ResolvePublicKeyAsync(signerDid);
         var suite = ZcapSuiteCatalog.GetByKeyType(resolvedKey.KeyType)
@@ -229,6 +231,9 @@ public class SigningService : ISigningService
         var created = ZcapTimestamps.Format(createdOverride ?? DateTime.UtcNow);
 
         var document = BuildInvocationRequestDocument(applicationDocument, suite.ContextUrl);
+        if (!CanonicalIri.IsCanonical(TryGetString(document, "id")))
+            throw new CapabilityValidationException(
+                $"The invocation document id is the replay nonce and {CanonicalIri.RequirementMessage}.");
 
         // Invocation proof: capability/action/target live ONLY here. No capabilityChain (that is a
         // delegation-proof field), and no @context (the verifier derives it from the document).
@@ -272,6 +277,10 @@ public class SigningService : ISigningService
         };
     }
 
+    private static string? TryGetString(JsonObject document, string name)
+        => document.TryGetPropertyValue(name, out var node) && node is JsonValue value
+           && value.TryGetValue<string>(out var text) ? text : null;
+
     private async Task<Proof> SignInvocationProofAsync(
         Invocation invocation,
         string signerDid,
@@ -281,6 +290,9 @@ public class SigningService : ISigningService
     {
         CapabilityProfile.EnsureSupported(invocation.Capability?.EmbeddedCapability);
         CapabilityProfile.EnsureSupported(invocation.Proof?.Capability?.EmbeddedCapability);
+        if (!CanonicalIri.IsCanonical(invocation.Id))
+            throw new CapabilityValidationException(
+                $"The invocation id is the replay nonce and {CanonicalIri.RequirementMessage}.");
         var invocationWithoutProof = ProofSigningPayloadBuilder.CloneInvocationWithoutProof(invocation);
         var resolvedKey = await _resolver.ResolvePublicKeyAsync(signerDid);
         var suite = ZcapSuiteCatalog.GetByKeyType(resolvedKey.KeyType)
