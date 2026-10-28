@@ -22,6 +22,9 @@ internal static class CapabilityProfile
     internal const string KeywordKeyMessage =
         "Capability and proof JSON may not use JSON-LD keywords (other than @context) or IRIs as keys: they " +
         "can restate signed terms the verifier does not read.";
+    internal const string ProofMemberTypeMessage =
+        "A proof member has a JSON type the Data Integrity proof model does not accept (for example, a " +
+        "domain, challenge or nonce that is not a string).";
     internal const string InspectionLimitMessage =
         "Capability/proof inspection exceeds the depth (64) or visited-value (65536) limit.";
 
@@ -95,7 +98,9 @@ internal static class CapabilityProfile
                      Fail(Malformed($"verificationMethod {CanonicalIri.BindableMessage}."))) &&
                     CheckProperties(proof.AdditionalProperties, depth + 1) &&
                     (proof.CapabilityChain == null || proof.CapabilityChain.All(entry => Check(entry, depth + 1, capabilityLevel: true))) &&
-                    Check(proof.Capability?.EmbeddedCapability, depth + 1, capabilityLevel: true));
+                    Check(proof.Capability?.EmbeddedCapability, depth + 1, capabilityLevel: true) &&
+                    // Last, once the scan has bounded the proof: DataProofs must be able to model it.
+                    (LegacyProofCrypto.TryMapProof(proof, out _) || Fail(Malformed(ProofMemberTypeMessage))));
             }
 
             var json = value is JsonElement element ? element :

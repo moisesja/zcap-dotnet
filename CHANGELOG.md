@@ -110,6 +110,11 @@ Planned as 6.0.0 (breaking: new interface/constructor parameters and in-stack si
 
 ### Fixed
 
+- A proof member DataProofs models with a fixed JSON type, given another type (`"domain": 123`,
+  `"challenge": {}`), made the proof mapping throw. Verification reported `CouldNotVerify`, which is
+  reserved for infrastructure faults, and logged it as one. The profile gate now refuses such a proof
+  as `MalformedCapability` on every path and before signing, and `LegacyProofCrypto.Verify` keeps its
+  never-throw contract.
 - `MapZcapRevocationEndpoints` decoded the `{*capabilityId}` route value a second time although
   ASP.NET Core had already decoded it once (keeping `%2F`). Every root id
   (`urn:zcap:root:https%3A%2F%2F…`) therefore read as a different id: `GET` reported a revoked root

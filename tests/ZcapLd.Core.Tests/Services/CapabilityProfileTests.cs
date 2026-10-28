@@ -471,4 +471,42 @@ public class CapabilityProfileTests
             (await Verifier(allow).VerifyCapabilityProofAsync(child, root)).Should().BeFalse();
         }
     }
+
+    [Theory(DisplayName = "A proof member of the wrong JSON type is malformed on every path, not a verifier fault")]
+    [InlineData("domain", "123")]
+    [InlineData("challenge", "{}")]
+    [InlineData("nonce", "[1]")]
+    [InlineData("previousProof", "{\"x\":1}")]
+    public async Task WrongTypedProofMember_IsMalformed(string member, string json)
+    {
+        // DataProofs models these members with fixed types and cannot map such a proof. That used to
+        // surface as CouldNotVerify, which is reserved for infrastructure faults.
+        var (root, leaf) = await Chain();
+        var value = JsonDocument.Parse(json).RootElement.Clone();
+
+        var envelope = _caps.CreateInvocation(leaf, "read");
+        envelope.Proof = await _signing.SignInvocationAsync(envelope, _holder);
+        envelope.Proof.AdditionalProperties = new() { [member] = value };
+        var envelopeResult = await Verifier().VerifyInvocationDetailedAsync(envelope, leaf, root);
+        envelopeResult.Outcome.Should().Be(VerificationOutcome.MalformedCapability);
+        envelopeResult.Message.Should().Be(CapabilityProfile.ProofMemberTypeMessage);
+
+        var secured = await _signing.SignCapabilityInvocationAsync(
+            InvocationCapability.FromCapability(leaf), "read", leaf.InvocationTarget, _holder);
+        secured["proof"]![member] = JsonNode.Parse(json);
+        (await Verifier().VerifyCapabilityInvocationDetailedAsync(secured, "read", [leaf.InvocationTarget], rootCapability: root))
+            .Outcome.Should().Be(VerificationOutcome.MalformedCapability);
+
+        var delegated = Copy(leaf);
+        delegated.Proof!.Primary.AdditionalProperties = new() { [member] = value };
+        (await Verifier().VerifyCapabilityChainDetailedAsync(delegated, root)).Outcome.Should().Be(VerificationOutcome.MalformedCapability);
+        (await Verifier().VerifyCapabilityProofDetailedAsync(delegated, root)).Outcome.Should().Be(VerificationOutcome.MalformedCapability);
+
+        var store = new InMemoryRevocationStore();
+        var revocation = await _signing.SignRevocationAsync(leaf.Id, _owner, leaf.InvocationTarget);
+        revocation.Proof!.AdditionalProperties = new() { [member] = value };
+        (await new VerificationService(_dids, new RevocationService(store), new InMemoryNonceStore())
+            .RevokeCapabilityAsync(leaf, revocation, root)).Should().BeFalse();
+        (await store.GetByCapabilityIdAsync(leaf.Id)).Should().BeNull();
+    }
 }

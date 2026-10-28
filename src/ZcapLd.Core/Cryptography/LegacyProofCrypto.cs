@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics.CodeAnalysis;
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -81,8 +82,12 @@ internal sealed class LegacyProofCrypto
             return false;
         }
 
+        if (!TryMapProof(proof, out var diProof))
+        {
+            return false;
+        }
+
         var document = BuildDocumentElement(documentWithoutProof, proof);
-        var diProof = ToDataIntegrityProof(proof);
         return suite.VerifyProof(document, diProof, publicKey).Verified;
     }
 
@@ -158,6 +163,24 @@ internal sealed class LegacyProofCrypto
     // LegacyProofCryptoMappingTests pins the survival of capabilityChain (incl. an embedded
     // capability object), capability, capabilityAction, and invocationTarget against that drift.
     // internal (not private) so that test can assert the real mapping rather than a copy.
+    /// <summary>
+    /// Maps <paramref name="proof"/> unless one of the members DataProofs models (<c>domain</c>,
+    /// <c>challenge</c>, <c>nonce</c>, <c>previousProof</c>, …) has a JSON type its model rejects.
+    /// </summary>
+    internal static bool TryMapProof(Proof proof, [NotNullWhen(true)] out DataIntegrityProof? mapped)
+    {
+        try
+        {
+            mapped = ToDataIntegrityProof(proof);
+            return true;
+        }
+        catch (Exception ex) when (ex is JsonException or NotSupportedException or CryptographicException)
+        {
+            mapped = null;
+            return false;
+        }
+    }
+
     internal static DataIntegrityProof ToDataIntegrityProof(Proof proof)
     {
         var element = JsonSerializer.SerializeToElement(proof, ZcapJsonOptions.Default);
