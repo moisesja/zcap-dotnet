@@ -101,6 +101,27 @@ was covered because the context defines `expires`; that did not prove integrity
 of other caveat types. `CapabilityProfileTests` constructs legacy signed fixtures
 below the issuance gate so verifier regressions cannot be masked by signer rejection.
 
+## Opt-in caveat extension profile (#157)
+
+The contract above describes the standard profile (no `CaveatTypeRegistry`), and it is unchanged.
+A verifier configured with a registry admits `caveat` only as specified in
+[the caveat profile](CAVEAT-PROFILE.md). This is an extension outside ZCAP v0.4. Its rules and
+their tests:
+
+| Requirement | Tests |
+| --- | --- |
+| Type and every parameter value are signed; post-signing edits fail, including the embedded ancestor | `CaveatTamperingTests` |
+| Inputs RDFC would drop are rejected (undeclared parameter, unregistered type, missing type context, non-canonical number, null, aliases, nested placement) | `CaveatIntegrityTests` |
+| Children restate and narrow every inherited caveat, even when signed by the real parent controller | `CaveatAttenuationTests` |
+| Only invocation authorizes; chain/proof APIs return `CaveatEnforcementRequired`; missing handler is `UnsupportedCaveat` before the nonce is used | `CaveatIssuanceAndProfileTests`, `CaveatIntegrityTests` |
+| Handlers run after replay checks, atomically debit hierarchical budgets, release on later denial | `CaveatEnforcementTests` |
+| Published deterministic fixtures and RDFC literal = RFC 8785 number domain | `CaveatProfileFixtureTests` |
+| Registration rules (names, reserved terms, extension data, frozen registry) | `CaveatTypeRegistryTests`, ASP.NET `CaveatDependencyInjectionTests` |
+
+Fields the verifier keys on must be signed in every profile: envelope `created` is signed under
+the suite context, ids must be normalized absolute IRIs, and a proof-set link verifies only with
+the proof that signed its parent's chain (`SignedBindingTests`).
+
 ## Revocation and optional verifier policies
 
 Signed revocation requests prove key possession and authorize a controller of

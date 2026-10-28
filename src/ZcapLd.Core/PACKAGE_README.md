@@ -27,12 +27,20 @@ For cross-stack invocation use `SignCapabilityInvocationAsync` and
 `VerifyCapabilityInvocationAsync`; the relying party supplies its expected action
 and target. The root is referenced by ID; a delegated invocation embeds the zcap.
 
-Version 5 removes all typed caveat APIs and invocation-context property overloads.
-Incoming `caveat` fields are rejected even when null or empty. Use `expires`,
-`allowedAction`, and an optional delegation `invocationTarget` instead.
-Equivalent IRI/prefixed keys and nested restrictions are rejected throughout
-capability/proof JSON. Their contexts must be zcap/v1 or a supported proof-suite
-context; inline aliases and unrelated vocabularies are unsupported.
+Prefer `expires`, `allowedAction` and an optional delegation `invocationTarget`.
+Without a `CaveatTypeRegistry`, incoming `caveat` fields are rejected even when null
+or empty, and equivalent IRI/prefixed keys and nested restrictions are rejected
+throughout capability/proof JSON. Contexts must be zcap/v1, a supported proof-suite
+context or a registered caveat context; inline aliases and unrelated vocabularies are
+unsupported.
+
+Version 6 restores custom caveats as an opt-in extension profile (#157), which other
+ZCAP stacks do not accept. Subclass `Caveat` and register the class with
+`CaveatTypeRegistry`. Pass the registry to `SigningService`, `CapabilityService` and
+`VerificationService`, and register an `ICaveatHandler` per type at the resource. Every
+parameter is signed through a pinned per-type context. Children must restate and narrow
+inherited caveats. Only invocation verification authorizes caveats; chain checks return
+`CaveatEnforcementRequired`. See `docs/CAVEAT-PROFILE.md` in the repository.
 `VerificationPolicy.AllowTargetAttenuation` defaults to false; explicitly enable
 it for path/query narrowing. The target API must enforce parameter semantics.
 

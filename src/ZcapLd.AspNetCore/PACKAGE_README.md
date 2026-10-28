@@ -106,6 +106,18 @@ builder.Services.AddZcapServices();
 ```
 
 The default requires exact target matches. Applications enforce path/query semantics.
-Version 5 removes `AddZcapValidWhileTrueSupport`, `AddZcapCaveatType`, and all
-vocabulary caveat processing. Incoming `caveat` fields are rejected. Submit signed
-revocations to the target verifier and use shared durable revocation state across replicas.
+Without registered caveat types, incoming `caveat` fields are rejected. Version 6
+restores `AddZcapCaveatType<T>(type)` for the opt-in caveat extension profile (#157).
+Add `AddZcapCaveatHandler<T>()` for each type the resource enforces, and register both
+before the ZCAP services are first resolved:
+
+```csharp
+builder.Services.AddZcapServices();
+builder.Services.AddZcapCaveatType<EpsilonBudgetCaveat>("EpsilonBudget");
+builder.Services.AddZcapCaveatHandler<EpsilonBudgetLedger>();
+```
+
+The revocation endpoint accepts caveat-bearing capabilities whose types are registered.
+`AddZcapValidWhileTrueSupport` stays removed: no capability-supplied URL is fetched.
+Submit signed revocations to the target verifier and use shared durable revocation state
+across replicas.

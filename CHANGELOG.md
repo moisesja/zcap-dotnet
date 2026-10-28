@@ -7,6 +7,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+Planned as 6.0.0 (breaking: new interface/constructor parameters and in-stack signing bytes).
+
+### Added
+
+- **Custom caveats return as an opt-in extension profile (#157).** Delegated capabilities
+  carry `"caveat": [{ "type": …, …params }]` as in 2.x–4.x. Consumers subclass `Caveat` and
+  register it with `CaveatTypeRegistry.Register<T>(type)` or `AddZcapCaveatType<T>(type)`.
+  `DelegateCapabilityAsync` accepts `caveats:` again. Unlike before, every parameter is signed: each
+  registered type gets a generated, pinned, never-fetched JSON-LD context
+  (`urn:zcap-dotnet:caveat-context:v1:<Type>`) defining the type and each parameter as a JSON
+  literal. Undeclared parameters, unregistered types, caveats without their context,
+  non-canonical numbers and `null` are rejected, because RDFC would drop them (the #149 defect).
+  Children must restate and narrow every inherited caveat (`IsAttenuationOf`); the issuer
+  inherits unrestated ones. Caveats never authorize: resource-owned `ICaveatHandler`s
+  (`AddZcapCaveatHandler`) enforce them at invocation, after signature, authorization,
+  freshness and replay checks, with release on a later denial. New outcomes are
+  `UnsupportedCaveat`, `CaveatNotSatisfied` and `CaveatEnforcementRequired`. Chain and proof
+  verification of a caveat-bearing chain returns `CaveatEnforcementRequired` (not valid), with
+  the authenticated grants and a path-bound `GrantKey` in `VerificationResult.Caveats`.
+  Capabilities with caveats are not interoperable with `@digitalbazaar/zcap`. Without a registry
+  nothing changes. See `docs/CAVEAT-PROFILE.md` and the fixtures in `docs/caveat-profile-v1/`.
+
+### Security
+
+- Envelope invocations and signed revocation requests were canonicalized under `zcap/v1` only.
+  That context does not define `created`, `proofPurpose` or `verificationMethod`, so RDFC
+  dropped them from the signature: a captured request could be re-stamped to pass the #71
+  freshness window after its nonce evicted. Context-less documents are now canonicalized under
+  `zcap/v1` plus the proof's suite context. **Breaking (in-stack wire):** envelope invocations
+  and signed revocations signed by 5.x do not verify under 6.0 and vice versa. Data Integrity
+  application documents and capabilities are unchanged.
+- RDFC normalizes IRIs (scheme/host case, default port, dot segments, escaped unreserved
+  characters, surrounding whitespace) and drops relative ids. A variant id therefore verified
+  as the signed one: a revoked capability could be re-presented as `URN:uuid:…` and verify, and
+  an invocation could be replayed under a new nonce. Capability ids in a chain,
+  `capabilityChain` ids, and invocation, document and revocation-request ids must now be
+  absolute IRIs already in `Uri.AbsoluteUri` form; signing refuses other ids.
+- In a proof set the chain walk took the parent from the first delegation proof but accepted
+  any proof's signature, so a junk first proof could choose the parent that a valid proof was
+  judged against. A link now verifies only with a proof that signed that same chain, and the
+  standalone path sweeps every delegation proof's ancestry for revocation.
+
+### Changed
+
+- `DataProofsDotnet.Core`/`Rdfc`/`Legacy` 1.3.0 → 1.4.0 (emitted bytes unchanged). `NetCid`
+  1.6.0 is now a direct dependency (RFC 8785). NetCrypto 1.7.1 is already the latest release.
+- Breaking API: `ICapabilityService.DelegateCapabilityAsync` gains a trailing `caveats`
+  parameter. `SigningService`, `CapabilityService` and `VerificationService` constructors gain
+  optional caveat parameters. `VerificationOutcome` gains three members (appended).
+
 ### Fixed
 
 - `MapZcapRevocationEndpoints` decoded the `{*capabilityId}` route value a second time although
