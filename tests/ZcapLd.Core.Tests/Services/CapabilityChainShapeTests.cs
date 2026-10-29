@@ -285,6 +285,6 @@ public class CapabilityChainShapeTests
         var signed = await _signing.SignRevocationAsync(d1.Id, childDid, d1.InvocationTarget);
 
         (await _verifier.RevokeCapabilityAsync(d1, signed, root)).Should().BeTrue();
-        (await _verifier.IsCapabilityRevokedAsync(d1.Id)).Should().BeTrue();
+        (await _verifier.IsCapabilityRevokedAsync(d1.Id, RevocationScope.Delegated(rootDid))).Should().BeTrue();
     }
 }

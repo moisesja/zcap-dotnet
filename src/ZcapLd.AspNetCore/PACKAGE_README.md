@@ -4,7 +4,7 @@ Optional ASP.NET Core adapter for `ZcapLd.Core` signed revocation workflows.
 
 ## Features
 
-- Minimal API endpoint rails for revocation status and revocation requests
+- Minimal API endpoint rail for signed revocation requests
 - DI registration helpers for default and custom `IRevocationStore` backends
 - Works with pluggable stores (database, contract client, oracle bridge, cache)
 
@@ -38,7 +38,11 @@ builder.Services.AddZcapRevocationSupport<MyRevocationStore>();
   Body: `{ capability, signedRevocation }` (the latter from `ISigningService.SignRevocationAsync`).
   Returns `403` when unauthenticated/unauthorized. Requires `AddZcapServices()` (it resolves
   `IVerificationService`), not `AddZcapRevocationSupport()` alone.
-- `GET /zcaps/revocations/{*capabilityId}` — anonymous status: `{ capabilityId, isRevoked }`.
+
+There is no status GET. The ZCAP specification and the Digital Bazaar stack define only the POST,
+and a bare id has no single status once records are scoped (#158). Holders learn of revocation
+from a `Revoked` verification outcome; expose `IRevocationService` behind your own authorization
+if you need status queries.
 
 `{*capabilityId}` is `encodeURIComponent(capabilityId)`: one level of percent-encoding, which the
 endpoint decodes exactly once (`Uri.EscapeDataString` output is accepted too). A root id already
@@ -51,10 +55,11 @@ the path turns `%2541` into `%41` and reintroduces the double decode.
 
 Revoking a root over `POST` authorizes against the root the configured `IRootCapabilityResolver`
 returns for that id, never the body's copy, so a root the server cannot resolve is not revocable.
-Other ids are not anchored: records are keyed by bare capability id, so anyone with a valid chain
-under any trusted root can force-revoke non-root ids, including delegated ids under other roots.
-Do not share a host or revocation store between parties that must not be able to revoke each
-other's capabilities. See [Revocation scope](https://github.com/moisesja/zcap-dotnet/blob/main/architecture.md#revocation-scope-known-limitation).
+Delegated capabilities are recorded under the delegator that signed them, so a forged copy of an
+id under another chain lands in the forger's scope and cannot revoke the genuine capability, even
+across roots or verifiers sharing a store. A custom `IRevocationStore` keys rows by
+`RevocationRecord.Key`, never by the capability id, and migrates 5.x rows to unscoped records. See
+[Revocation scope](https://github.com/moisesja/zcap-dotnet/blob/main/architecture.md#revocation-scope).
 
 To customize route prefix:
 

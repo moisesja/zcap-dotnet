@@ -103,7 +103,7 @@ public class VerificationServicePolicyTests
 
         revoked.Should().BeTrue(
             "a long-lived delegation must remain revocable even when the expiration-ceiling policy is on");
-        (await verifier.IsCapabilityRevokedAsync(delegated.Id)).Should().BeTrue();
+        (await verifier.IsCapabilityRevokedAsync(delegated.Id, RevocationScope.ForDelegationProof(delegated.Proof!.Primary))).Should().BeTrue();
     }
 
     [Fact]

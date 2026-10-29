@@ -599,13 +599,13 @@ public class CompositeDidResolverTests
         var carolRequest = await _signing.SignRevocationAsync(toCarol.Id, carol.Did, toCarol.InvocationTarget);
         (await verifier.RevokeCapabilityAsync(toCarol, carolRequest, root)).Should().BeFalse(
             "a key authorized only for capabilityInvocation cannot revoke");
-        (await verifier.IsCapabilityRevokedAsync(toCarol.Id)).Should().BeFalse();
+        (await verifier.IsCapabilityRevokedAsync(toCarol.Id, RevocationScope.Delegated(alice.Did))).Should().BeFalse();
         web.RelationshipCalls.Should().Contain(c =>
             c.Controller == carol.Did && c.Relationship == VerificationRelationship.CapabilityDelegation);
 
         var daveRequest = await _signing.SignRevocationAsync(toDave.Id, dave.Did, toDave.InvocationTarget);
         (await verifier.RevokeCapabilityAsync(toDave, daveRequest, root)).Should().BeTrue();
-        (await verifier.IsCapabilityRevokedAsync(toDave.Id)).Should().BeTrue();
+        (await verifier.IsCapabilityRevokedAsync(toDave.Id, RevocationScope.Delegated(alice.Did))).Should().BeTrue();
     }
 }
 

@@ -11,7 +11,15 @@ public sealed class RevocationRequest
     public string CapabilityId { get; set; } = string.Empty;
 
     /// <summary>
-    /// Optional root capability ID associated with the capability being revoked.
+    /// The scope to record the revocation in (#158). The signed revocation path supplies the scope the
+    /// capability was authorized under; an operator writing a record directly must choose one
+    /// deliberately. <see cref="RevocationScope.Unscoped"/> applies to the id on every chain, which is
+    /// the 5.x behaviour and is appropriate only for an id the operator knows to be unique.
+    /// </summary>
+    public required RevocationScope Scope { get; set; }
+
+    /// <summary>
+    /// The root of the chain the revocation was authorized on, when known. Informational only.
     /// </summary>
     public string? RootCapabilityId { get; set; }
 

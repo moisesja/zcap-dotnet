@@ -37,7 +37,7 @@ public class VerificationServiceRootRevocationTests
         var signed = await _signingService.SignRevocationAsync(root.Id, owner, root.InvocationTarget);
 
         (await _verifier.RevokeCapabilityAsync(root, signed)).Should().BeTrue();
-        (await _verifier.IsCapabilityRevokedAsync(root.Id)).Should().BeTrue();
+        (await _verifier.IsCapabilityRevokedAsync(root.Id, RevocationScope.Root)).Should().BeTrue();
     }
 
     [Fact]
@@ -61,7 +61,7 @@ public class VerificationServiceRootRevocationTests
 
         (await _verifier.RevokeCapabilityAsync(impostor, signed)).Should().BeFalse(
             "a root's controller comes from the trusted root, never from the request");
-        (await _verifier.IsCapabilityRevokedAsync(root.Id)).Should().BeFalse();
+        (await _verifier.IsCapabilityRevokedAsync(root.Id, RevocationScope.Root)).Should().BeFalse();
     }
 
     [Fact]
@@ -74,7 +74,7 @@ public class VerificationServiceRootRevocationTests
 
         (await _verifier.RevokeCapabilityAsync(root, signed)).Should().BeFalse(
             "a root the verifier cannot resolve is not trusted, even with the genuine controller's signature");
-        (await _verifier.IsCapabilityRevokedAsync(root.Id)).Should().BeFalse();
+        (await _verifier.IsCapabilityRevokedAsync(root.Id, RevocationScope.Root)).Should().BeFalse();
     }
 
     [Fact]
@@ -93,11 +93,11 @@ public class VerificationServiceRootRevocationTests
 
         var malloryRequest = await _signingService.SignRevocationAsync(root.Id, mallory, root.InvocationTarget);
         (await _verifier.RevokeCapabilityAsync(impostor, malloryRequest, root)).Should().BeFalse();
-        (await _verifier.IsCapabilityRevokedAsync(root.Id)).Should().BeFalse();
+        (await _verifier.IsCapabilityRevokedAsync(root.Id, RevocationScope.Root)).Should().BeFalse();
 
         var ownerRequest = await _signingService.SignRevocationAsync(root.Id, owner, root.InvocationTarget);
         (await _verifier.RevokeCapabilityAsync(root, ownerRequest, root)).Should().BeTrue();
-        (await _verifier.IsCapabilityRevokedAsync(root.Id)).Should().BeTrue();
+        (await _verifier.IsCapabilityRevokedAsync(root.Id, RevocationScope.Root)).Should().BeTrue();
     }
 
     // ----- Root-ness is decided by the verifier's trust store, never by the request's shape -----
@@ -123,7 +123,7 @@ public class VerificationServiceRootRevocationTests
 
         (await _verifier.RevokeCapabilityAsync(forged, signed)).Should().BeFalse(
             "an id the verifier knows as a root is anchored to that root however the request shapes it");
-        (await _verifier.IsCapabilityRevokedAsync(victimRoot.Id)).Should().BeFalse();
+        (await _verifier.IsCapabilityRevokedAsync(victimRoot.Id, RevocationScope.Root)).Should().BeFalse();
     }
 
     [Fact]
@@ -150,7 +150,7 @@ public class VerificationServiceRootRevocationTests
         // pins the resolver lookup itself.
         (await _verifier.RevokeCapabilityAsync(forged, signed, root)).Should().BeFalse(
             "a known root's id is refused through the explicit-root overload too");
-        (await _verifier.IsCapabilityRevokedAsync(victimRoot.Id)).Should().BeFalse();
+        (await _verifier.IsCapabilityRevokedAsync(victimRoot.Id, RevocationScope.Root)).Should().BeFalse();
     }
 
     [Fact]
@@ -168,7 +168,7 @@ public class VerificationServiceRootRevocationTests
 
         (await _verifier.RevokeCapabilityAsync(forged, signed)).Should().BeFalse(
             "a urn:zcap:root:-named id the verifier cannot resolve has nothing trusted to authorize against");
-        (await _verifier.IsCapabilityRevokedAsync(unknownRootId)).Should().BeFalse();
+        (await _verifier.IsCapabilityRevokedAsync(unknownRootId, RevocationScope.Root)).Should().BeFalse();
     }
 
     [Fact]
@@ -205,7 +205,7 @@ public class VerificationServiceRootRevocationTests
 
         (await _verifier.RevokeCapabilityAsync(rootB, signedByB, rootA)).Should().BeFalse(
             "a root may be revoked through the explicit-root overload only when it IS the explicit root");
-        (await _verifier.IsCapabilityRevokedAsync(rootB.Id)).Should().BeFalse();
+        (await _verifier.IsCapabilityRevokedAsync(rootB.Id, RevocationScope.Root)).Should().BeFalse();
 
         var retry = await _signingService.SignRevocationAsync(rootB.Id, ownerB, rootB.InvocationTarget);
         (await _verifier.RevokeCapabilityAsync(rootB, retry, rootB)).Should().BeTrue();
@@ -227,7 +227,7 @@ public class VerificationServiceRootRevocationTests
         var signed = await _signingService.SignRevocationAsync(customRoot.Id, owner, customRoot.InvocationTarget);
 
         (await verifier.RevokeCapabilityAsync(customRoot, signed, rootA)).Should().BeFalse();
-        (await verifier.IsCapabilityRevokedAsync(customRoot.Id)).Should().BeFalse();
+        (await verifier.IsCapabilityRevokedAsync(customRoot.Id, RevocationScope.Root)).Should().BeFalse();
     }
 
     [Fact]
@@ -279,11 +279,11 @@ public class VerificationServiceRootRevocationTests
         var controlId = "urn:uuid:" + Guid.NewGuid();
         (await RevokeThroughRootAAsync(controlId)).Should().BeTrue(
             "the same delegation with an id of its own is genuine and revocable through root A");
-        (await _verifier.IsCapabilityRevokedAsync(controlId)).Should().BeTrue();
+        (await _verifier.IsCapabilityRevokedAsync(controlId, RevocationScope.Delegated(attacker))).Should().BeTrue();
 
         (await RevokeThroughRootAAsync(victimRoot.Id)).Should().BeFalse(
             "the resolver knows this id as root B, and the explicit root admits only itself");
-        (await _verifier.IsCapabilityRevokedAsync(victimRoot.Id)).Should().BeFalse();
+        (await _verifier.IsCapabilityRevokedAsync(victimRoot.Id, RevocationScope.Root)).Should().BeFalse();
     }
 
     [Fact]
@@ -299,13 +299,13 @@ public class VerificationServiceRootRevocationTests
 
         (await verifier.RevokeCapabilityAsync(delegated, signed, root)).Should().BeFalse(
             "the configured resolver could not say whether the id names a trusted root");
-        (await verifier.IsCapabilityRevokedAsync(delegated.Id)).Should().BeFalse();
+        (await verifier.IsCapabilityRevokedAsync(delegated.Id, RevocationScope.Delegated(owner))).Should().BeFalse();
         resolver.Calls.Should().Contain(delegated.Id, "the leaf id is looked up even with an explicit root");
 
         resolver.Throw = false;
         (await verifier.RevokeCapabilityAsync(delegated, signed, root)).Should().BeTrue(
             "nothing was recorded and the nonce was not consumed, so the same request succeeds on retry");
-        (await verifier.IsCapabilityRevokedAsync(delegated.Id)).Should().BeTrue();
+        (await verifier.IsCapabilityRevokedAsync(delegated.Id, RevocationScope.Delegated(owner))).Should().BeTrue();
     }
 
     [Fact]
@@ -322,7 +322,7 @@ public class VerificationServiceRootRevocationTests
         var signed = await _signingService.SignRevocationAsync(delegated.Id, owner, delegated.InvocationTarget);
 
         (await verifier.RevokeCapabilityAsync(delegated, signed, root)).Should().BeTrue();
-        (await verifier.IsCapabilityRevokedAsync(delegated.Id)).Should().BeTrue();
+        (await verifier.IsCapabilityRevokedAsync(delegated.Id, RevocationScope.Delegated(owner))).Should().BeTrue();
     }
 
     // ----- Equivalent spellings of a root id (second adversarial pass) -----
@@ -366,7 +366,7 @@ public class VerificationServiceRootRevocationTests
         (await verifier.RevokeCapabilityAsync(forged, await RevocationRequest())).Should().BeFalse();
         (await verifier.RevokeCapabilityAsync(forged, await RevocationRequest(), rootA)).Should().BeFalse();
 
-        (await verifier.IsCapabilityRevokedAsync(rootB.Id)).Should().BeFalse();
+        (await verifier.IsCapabilityRevokedAsync(rootB.Id, RevocationScope.Root)).Should().BeFalse();
         store.Count.Should().Be(0);
     }
 
@@ -383,7 +383,7 @@ public class VerificationServiceRootRevocationTests
         var signed = await _signingService.SignRevocationAsync(delegated.Id, owner, delegated.InvocationTarget);
 
         (await verifier.RevokeCapabilityAsync(delegated, signed)).Should().BeTrue();
-        (await verifier.IsCapabilityRevokedAsync(delegated.Id)).Should().BeTrue();
+        (await verifier.IsCapabilityRevokedAsync(delegated.Id, RevocationScope.Delegated(owner))).Should().BeTrue();
     }
 
     private sealed class SingleRootResolver(Capability root) : IRootCapabilityResolver
@@ -401,16 +401,17 @@ public class VerificationServiceRootRevocationTests
 
         public Task UpsertAsync(RevocationRecord record, CancellationToken cancellationToken = default)
         {
-            _records[record.CapabilityId] = record;
+            _records[record.Key] = record;
             return Task.CompletedTask;
         }
 
-        public Task<RevocationRecord?> GetByCapabilityIdAsync(string capabilityId, CancellationToken cancellationToken = default)
-            => Task.FromResult(_records.TryGetValue(capabilityId, out var r) ? r : null);
+        public Task<IReadOnlyList<RevocationRecord>> GetAsync(IReadOnlyCollection<string> keys, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<RevocationRecord>>(
+                keys.Where(_records.ContainsKey).Select(key => _records[key]).ToList());
 
-        public Task DeleteAsync(string capabilityId, CancellationToken cancellationToken = default)
+        public Task DeleteAsync(string key, CancellationToken cancellationToken = default)
         {
-            _records.TryRemove(capabilityId, out _);
+            _records.TryRemove(key, out _);
             return Task.CompletedTask;
         }
     }

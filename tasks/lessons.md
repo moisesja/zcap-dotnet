@@ -1,5 +1,18 @@
 # Lessons Learned
 
+## 2026-10-29 — Issue #158: ground a protocol design choice in the spec and the reference stack first
+
+- I presented three revocation-scope designs (my own route scoping, a prefix variant, and the JS
+  stack's delegator key) as a preference question. The owner answered "what does the spec say? what
+  does the JavaScript implementation do?" For a protocol this library implements, read the spec text
+  and the reference implementation BEFORE designing, quote what each says (and where it is silent),
+  and lead the question with that; present a departure from the reference only with a concrete reason
+  the reference's behaviour is unsafe here.
+- "Prior art … needs confirming" in an issue is a research task, not a footnote: resolve it with the
+  actual source (`gh api repos/<owner>/<repo>/contents/<path>`), not from memory.
+- The same applies to removing a feature: the status GET had no basis in the spec or the JS stack, and
+  the owner removed it once that was stated plainly.
+
 ## 2026-10-27 — Issue #157 red team: RDFC drops malformed IRIs, not only undefined terms
 
 - I measured how dotNetRDF normalizes ids but only probed well-formed variants, so the id rule

@@ -110,6 +110,21 @@ Planned as 6.0.0 (breaking: new interface/constructor parameters and in-stack si
 - Breaking API: `ICapabilityService.DelegateCapabilityAsync` gains a trailing `caveats`
   parameter. `SigningService`, `CapabilityService` and `VerificationService` constructors gain
   optional caveat parameters. `VerificationOutcome` gains three members (appended).
+- Breaking API: revocation records are scoped (#158, see Security). `RevocationRecord` and
+  `RevocationRequest` gain a required `Scope` (`RevocationScope.Root`, `.Unscoped` or
+  `.Delegated(delegator)`; `RevocationScope.ForDelegationProof(proof)` derives it) and
+  `RevocationRecord.Key`. `IRevocationStore` becomes `UpsertAsync`, a batched `GetAsync(keys)` and
+  `DeleteAsync(key)`, keyed by `RevocationRecord.Key` only. `IRevocationService` takes the scope on
+  `GetRevocationAsync`/`IsRevokedAsync` and gains a batched `FindRevocationAsync`;
+  `IVerificationService.IsCapabilityRevokedAsync` takes the scope. A custom store must be
+  rewritten: key rows by `Key`, never by the capability id, and persist the scope. Migrate 5.x
+  rows to `RevocationScope.Unscoped` records, which every chain honours as before; the demo's
+  `SqliteRevocationStore` does this at startup. Operator writes through `RevokeAsync` must choose a
+  scope explicitly.
+- Breaking (ASP.NET): the anonymous `GET {prefix}/{capabilityId}` status endpoint is removed. The
+  ZCAP specification and the Digital Bazaar stack define only the POST, and a bare id has no
+  single status once records are scoped. Holders learn of revocation from a `Revoked` outcome;
+  expose `IRevocationService` behind your own authorization if you need status queries.
 
 ### Fixed
 
@@ -120,10 +135,10 @@ Planned as 6.0.0 (breaking: new interface/constructor parameters and in-stack si
   never-throw contract.
 - `MapZcapRevocationEndpoints` decoded the `{*capabilityId}` route value a second time although
   ASP.NET Core had already decoded it once (keeping `%2F`). Every root id
-  (`urn:zcap:root:https%3A%2F%2F…`) therefore read as a different id: `GET` reported a revoked root
-  as not revoked and `POST` could not revoke a root (#155). Both endpoints now recover the id from
-  the raw request target and decode it exactly once; a host without a raw target (the in-memory
-  `TestServer`) falls back to the once-decoded route value. Clients still send
+  (`urn:zcap:root:https%3A%2F%2F…`) therefore read as a different id: `POST` could not revoke a
+  root, and the since-removed `GET` reported a revoked root as not revoked (#155). The endpoint now
+  recovers the id from the raw request target and decodes it exactly once; a host without a raw
+  target (the in-memory `TestServer`) falls back to the once-decoded route value. Clients still send
   `encodeURIComponent(capabilityId)`.
 
 ### Security
@@ -147,12 +162,24 @@ Planned as 6.0.0 (breaking: new interface/constructor parameters and in-stack si
   must return null for unknown ids: one that throws instead now blocks delegated revocations. A
   result whose id differs from the requested id is treated as "not a root".
 - An unresolvable `urn:zcap:root:` id is refused in any casing, since the `urn` scheme and the
-  namespace are case-insensitive. `IRevocationStore` now documents that ids are compared
-  ordinally; a case-insensitive backend would let a re-cased id land on a root's record.
-- Known limitation, not fixed here: revocation records are keyed by bare capability id. Anyone
-  with a valid chain under any trusted root can force-revoke non-root ids, including delegated
-  ids under other roots and custom root ids trusted only by another verifier sharing the store.
-  See "Revocation scope" in `architecture.md` for deployment guidance. Tracked in #158.
+  namespace are case-insensitive.
+- Revocation records were keyed by the bare capability id, and a delegated id is chosen by
+  whoever signs the delegation. Anyone with a valid chain under any root a verifier trusted could
+  mint a delegated capability carrying another capability's id, revoke it, and revoke the
+  victim's capability with it: siblings under one root, delegations under any other root the
+  verifier trusted, and custom root ids trusted only by another verifier sharing the store
+  (#158). Records are now scoped, following `bedrock-zcap-storage`'s `(delegator, capability.id)`
+  key: to the delegator that signed the capability (`Delegated`, the DID of the delegation proof's
+  verification method), to the root (`Root`), or, for migrated 5.x and operator records only, to
+  every chain (`Unscoped`). Each chain link is looked up under the delegator of the proof that
+  verified it, after that proof verifies, in one store read per chain; the standalone proof path
+  reaches every ancestor's delegator through the nested embedded parents. The signed path records
+  the delegator of the accepted chain and every co-signer of the same chain, so a proof set cannot
+  be revived by dropping a proof. A forged copy of an id is signed by the forger and lands in the
+  forger's scope, where no genuine chain looks. Store keys are opaque digests of id and scope;
+  `RevocationService` refuses records it did not request, reads each write back before the replay
+  nonce is consumed, and evicts expired records by exact key, so a misbehaving store fails closed.
+  The revocation-authorization memo of refused controllers now records refusals only.
 
 ## [5.0.0] - 2026-10-25
 

@@ -37,7 +37,6 @@ app.MapGet("/", () => Results.Ok(new
     sqliteDatabase = fullPath,
     endpoints = new
     {
-        getStatus = "GET /zcaps/revocations/{url-encoded-capability-id}",
         revoke = "POST /zcaps/revocations/{url-encoded-capability-id}"
     },
     revocation = new
@@ -55,8 +54,7 @@ app.MapGet("/", () => Results.Ok(new
     },
     examples = new
     {
-        revoke = "curl -X POST http://localhost:5099/zcaps/revocations/<url-encoded-capability-id> -H \"Content-Type: application/json\" -d @signed-revocation.json",
-        status = "curl http://localhost:5099/zcaps/revocations/urn%3Auuid%3A12345"
+        revoke = "curl -X POST http://localhost:5099/zcaps/revocations/<url-encoded-capability-id> -H \"Content-Type: application/json\" -d @signed-revocation.json"
     }
 }));
 

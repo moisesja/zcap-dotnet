@@ -97,7 +97,7 @@ public class CaveatIntegrityTests
         var request = await _bed.Signing.SignRevocationAsync(variant.Id, chain.OrchestratorDid, variant.InvocationTarget);
 
         (await _bed.Verifier.RevokeCapabilityAsync(variant, request)).Should().BeFalse();
-        (await _bed.Verifier.IsCapabilityRevokedAsync(variant.Id)).Should().BeFalse();
+        (await _bed.Verifier.IsCapabilityRevokedAsync(variant.Id, RevocationScope.Delegated(chain.OrchestratorDid))).Should().BeFalse();
     }
 
     [Fact(DisplayName = "Positive control: revocation accepts the same re-signed grant without the extra parameter")]

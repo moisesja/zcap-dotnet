@@ -22,8 +22,8 @@ public static class ZcapRevocationEndpointRouteBuilderExtensions
     private const long MaxRevocationRequestBytes = 1 * 1024 * 1024; // 1 MB
 
     /// <summary>
-    /// Maps revocation endpoints under the provided route prefix.
-    /// Defaults to /zcaps/revocations.
+    /// Maps the signed revocation endpoint, <c>POST {prefix}/{capabilityId}</c>, under the provided
+    /// route prefix. Defaults to /zcaps/revocations.
     /// <para>
     /// Clients address a capability as <c>{prefix}/{encodeURIComponent(capabilityId)}</c>: one level
     /// of percent-encoding over the id, which the endpoint decodes exactly once. A root id already
@@ -31,10 +31,17 @@ public static class ZcapRevocationEndpointRouteBuilderExtensions
     /// the URL; that is correct.
     /// </para>
     /// <para>
-    /// The POST (revoke) endpoint requires a <b>signed</b> revocation request and resolves an
+    /// The endpoint requires a <b>signed</b> revocation request and resolves an
     /// <see cref="IVerificationService"/> — register the full service graph via
     /// <c>AddZcapServices()</c>. <c>AddZcapRevocationSupport()</c> alone (which registers only the
-    /// revocation store/service) is <b>not</b> sufficient for the POST endpoint.
+    /// revocation store/service) is <b>not</b> sufficient.
+    /// </para>
+    /// <para>
+    /// There is no status GET. The ZCAP specification and the <c>@digitalbazaar</c> reference stack
+    /// define only the POST, and once records are scoped to the delegator that signed a capability
+    /// (#158) a bare id has no single revocation status. Holders learn of revocation from a
+    /// <c>Revoked</c> verification outcome; an operator who needs status queries exposes
+    /// <see cref="IRevocationService"/> behind their own authorization.
     /// </para>
     /// </summary>
     public static RouteGroupBuilder MapZcapRevocationEndpoints(
@@ -56,11 +63,6 @@ public static class ZcapRevocationEndpointRouteBuilderExtensions
             .Produces<RevocationStatusHttpResponse>(StatusCodes.Status200OK)
             .Produces<string>(StatusCodes.Status400BadRequest)
             .Produces(StatusCodes.Status403Forbidden);
-
-        group.MapGet("/{*capabilityId}", GetRevocationStatusAsync)
-            .WithName("ZcapGetRevocationStatus")
-            .Produces<RevocationStatusHttpResponse>(StatusCodes.Status200OK)
-            .Produces<string>(StatusCodes.Status400BadRequest);
 
         return group;
     }
@@ -131,36 +133,6 @@ public static class ZcapRevocationEndpointRouteBuilderExtensions
         {
             CapabilityId = request.Capability.Id,
             IsRevoked = true
-        });
-    }
-
-    private static async Task<IResult> GetRevocationStatusAsync(
-        string capabilityId,
-        HttpContext httpContext,
-        IRevocationService revocationService,
-        CancellationToken cancellationToken)
-    {
-        if (string.IsNullOrWhiteSpace(capabilityId))
-        {
-            return TypedResults.BadRequest("Capability ID route value is required.");
-        }
-
-        if (!TryGetCapabilityId(httpContext, capabilityId, out var requestedCapabilityId))
-        {
-            return TypedResults.BadRequest("Capability ID could not be read from the request path.");
-        }
-
-        var revocation = await revocationService.GetRevocationAsync(requestedCapabilityId, cancellationToken);
-
-        // This GET is unauthenticated (the ValidWhileTrue design dereferences it anonymously), so it
-        // returns ONLY the minimal {capabilityId, isRevoked} status — never the operational metadata on
-        // the record (RevokedBy DID, Reason, RootCapabilityId, backend Metadata). Disclosing those to
-        // anonymous callers leaks who/why/linkage for any revoked id. Consumers who need the richer
-        // payload should expose it behind their own authorization.
-        return TypedResults.Ok(new RevocationStatusHttpResponse
-        {
-            CapabilityId = requestedCapabilityId,
-            IsRevoked = revocation != null
         });
     }
 

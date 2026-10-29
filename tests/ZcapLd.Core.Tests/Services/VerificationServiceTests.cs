@@ -350,7 +350,7 @@ public class VerificationServiceTests
     [Fact]
     public async Task RevokeCapability_WhenAuthorizationChainWalkFaults_FailsClosedAndLogs()
     {
-        // PR #84 review (🔴): the revocation authorization step (IsRevokerAuthorizedAsync) must fail
+        // PR #84 review (🔴): the revocation authorization step (AuthorizeRevocationAsync) must fail
         // closed on ANY fault from the chain walk — not only CapabilityValidationException — returning
         // false rather than letting the fault escape the authorization decision. The cause is logged
         // (Issue #64) so operators can tell a chain-walk failure apart from a genuine "not authorized".
@@ -390,8 +390,8 @@ public class VerificationServiceTests
 
         result.Should().BeFalse("an unbuildable authorization chain means 'not authorized'");
         logger.Entries.Should().Contain(
-            e => e.Level == LogLevel.Debug && e.Exception != null && e.Message.Contains("IsRevokerAuthorizedAsync"),
-            "the inner authorization catch must log the cause, attributed to IsRevokerAuthorizedAsync");
+            e => e.Level == LogLevel.Debug && e.Exception != null && e.Message.Contains("AuthorizeRevocationAsync"),
+            "the inner authorization catch must log the cause, attributed to AuthorizeRevocationAsync");
     }
 
     [Fact]
@@ -575,7 +575,8 @@ public class VerificationServiceTests
     {
         // A 4-deep chain root -> a -> b -> leaf. Revoke 'a', an intermediate ancestor that is
         // neither the root nor the leaf's immediate parent (b). The intermediate's id is carried as
-        // a string in leaf's capabilityChain, so the standalone sweep must catch it (Issue #63).
+        // a string in leaf's capabilityChain and its delegator is named by the proof of its embedding
+        // inside b's embedded parent, so the standalone sweep must catch it in a's scope (Issues #63, #158).
         var rootDid = "did:key:z6MkRevMidRoot";
         var aDid = "did:key:z6MkRevMidA";
         var bDid = "did:key:z6MkRevMidB";
@@ -1385,7 +1386,7 @@ public class VerificationServiceTests
         var revoked = await _verificationService.RevokeCapabilityAsync(delegated, signed);
 
         revoked.Should().BeTrue();
-        (await _verificationService.IsCapabilityRevokedAsync(delegated.Id)).Should().BeTrue();
+        (await _verificationService.IsCapabilityRevokedAsync(delegated.Id, RevocationScope.ForDelegationProof(delegated.Proof!.Primary))).Should().BeTrue();
         (await _verificationService.VerifyCapabilityChainAsync(delegated)).Should().BeFalse();
     }
 
@@ -1399,7 +1400,7 @@ public class VerificationServiceTests
         var revoked = await _verificationService.RevokeCapabilityAsync(delegated, signed);
 
         revoked.Should().BeTrue();
-        (await _verificationService.IsCapabilityRevokedAsync(delegated.Id)).Should().BeTrue();
+        (await _verificationService.IsCapabilityRevokedAsync(delegated.Id, RevocationScope.ForDelegationProof(delegated.Proof!.Primary))).Should().BeTrue();
     }
 
     [Fact]
@@ -1425,7 +1426,7 @@ public class VerificationServiceTests
         var signed = await _signingService.SignRevocationAsync(
             delegated.Id, "did:key:z6MkNoExpRoot", delegated.InvocationTarget);
         (await _verificationService.RevokeCapabilityAsync(delegated, signed)).Should().BeTrue();
-        (await _verificationService.IsCapabilityRevokedAsync(delegated.Id)).Should().BeTrue();
+        (await _verificationService.IsCapabilityRevokedAsync(delegated.Id, RevocationScope.ForDelegationProof(delegated.Proof!.Primary))).Should().BeTrue();
     }
 
     [Fact]
@@ -1443,7 +1444,7 @@ public class VerificationServiceTests
         var revoked = await _verificationService.RevokeCapabilityAsync(delegated, signed);
 
         revoked.Should().BeFalse();
-        (await _verificationService.IsCapabilityRevokedAsync(delegated.Id)).Should().BeFalse();
+        (await _verificationService.IsCapabilityRevokedAsync(delegated.Id, RevocationScope.ForDelegationProof(delegated.Proof!.Primary))).Should().BeFalse();
         (await _verificationService.VerifyCapabilityChainAsync(delegated)).Should().BeTrue();
     }
 
@@ -1466,7 +1467,7 @@ public class VerificationServiceTests
         var revoked = await _verificationService.RevokeCapabilityAsync(delegated, forged);
 
         revoked.Should().BeFalse();
-        (await _verificationService.IsCapabilityRevokedAsync(delegated.Id)).Should().BeFalse();
+        (await _verificationService.IsCapabilityRevokedAsync(delegated.Id, RevocationScope.ForDelegationProof(delegated.Proof!.Primary))).Should().BeFalse();
     }
 
     [Fact]
@@ -1482,7 +1483,7 @@ public class VerificationServiceTests
             delegated.Id, "did:key:z6MkReplayRoot", delegated.InvocationTarget);
 
         (await verifier.RevokeCapabilityAsync(delegated, signed)).Should().BeTrue();
-        await store.DeleteAsync(delegated.Id);
+        await store.DeleteAsync(RevocationScope.ForDelegationProof(delegated.Proof!.Primary).KeyFor(delegated.Id));
         (await verifier.RevokeCapabilityAsync(delegated, signed)).Should().BeFalse();
     }
 
@@ -1497,7 +1498,7 @@ public class VerificationServiceTests
             delegatedX.Id, "did:key:z6MkBindRootX", delegatedX.InvocationTarget);
 
         (await _verificationService.RevokeCapabilityAsync(delegatedY, signedForX)).Should().BeFalse();
-        (await _verificationService.IsCapabilityRevokedAsync(delegatedY.Id)).Should().BeFalse();
+        (await _verificationService.IsCapabilityRevokedAsync(delegatedY.Id, RevocationScope.ForDelegationProof(delegatedY.Proof!.Primary))).Should().BeFalse();
     }
 
     [Fact]
@@ -1558,7 +1559,7 @@ public class VerificationServiceTests
 
         (await verifier.RevokeCapabilityAsync(delegated, signed)).Should().BeTrue();
 
-        var record = await revocation.GetRevocationAsync(delegated.Id);
+        var record = await revocation.GetRevocationAsync(delegated.Id, RevocationScope.Delegated("did:key:z6MkReasonRoot"));
         record.Should().NotBeNull();
         record!.Reason.Should().Be("key compromised");
         record.RevokedBy.Should().Be("did:key:z6MkReasonRoot");
@@ -1586,7 +1587,7 @@ public class VerificationServiceTests
             JsonSerializer.SerializeToElement(new Dictionary<string, string> { ["ticket"] = "SEC-2" });
         (await _verificationService.RevokeCapabilityAsync(delegated, metadata)).Should().BeFalse();
 
-        (await _verificationService.IsCapabilityRevokedAsync(delegated.Id)).Should().BeFalse();
+        (await _verificationService.IsCapabilityRevokedAsync(delegated.Id, RevocationScope.ForDelegationProof(delegated.Proof!.Primary))).Should().BeFalse();
         (await _verificationService.RevokeCapabilityAsync(delegated, await Signed())).Should().BeTrue();
     }
 
@@ -1820,10 +1821,13 @@ internal sealed class ThrowingRevocationService : IRevocationService
     public Task<RevocationRecord> RevokeAsync(RevocationRequest request, CancellationToken cancellationToken = default)
         => throw new NotSupportedException();
 
-    public Task<RevocationRecord?> GetRevocationAsync(string capabilityId, CancellationToken cancellationToken = default)
+    public Task<RevocationRecord?> GetRevocationAsync(string capabilityId, RevocationScope scope, CancellationToken cancellationToken = default)
         => throw new NotSupportedException();
 
-    public Task<bool> IsRevokedAsync(string capabilityId, CancellationToken cancellationToken = default)
+    public Task<bool> IsRevokedAsync(string capabilityId, RevocationScope scope, CancellationToken cancellationToken = default)
+        => throw new InvalidOperationException("simulated revocation-store outage");
+
+    public Task<RevocationRecord?> FindRevocationAsync(IReadOnlyList<RevocationLookup> lookups, CancellationToken cancellationToken = default)
         => throw new InvalidOperationException("simulated revocation-store outage");
 }
 

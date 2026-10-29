@@ -190,9 +190,13 @@ public interface IVerificationService
     /// not resolve returns false (Issue #155).
     /// </para>
     /// <para>
-    /// Known limitation: records are keyed by bare capability id, so anyone with a valid chain under
-    /// any trusted root can revoke a non-root id, including one under another root or one trusted only
-    /// by another verifier sharing the store. See "Revocation scope" in <c>architecture.md</c>.
+    /// The record is scoped (#158). A root is recorded in <see cref="RevocationScope.Root"/>. A delegated
+    /// capability is recorded in <see cref="RevocationScope.Delegated(string)"/> for the delegator that
+    /// signed the delegation proof its verified chain followed, and for each co-signer of the same
+    /// chain; that is the scope every verifier looks a link up under. A forged copy of the id under
+    /// another chain is signed by someone else and lands in that signer's scope, where no genuine chain
+    /// looks. Only the chain the request presents is revoked; a capability that also verifies on another
+    /// chain is revoked there by presenting that chain.
     /// </para>
     /// </remarks>
     /// <param name="capability">The capability to revoke, with its full delegation chain.</param>
@@ -225,12 +229,16 @@ public interface IVerificationService
     Task<bool> RevokeCapabilityAsync(Capability capability, Invocation signedRevocation, Capability rootCapability);
 
     /// <summary>
-    /// Checks if a capability has been revoked
+    /// Checks whether a capability id is revoked in <paramref name="scope"/> (#158): by a record in that
+    /// scope, or by an unscoped one. Use <see cref="RevocationScope.Root"/> for a root and
+    /// <see cref="RevocationScope.ForDelegationProof"/> with the delegation proof a verifier accepted for
+    /// a delegated capability. Chain and invocation verification perform this check for every link.
     /// COMPLIANCE FIX: MUST-21 - Check revocation status
     /// </summary>
     /// <param name="capabilityId">The ID of the capability to check</param>
-    /// <returns>True if the capability has been revoked</returns>
-    Task<bool> IsCapabilityRevokedAsync(string capabilityId);
+    /// <param name="scope">The scope the capability is verified under.</param>
+    /// <returns>True if the capability has been revoked in that scope</returns>
+    Task<bool> IsCapabilityRevokedAsync(string capabilityId, RevocationScope scope);
 
     /// <summary>
     /// Verifies a <c>@digitalbazaar/zcap</c>-compatible ("Path A") Data Integrity invocation — an

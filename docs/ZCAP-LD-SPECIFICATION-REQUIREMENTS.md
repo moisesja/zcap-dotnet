@@ -131,10 +131,12 @@ Signed revocation requests prove key possession and authorize a controller of
 the capability or an ancestor. Every link is checked for revocation. Store records
 until expiry and share authoritative state across verifier replicas. Distribution
 to independently operated or unknown verifiers requires an explicit deployment
-protocol; it is not supplied by the spec's endpoint model. Records are keyed by bare
-capability id and are not yet scoped to their authorizing root, so only roots the
-revoking verifier trusts are protected from forced revocation; see
-[Revocation scope](../architecture.md#revocation-scope-known-limitation).
+protocol; it is not supplied by the spec's endpoint model. The spec defines no record
+key. Records are scoped to the delegator that signed each capability, or to the root, as
+the Digital Bazaar stack keys them, so a forged copy of an id under another chain cannot
+revoke it; the standalone proof path reaches each ancestor's delegator through the
+embedded parents (`VerificationServiceRevocationScopeTests`). See
+[Revocation scope](../architecture.md#revocation-scope).
 
 The verifier offers opt-in expiration ceilings (three months by default), required
 delegation `created`, and unknown-root-field rejection. Expiration ceiling and

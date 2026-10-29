@@ -11,7 +11,10 @@ dotnet run --project examples/ZcapLd.RevocationEndpointsDemo/ZcapLd.RevocationEn
 ## Endpoints
 
 - `POST /zcaps/revocations/{url-encoded-capability-id}`
-- `GET /zcaps/revocations/{url-encoded-capability-id}`
+
+There is no status GET. The ZCAP specification and the Digital Bazaar reference stack define only
+the POST, and a bare id has no single status once records are scoped to the delegator that signed
+the capability (#158). Holders learn of revocation from a `Revoked` verification outcome.
 
 `{url-encoded-capability-id}` is `encodeURIComponent(capabilityId)`, decoded exactly once by the
 endpoint. A root id already contains escapes, so it is encoded twice in the URL:
@@ -75,16 +78,10 @@ var roots = (InMemoryRootCapabilityResolver)app.Services.GetRequiredService<IRoo
 roots.Register(root); // a Capability created via CreateRootCapabilityAsync
 ```
 
-A production resource server implements `IRootCapabilityResolver` over its own root store.
-(Revoking a **root** capability needs no resolver — there is no chain to walk.) The
-`ZcapLd.AspNetCore.Tests` integration tests exercise the full delegated-revocation flow with a seeded
-resolver.
-
-Check status:
-
-```bash
-curl "http://localhost:5099/zcaps/revocations/urn%3Auuid%3A12345"
-```
+A production resource server implements `IRootCapabilityResolver` over its own root store. Revoking a
+**root** capability needs it too: the root is authorized against the resolver's copy, never the
+body's (Issue #155). The `ZcapLd.AspNetCore.Tests` integration tests exercise the full
+delegated-revocation flow with a seeded resolver.
 
 ## Shared revocation state
 
@@ -93,8 +90,11 @@ SQLite. It does not poll capability-supplied URLs. All production verifier repli
 must share authoritative revocation state. See the repository revocation guide for
 multi-verifier deployment considerations.
 
-Records are keyed by bare capability id. Anyone with a valid chain under any root this host
-trusts can force-revoke non-root ids, including delegated ids under other trusted roots. Do
-not share this host or its database between parties that must not be able to revoke each
-other's capabilities. See
-[Revocation scope](../../architecture.md#revocation-scope-known-limitation).
+Records are keyed by the capability id **and** the delegator that signed it (the controller of the
+delegation proof's verification method), as `bedrock-zcap-storage` keys them; a root is keyed as a
+root. A forged copy of an id under another chain is signed by someone else and lands in that
+signer's scope, where no genuine chain looks, so sharing this host or its database between root
+owners no longer lets one revoke the other's capabilities. `SqliteRevocationStore` keys rows by the
+record's opaque digest (`revocation_key`) and, at startup, migrates a pre-6.0 `revocation_registry`
+table into unscoped records, which every chain honours as before. See
+[Revocation scope](../../architecture.md#revocation-scope).
