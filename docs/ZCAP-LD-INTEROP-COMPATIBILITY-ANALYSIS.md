@@ -52,10 +52,12 @@ caveats while ignoring their meaning. Both generalizations were incorrect:
   does not establish enforcement of the restriction. Neither observation provides
   interoperable semantics for the removed .NET caveat types.
 
-Version 5 removes the caveat API and rejects all capability `caveat` fields.
-It does not offer an extension-context or passthrough acceptance mode. The custom
-caveat acceptance proposal in [#112](https://github.com/moisesja/zcap-dotnet/issues/112)
-is superseded for this profile; unknown caveat types remain unsupported.
+Version 5 removed the caveat API and rejects all capability `caveat` fields in the standard
+profile. Version 6 adds an opt-in [caveat extension profile](CAVEAT-PROFILE.md) (#157) with
+generated per-type contexts that sign every parameter. It is **not** interoperable:
+`@digitalbazaar/zcap` cannot load `urn:zcap-dotnet:caveat-context:v1:*` and rejects such
+capabilities, and no JavaScript tests cover it. Caveat-free capabilities from an
+extension-enabled issuer keep the standard shape and remain interoperable.
 
 The original twelve cases contain no typed caveats, so their expected results
 remain unchanged. Public API migration removes processors/context arguments; it

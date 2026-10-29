@@ -1566,23 +1566,28 @@ public class VerificationServiceTests
     }
 
     [Fact]
-    public async Task SignedRevoke_TamperedReason_IsInformationalUnderRdfc_ReturnsTrue()
+    public async Task SignedRevoke_TamperedReasonOrMetadata_BreaksTheSignature()
     {
-        // Under RDFC-1.0 (the only canonicalization ZCAP-LD supports), the free-form revocation
-        // `reason`/`metadata` are NOT defined in any JSON-LD context, so they are dropped from the
-        // canonical N-Quads and are therefore INFORMATIONAL — not signature-bound. The bound fields
-        // (which capability, the `revoke` action, the target) and the revoker's authentication (key
-        // possession) are unaffected, so altering only the reason does not invalidate an otherwise-valid
-        // revocation. Bound-field integrity is covered by SignedRevoke_WrongCapabilityBinding /
-        // _WrongCapabilityAction / _ProofBodyMismatch.
+        // zcap-dotnet's revocation context defines revocationReason and revocationMetadata, so RDFC signs
+        // them. They stay informational (never authorization inputs) but cannot be edited in transit.
+        // Before DataProofs 1.5.0 refused undefined terms, both were dropped from the signed N-Quads.
         var (_, delegated) = await BuildDelegatedChainAsync("did:key:z6MkTamperRoot", "did:key:z6MkTamperChild");
 
-        var signed = await _signingService.SignRevocationAsync(
-            delegated.Id, "did:key:z6MkTamperRoot", delegated.InvocationTarget, reason: "legitimate");
-        signed.Proof!.AdditionalProperties![Proof.RevocationReasonField] =
-            JsonSerializer.SerializeToElement("changed-reason");
+        async Task<Invocation> Signed() => await _signingService.SignRevocationAsync(
+            delegated.Id, "did:key:z6MkTamperRoot", delegated.InvocationTarget, reason: "legitimate",
+            metadata: new Dictionary<string, string> { ["ticket"] = "SEC-1" });
 
-        (await _verificationService.RevokeCapabilityAsync(delegated, signed)).Should().BeTrue();
+        var reason = await Signed();
+        reason.Proof!.AdditionalProperties![Proof.RevocationReasonField] = JsonSerializer.SerializeToElement("changed-reason");
+        (await _verificationService.RevokeCapabilityAsync(delegated, reason)).Should().BeFalse();
+
+        var metadata = await Signed();
+        metadata.Proof!.AdditionalProperties![Proof.RevocationMetadataField] =
+            JsonSerializer.SerializeToElement(new Dictionary<string, string> { ["ticket"] = "SEC-2" });
+        (await _verificationService.RevokeCapabilityAsync(delegated, metadata)).Should().BeFalse();
+
+        (await _verificationService.IsCapabilityRevokedAsync(delegated.Id)).Should().BeFalse();
+        (await _verificationService.RevokeCapabilityAsync(delegated, await Signed())).Should().BeTrue();
     }
 
     [Fact]

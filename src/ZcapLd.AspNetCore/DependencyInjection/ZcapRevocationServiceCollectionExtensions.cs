@@ -37,9 +37,11 @@ public static class ZcapRevocationServiceCollectionExtensions
         services.TryAddSingleton<ISigningService>(sp =>
             new SigningService(
                 sp.GetRequiredService<IDidSigner>(),
-                sp.GetRequiredService<IDidResolver>()));
+                sp.GetRequiredService<IDidResolver>(),
+                sp.GetService<CaveatTypeRegistry>()));
 
-        services.TryAddSingleton<ICapabilityService, CapabilityService>();
+        services.TryAddSingleton<ICapabilityService>(sp =>
+            new CapabilityService(sp.GetRequiredService<ISigningService>(), sp.GetService<CaveatTypeRegistry>()));
         services.TryAddSingleton<IRevocationStore, InMemoryRevocationStore>();
         services.TryAddSingleton<IRevocationService, RevocationService>();
         services.TryAddSingleton<INonceStore, InMemoryNonceStore>();
@@ -58,8 +60,61 @@ public static class ZcapRevocationServiceCollectionExtensions
                 logger: sp.GetService<ILogger<VerificationService>>(),
                 relationshipResolver: sp.GetService<IVerificationRelationshipResolver>(),
                 rootResolver: sp.GetService<IRootCapabilityResolver>(),
-                policy: sp.GetService<VerificationPolicy>()));
+                policy: sp.GetService<VerificationPolicy>(),
+                caveats: sp.GetService<CaveatTypeRegistry>(),
+                caveatHandlers: sp.GetServices<ICaveatHandler>()));
 
+        return services;
+    }
+
+    /// <summary>
+    /// Registers a custom caveat type (#157) in the application's <see cref="CaveatTypeRegistry"/>,
+    /// which <see cref="AddZcapServices"/> passes to signing, delegation and verification. Registering
+    /// any type enables the caveat extension profile; capabilities that carry caveats are not
+    /// interoperable with other ZCAP implementations. Register every type before the ZCAP services are
+    /// first resolved: the registry is frozen at that point.
+    /// </summary>
+    /// <param name="services">The service collection.</param>
+    /// <param name="type">The caveat's wire type name (see <see cref="CaveatTypeRegistry.Register{TCaveat}(string)"/>).</param>
+    public static IServiceCollection AddZcapCaveatType<TCaveat>(this IServiceCollection services, string type)
+        where TCaveat : Caveat
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        var registry = services.LastOrDefault(d => d.ServiceType == typeof(CaveatTypeRegistry))?.ImplementationInstance
+            as CaveatTypeRegistry;
+        if (registry is null)
+        {
+            registry = new CaveatTypeRegistry();
+            services.Replace(ServiceDescriptor.Singleton(registry));
+        }
+
+        registry.Register<TCaveat>(type);
+        return services;
+    }
+
+    /// <summary>
+    /// Registers the resource's enforcement of one caveat type (#157). Invocations whose chain carries
+    /// a caveat type without a handler are denied, so every type the resource accepts needs one.
+    /// </summary>
+    public static IServiceCollection AddZcapCaveatHandler<THandler>(this IServiceCollection services)
+        where THandler : class, ICaveatHandler
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<ICaveatHandler, THandler>());
+        return services;
+    }
+
+    /// <summary>Registers a caveat handler using a factory (#157).</summary>
+    public static IServiceCollection AddZcapCaveatHandler(
+        this IServiceCollection services,
+        Func<IServiceProvider, ICaveatHandler> handlerFactory)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(handlerFactory);
+
+        services.AddSingleton(handlerFactory);
         return services;
     }
 

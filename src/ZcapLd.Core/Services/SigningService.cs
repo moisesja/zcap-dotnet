@@ -17,17 +17,25 @@ public class SigningService : ISigningService
 {
     private readonly IDidSigner _signer;
     private readonly IDidResolver _resolver;
-    private readonly LegacyProofCrypto _legacyProofCrypto = new();
+    private readonly CaveatTypeRegistry? _caveats;
+    private readonly LegacyProofCrypto _legacyProofCrypto;
 
     /// <summary>
     /// Creates a signing service. Every proof it produces uses RDFC-1.0 canonicalization — the only
     /// canonicalization ZCAP-LD supports, and what makes proofs interoperable with
     /// <c>@digitalbazaar/zcap</c>.
     /// </summary>
-    public SigningService(IDidSigner signer, IDidResolver resolver)
+    /// <param name="signer">The consumer's signer.</param>
+    /// <param name="resolver">Resolves signer DIDs to keys and verification methods.</param>
+    /// <param name="caveats">Optional caveat types (#157). Without it, a capability carrying a
+    /// <c>caveat</c> is refused; with it, registered caveats are signed. The registry is frozen.</param>
+    public SigningService(IDidSigner signer, IDidResolver resolver, CaveatTypeRegistry? caveats = null)
     {
         _signer = signer ?? throw new ArgumentNullException(nameof(signer));
         _resolver = resolver ?? throw new ArgumentNullException(nameof(resolver));
+        caveats?.Freeze();
+        _caveats = caveats;
+        _legacyProofCrypto = new LegacyProofCrypto(caveats);
     }
 
     /// <summary>
@@ -62,7 +70,9 @@ public class SigningService : ISigningService
         if (string.IsNullOrWhiteSpace(proofPurpose))
             throw new ArgumentException("Proof purpose cannot be null or empty", nameof(proofPurpose));
 
-        CapabilityProfile.EnsureSupported(capability, capabilityChain);
+        CapabilityProfile.EnsureSupported(capability, capabilityChain, _caveats);
+        if (!CanonicalIri.IsCanonical(capability.Id))
+            throw new CapabilityValidationException($"Capability id {CanonicalIri.RequirementMessage}.");
         var capabilityWithoutProof = ProofSigningPayloadBuilder.CloneCapabilityWithoutProof(capability);
         var resolvedKey = await _resolver.ResolvePublicKeyAsync(signerDid);
         var suite = ZcapSuiteCatalog.GetByKeyType(resolvedKey.KeyType)
@@ -214,7 +224,7 @@ public class SigningService : ISigningService
         DateTime? createdOverride)
     {
         ArgumentNullException.ThrowIfNull(capability);
-        CapabilityProfile.EnsureSupported(capability.EmbeddedCapability);
+        CapabilityProfile.EnsureSupported(capability.EmbeddedCapability, caveats: _caveats);
         if (string.IsNullOrEmpty(capabilityAction))
             throw new ArgumentException("Capability action cannot be null or empty", nameof(capabilityAction));
         if (string.IsNullOrEmpty(invocationTarget))
@@ -228,7 +238,12 @@ public class SigningService : ISigningService
         var verificationMethod = await _resolver.GetVerificationMethodAsync(signerDid);
         var created = ZcapTimestamps.Format(createdOverride ?? DateTime.UtcNow);
 
+        if (!CanonicalIri.IsSignedTarget(invocationTarget))
+            throw new CapabilityValidationException($"The invocation target {CanonicalIri.TargetMessage}.");
         var document = BuildInvocationRequestDocument(applicationDocument, suite.ContextUrl);
+        if (!CanonicalIri.IsCanonical(TryGetString(document, "id")))
+            throw new CapabilityValidationException(
+                $"The invocation document id is the replay nonce and {CanonicalIri.RequirementMessage}.");
 
         // Invocation proof: capability/action/target live ONLY here. No capabilityChain (that is a
         // delegation-proof field), and no @context (the verifier derives it from the document).
@@ -272,6 +287,10 @@ public class SigningService : ISigningService
         };
     }
 
+    private static string? TryGetString(JsonObject document, string name)
+        => document.TryGetPropertyValue(name, out var node) && node is JsonValue value
+           && value.TryGetValue<string>(out var text) ? text : null;
+
     private async Task<Proof> SignInvocationProofAsync(
         Invocation invocation,
         string signerDid,
@@ -279,8 +298,13 @@ public class SigningService : ISigningService
         IReadOnlyDictionary<string, JsonElement>? additionalProperties = null,
         DateTime? createdOverride = null)
     {
-        CapabilityProfile.EnsureSupported(invocation.Capability?.EmbeddedCapability);
-        CapabilityProfile.EnsureSupported(invocation.Proof?.Capability?.EmbeddedCapability);
+        CapabilityProfile.EnsureSupported(invocation.Capability?.EmbeddedCapability, caveats: _caveats);
+        CapabilityProfile.EnsureSupported(invocation.Proof?.Capability?.EmbeddedCapability, caveats: _caveats);
+        if (!CanonicalIri.IsCanonical(invocation.Id))
+            throw new CapabilityValidationException(
+                $"The invocation id is the replay nonce and {CanonicalIri.RequirementMessage}.");
+        if (!CanonicalIri.IsSignedTarget(invocation.InvocationTarget))
+            throw new CapabilityValidationException($"The invocation target {CanonicalIri.TargetMessage}.");
         var invocationWithoutProof = ProofSigningPayloadBuilder.CloneInvocationWithoutProof(invocation);
         var resolvedKey = await _resolver.ResolvePublicKeyAsync(signerDid);
         var suite = ZcapSuiteCatalog.GetByKeyType(resolvedKey.KeyType)
@@ -304,14 +328,14 @@ public class SigningService : ISigningService
             CapabilityAction = invocation.CapabilityAction
         };
 
-        // Preserve extension fields on the wire. Free-form revocation reason/metadata are
-        // informational: undefined terms do not become tamper-evident merely by serialization.
+        // Preserve extension fields on the wire. Revocation reason/metadata are signed under the
+        // revocation context (LegacyProofCrypto.EnvelopeContext) but remain informational.
         if (additionalProperties is { Count: > 0 })
         {
             proof.AdditionalProperties = new Dictionary<string, JsonElement>(additionalProperties, StringComparer.Ordinal);
         }
 
-        if (CapabilityProfile.GetProofRejectionReason(proof) is { } profileReason)
+        if (CapabilityProfile.GetProofRejectionReason(proof, _caveats) is { } profileReason)
             throw new CapabilityValidationException(profileReason);
 
         var didSigner = CreateLegacySigner(signerDid, resolvedKey, proofType);

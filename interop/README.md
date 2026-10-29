@@ -27,6 +27,8 @@ nodes in compact, absolute-IRI and `@nest` forms without enforcing their meaning
 .NET rejects those authentic documents. Altering a signed node then triggers a
 specifically asserted JS signature failure. These are distinct checks.
 
+The opt-in caveat extension profile ([docs/CAVEAT-PROFILE.md](../docs/CAVEAT-PROFILE.md))
+is outside this harness: it is not interoperable by design, and the CLI runs the standard profile.
 .NET also rejects unknown/empty/null caveats in either direct key spelling. Unit
 tests cover scoped prefixes, inline aliases, other JSON-LD nesting, ancestors,
 secondary proofs, and public signing/verification paths. Capability/proof contexts

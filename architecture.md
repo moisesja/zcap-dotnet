@@ -24,8 +24,10 @@ capabilities add parent, expiry, action restrictions and delegation proofs.
 
 `AdditionalProperties` preserves unknown capability fields. It does not make
 unknown terms signature-bound under RDFC. Security decisions use supported fields.
-The reserved `caveat` field is always rejected, even when stored as extension data.
-There are no typed caveat models, registries or evaluation callbacks.
+Without a `CaveatTypeRegistry` the reserved `caveat` field is always rejected, even when
+stored as extension data. With one (the opt-in caveat extension profile, #157), `Caveat`
+subclasses carry signed parameters plus `Validate`/`IsAttenuationOf` rules but never decide
+authorization; resource-owned `ICaveatHandler`s do. See [the caveat profile](docs/CAVEAT-PROFILE.md).
 
 `Invocation` is the convenience in-stack envelope. The interoperable DI invocation
 API signs an application document and places capability, action and target in its
@@ -46,6 +48,8 @@ provably invalid authority. Denials are logged at Debug; unexpected faults at Wa
 | `IRootCapabilityResolver` | Resolve root trust anchors referenced by ID. Explicit-root overloads are also available. |
 | `IRevocationService` / `IRevocationStore` | Record/check verifier-owned revocation state. In-memory implementations are for local development. |
 | `INonceStore` | Atomic replay tracking. Share across replicas; `NullNonceStore` explicitly opts out. |
+| `CaveatTypeRegistry` | Opt-in custom caveat types. Generates each type's pinned context (`urn:zcap-dotnet:caveat-context:v1:<Type>`); frozen once a service receives it. |
+| `ICaveatHandler` | Resource-owned enforcement of one caveat type, run last at invocation with authenticated grants (`GrantKey`, chain, action, target, invocation id). |
 
 A resolver that also supplies relationship/root resolution is detected automatically; an
 explicit relationship resolver passed to the constructor or registered in DI takes precedence.
@@ -64,9 +68,19 @@ large action lists. Exceeding these resource limits reports a distinct diagnosti
 instead of an unsupported-vocabulary message. These are local resource limits, not
 ZCAP specification limits. Extension JSON is scanned too:
 JSON-LD nesting or a nested object sharing the capability ID can contribute the
-same restricted RDF property. Compact, absolute-IRI and `sec:caveat` keys are rejected,
-including null/empty values. Contexts on capabilities/proofs must be zcap/v1 or a
-supported proof suite; inline aliases and unrelated vocabularies are refused.
+same restricted RDF property. Absolute-IRI and `sec:caveat` keys are always rejected; the
+compact `caveat` key is rejected (including null/empty values) unless a registry is configured.
+Then it is admitted only at a capability's top level, and `CaveatCodec` checks it: registered
+types, declared parameters only, the type's context in that object's own `@context`, and JSON
+literal rules (RFC 8785 numbers in a JCS-equal domain, no null, bounded size). Each of these
+refuses an input RDFC would otherwise drop from the signature. In every profile, `:` keys and
+keywords other than `@context` are refused: `"@nest": {"allowedAction": …}`, an `@included` node
+with the capability's id, or a full-IRI key signs the same triples as the term itself, so a holder
+could otherwise hide a signed `allowedAction` or `expires` from the model. Under a registry, caveat
+type names outside caveat entries are refused too. A revocation's `revocationMetadata` is a JSON
+literal, so its member names are not checked.
+Contexts on capabilities/proofs must be zcap/v1, a supported proof suite or a registered caveat
+context; inline aliases and unrelated vocabularies are refused.
 Generated proofs pass the same profile gate before signing. Standalone proof verification applies the
 guard before its proofless-root shortcut. Envelope invocation checks its separate
 capability argument, body capability and proof capability independently. Signed revocation
@@ -90,6 +104,16 @@ that routing and URL normalization agree with the authenticated target.
 5. At invocation, validate every chain link, authority restriction and revocation.
 6. Verify the invoker's signature and controller relationship, enforce freshness,
    then atomically record the nonce before authorizing the action.
+7. With caveats (#157), require a handler per caveat type before step 6 and run the
+   handlers after it, in ordinal type order, releasing earlier ones on a denial.
+
+Ids used as keys (capability, chain, invocation, document and revocation-request ids) must be
+absolute IRIs in `Uri.AbsoluteUri` form, because RDFC signs only the normalized IRI. Envelope
+invocations and signed revocations are canonicalized under zcap/v1 plus the suite context so
+`created` is signed. A proof set can name several chains, for example two representations of the
+same parent. The chain walk tries each one, depth first and at most 16, and verifies every link only
+with the delegation proof whose chain named its parent. The first chain that verifies is used for
+caveats, root pinning and revocation sweeps.
 
 `LegacyProofCrypto` delegates to DataProofs' Ed25519Signature2020 and
 EcdsaSecp256r1Signature2019 suites. `ZcapSuiteCatalog` binds proof type, key type and
@@ -112,7 +136,8 @@ be parseable when present and cannot exceed allowed clock skew; requiring it is
 optional. Invocation/revocation `created` additionally has a lower freshness bound
 based on the nonce window. Revocation authorization intentionally exempts applicable
 expiration-ceiling/created policies so removing authority remains possible; it does
-not exempt unsupported caveats. Revoking a root authorizes against the trusted root
+not exempt unsupported caveats (caveat integrity stays required; caveat policy is skipped).
+Revoking a root authorizes against the trusted root
 (explicit or resolved), never the request's copy: a root-only chain has no delegation
 proof, so the caller's `controller` is never consulted. Whether an id is a root is decided
 by the verifier's trust store, not by the request's shape, and an unresolvable root-shaped
@@ -130,8 +155,8 @@ recover the id from the raw request target, decoded exactly once; ASP.NET Core's
 value is already decoded except for `%2F`, so decoding it again corrupted every root
 id (#155). A host without a raw target (TestServer) falls back to the route value, and
 an intermediary that decodes and re-encodes the path reintroduces the double decode.
-Free-form revocation `reason`/`metadata` are informational under RDFC, not
-signature-bound policy.
+Revocation `reason`/`metadata` are signed under zcap-dotnet's revocation context
+but remain informational, never authorization policy.
 
 Replicated verifiers must share authoritative revocation and replay stores. The
 library does not discover unknown verifiers, distribute revocations between

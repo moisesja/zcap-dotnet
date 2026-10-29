@@ -121,4 +121,17 @@ public class LegacyProofCryptoMappingTests
         // Modeled members never leak into AdditionalProperties (clean separation).
         di.AdditionalProperties.Should().NotContainKeys("type", "proofPurpose", "verificationMethod", "proofValue", "created");
     }
+
+    [Fact(DisplayName = "Verify returns false, never throws, for a proof DataProofs cannot map")]
+    public void Verify_UnmappableProof_ReturnsFalse()
+    {
+        var proof = EmbeddedParent().Proof!.Primary;
+        proof.AdditionalProperties = new() { ["domain"] = JsonSerializer.SerializeToElement(123) };
+        var capability = EmbeddedParent();
+        capability.Proof = null;
+
+        LegacyProofCrypto.TryMapProof(proof, out _).Should().BeFalse();
+        new LegacyProofCrypto().Verify(capability, proof, new ResolvedKey(new byte[32], "Ed25519VerificationKey2020"))
+            .Should().BeFalse();
+    }
 }

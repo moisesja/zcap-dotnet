@@ -1,4 +1,5 @@
 using System.Text.Json;
+using ZcapLd.Core.Models;
 using InnerCanonicalizer = DataProofsDotnet.Rdfc.RdfcDocumentCanonicalizer;
 
 namespace ZcapLd.Core.Cryptography;
@@ -14,7 +15,16 @@ public class RdfcDocumentCanonicalizer : IDocumentCanonicalizer
     // Use the same serialization options as the production proof engine.
     private static readonly JsonSerializerOptions SerializerOptions = ZcapJsonOptions.Default;
 
-    private static readonly InnerCanonicalizer Inner = new(RdfcContextDocumentLoader.Instance);
+    private static readonly InnerCanonicalizer Shared = new(RdfcContextDocumentLoader.Instance);
+
+    private readonly InnerCanonicalizer _inner;
+
+    /// <summary>A canonicalizer over the ZCAP and supported suite contexts.</summary>
+    public RdfcDocumentCanonicalizer() => _inner = Shared;
+
+    /// <summary>A canonicalizer that also resolves the generated contexts of registered caveat types (#157).</summary>
+    public RdfcDocumentCanonicalizer(CaveatTypeRegistry caveats)
+        => _inner = new InnerCanonicalizer(new RdfcContextDocumentLoader(caveats ?? throw new ArgumentNullException(nameof(caveats))));
 
     public string Method => "RDFC-1.0";
 
@@ -26,6 +36,6 @@ public class RdfcDocumentCanonicalizer : IDocumentCanonicalizer
             ? JsonDocument.Parse(s)
             : JsonSerializer.SerializeToDocument(document, SerializerOptions);
 
-        return Inner.CanonicalizeJsonLd(parsed.RootElement);
+        return _inner.CanonicalizeJsonLd(parsed.RootElement);
     }
 }

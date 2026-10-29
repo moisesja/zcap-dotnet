@@ -1,8 +1,9 @@
 <Project>
   <PropertyGroup>
-    <!-- Shared major version: #149 removes typed caveats and invocation context APIs,
-         rejects unsupported caveat fields, and defaults target verification to exact matches.
-         Supported capability proof bytes remain unchanged (RDFC-1.0). -->
+    <!-- Shared major version: #157 restores custom caveats as a signed, opt-in extension
+         profile (new interface/constructor parameters) and signs envelope invocation/revocation
+         `created` under the suite context (in-stack signing bytes change). Capability proof
+         bytes remain unchanged (RDFC-1.0). -->
     <ZcapLdVersion>6.0.0</ZcapLdVersion>
   </PropertyGroup>
 </Project>

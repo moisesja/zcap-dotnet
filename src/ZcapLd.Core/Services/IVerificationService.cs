@@ -21,7 +21,9 @@ public interface IVerificationService
     /// particular, on a deep delegation only the <i>leaf</i> link's <c>created</c> is checked here; an
     /// intermediate ancestor's <c>created</c> — like its signature — is gated only by the full-chain
     /// path. For an authorization decision, use <see cref="VerifyCapabilityChainAsync(Capability)"/> (full chain)
-    /// or <see cref="VerifyInvocationAsync(Invocation, Capability)"/>.
+    /// or <see cref="VerifyInvocationAsync(Invocation, Capability)"/>. With a caveat registry (#157), a
+    /// link that carries caveats or sits below the first delegation level is reported as
+    /// <see cref="VerificationOutcome.CaveatEnforcementRequired"/> rather than valid.
     /// </para>
     /// </summary>
     /// <param name="capability">The capability whose delegation proof to verify</param>
@@ -169,7 +171,7 @@ public interface IVerificationService
     /// signer, a replayed request, or any infrastructure error (DID resolution, network, crypto)
     /// returns <c>false</c>. Unsupported caveats remain rejected on this path.
     /// The recorded <c>RevokedBy</c> is the authenticated verification method's bare DID,
-    /// never a caller-asserted identity. Reason and metadata are informational under RDFC.
+    /// never a caller-asserted identity. Reason and metadata are signed but informational.
     /// Replay protection keys on the request's <c>id</c>; mint a fresh ID for each request.
     /// Storage precedes nonce consumption so a failed store write can be retried. A false
     /// result from the subsequent replay check does not roll back a completed write.

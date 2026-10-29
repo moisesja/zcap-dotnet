@@ -19,13 +19,22 @@ Community Group draft; interoperability claims are limited to the tested cases.
 - **Delegated capabilities** carry a parent ID, controller, target, expiration and
   delegation proof, with optional allowed actions. Controllers can be a URI or array.
   A child cannot widen actions or extend the parent's expiration.
-- **Native restrictions** use `expires`, `allowedAction` and target narrowing.
-  Vocabulary caveats are unsupported. Reject `caveat`,
-  `https://w3id.org/security#caveat` and `sec:caveat`, including null/empty values,
-  ancestors and extension JSON. Capability/proof contexts are limited to zcap/v1 and
-  supported suite contexts; inline aliases and unrelated vocabularies are rejected.
-  Do not reintroduce typed caveats, processors, invocation context properties or
-  capability-supplied revocation URLs.
+- **Native restrictions** use `expires`, `allowedAction` and target narrowing. Without a
+  `CaveatTypeRegistry`, reject `caveat`, `https://w3id.org/security#caveat` and
+  `sec:caveat`, including null/empty values, ancestors and extension JSON. In every profile,
+  capability/proof JSON may not use `:` keys or keywords other than `@context`: `@nest`,
+  `@included` or a full-IRI key restates a signed term the model does not read, which let a holder
+  drop its own `allowedAction`. Capability/proof contexts are limited to zcap/v1, supported suite
+  contexts and registered caveat contexts; inline aliases and unrelated vocabularies are rejected.
+- **Custom caveats (#157)** are an opt-in, non-interoperable extension profile
+  ([docs/CAVEAT-PROFILE.md](docs/CAVEAT-PROFILE.md)). They are the only sanctioned caveat
+  path. Every parameter must be signed through the generated per-type context, and every
+  input RDFC would drop (undeclared parameters, unregistered types, missing type context,
+  non-canonical numbers, null) must be rejected. A `Caveat` validates and attenuates but never
+  authorizes. Only resource-owned `ICaveatHandler`s at invocation authorize, after every other
+  check including replay. Chain/proof APIs return `CaveatEnforcementRequired`. Children must
+  restate and narrow parent caveats. Do not add an `IsSatisfied` callback, an invocation
+  context property bag, unsigned caveat parameters or capability-supplied URLs.
 - **Target policy** defaults to exact matching. With
   `VerificationPolicy.AllowTargetAttenuation = true`, a suffix must begin with
   `/` or `?` before a query, or `&` after one. Matching is ordinal and rejects literal
@@ -110,25 +119,45 @@ bash interop/run-interop.sh
 
 ## Architecture Notes
 
-- **Framework and packages**: .NET 10, ZcapLd.Core and ZcapLd.AspNetCore 5.0.0.
+- **Framework and packages**: .NET 10, ZcapLd.Core and ZcapLd.AspNetCore 6.0.0.
   Exact dependency pins live in the project files. NetCrypto handles cryptographic
   primitives, NetDid handles DID resolution, DataProofs handles legacy proof suites
-  and RDFC, and NetCid handles multibase. Do not claim a spec compliance percentage.
+  and RDFC, and NetCid handles multibase and RFC 8785. Do not claim a spec compliance percentage.
 - **Signing bytes**: `SHA-256(RDFC(proofOptions)) || SHA-256(RDFC(document))`.
   `LegacyProofCrypto` owns production dispatch; `ProofSigningPayloadBuilder` supplies
   clone helpers and the test oracle. Signing self-verifies against the resolved key.
   `ZcapSuiteCatalog` is the closed suite metadata source, not a plugin registry.
+  Context-less documents (envelope invocations, signed revocations) are canonicalized under
+  zcap/v1 plus the proof's suite context, so `created`/`proofPurpose` are signed (#157). Revocations
+  also get `urn:zcap-dotnet:revocation-context:v1`, which defines their purpose, reason and metadata.
+  DataProofs ≥ 1.5.0 refuses undefined terms and dropped or respelled IRIs. That is a second layer
+  only for RDFC: its legacy verifier also accepts the JCS variant, which signs bytes verbatim.
+  Adversarial tests forge with `LenientRdfcCanonicalizer` (test helper) and assert zcap's specific
+  outcome, so they keep proving zcap's own checks reject first.
+- **Identifiers (#157)**: RDFC normalizes IRIs, so keys must be the signed form. Capability,
+  chain, invocation, document and revocation-request ids must be absolute IRIs equal to
+  `Uri.AbsoluteUri` (`CanonicalIri`). Never key revocation, replay or budgets on a variant.
+  dotNetRDF also drops IRIs .NET deems malformed (`[`, `]`, a second `#`) and rewrites others .NET
+  leaves alone (encoded dot segments, invisible trailing segments); DataProofs 1.5.0 refuses both,
+  but zcap checks first. Ids must be
+  `CanonicalIri.IsCanonical` and targets `IsSignedTarget`, both decided by canonicalizing the IRI
+  itself; controllers and verification methods must be `IsBindable`. Never predict RDFC's IRI form
+  from `System.Uri`.
 - **Serialization**: `ZcapJsonOptions.Default` preserves union shapes, opaque timestamp
-  strings and extension data, and rejects duplicate JSON properties. RDFC can drop
-  undefined terms: extension preservation alone does not make a field authenticated.
-  Revocation `reason`/`metadata` are informational, never authorization inputs.
+  strings and extension data, and rejects duplicate JSON properties. A field is authenticated
+  only if a context defines it; DataProofs 1.5.0 refuses undefined terms rather than dropping them.
+  Revocation `reason`/`metadata` are signed but informational, never authorization inputs.
 - **Profile rejection**: `CapabilityProfile` inspects capability/proof extensions,
   embedded ancestry and every proof-set member with depth/work bounds. Invocation
   and revocation checks cover every capability representation. An application
   document's unrelated fields are outside the capability scan.
 - **Roots and proofs**: roots are referenced by ID and resolved through a trust boundary.
   An ID-only delegated invocation is rejected. Proof sets accept at least one valid
-  delegation proof, but unsupported profile content in any member is rejected.
+  delegation proof, but unsupported profile content in any member is rejected. The chain walk
+  tries each chain the delegation proofs name, depth first and at most `MaxChainCandidates` (16),
+  and verifies each link only with the proof whose chain it followed. A parent is reached only
+  through its proof naming the ancestors its child lists. Never let one proof choose the parent
+  another proof is judged against, and never let an unverified proof hide a valid chain.
   Standalone proof verification checks a single link, not full authorization.
 - **Results**: detailed verify APIs return `VerificationResult` with a named outcome;
   bool APIs wrap `.IsValid`. `CouldNotVerify` distinguishes infrastructure faults.

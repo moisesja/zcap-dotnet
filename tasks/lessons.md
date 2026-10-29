@@ -1,5 +1,27 @@
 # Lessons Learned
 
+## 2026-10-27 — Issue #157 red team: RDFC drops malformed IRIs, not only undefined terms
+
+- I measured how dotNetRDF normalizes ids but only probed well-formed variants, so the id rule
+  (`AbsoluteUri == id`) accepted `urn:uuid:x[0]`, which dotNetRDF silently drops: the whole
+  capability node left the signature, and a bracketed invocation target could be rewritten. When
+  a guard depends on "what RDFC signs", probe malformed inputs too (brackets, repeated `#`,
+  spaces, non-ASCII) and check that each produces the expected triple, not just a stable string.
+- Treat "the signature binds this field" as a claim to test per field: write a test that edits
+  the field after signing and expects InvalidSignature or a pre-signature refusal.
+- My handler contract told implementers to cache decisions by an invoker-chosen id. Before
+  recommending an idempotency key, check who chooses it and how long the verifier remembers it.
+
+## 2026-10-27 — Issue #157: restoring removed functionality keeps its prior public/wire shape
+
+- I proposed a new wire term (`extensionCaveat`) and Core-shipped definitions; the owner wanted
+  "what existed before" — the `caveat` property and consumer-defined `Caveat` subclasses. When
+  restoring something that was removed, start from the removed API and wire shape and change only
+  what security forces (here: per-type pinned contexts and handler-based enforcement), and say
+  explicitly which parts differ and why.
+- Have an independent agent attack the design before implementing auth code: it found
+  pre-existing proof-set and envelope-signing gaps the new feature would have inherited.
+
 ## 2026-10-27 — PR #156 re-review: a deny-test must reach the guard it names
 
 - Recurrence of the 2026-06-05 isolation rule. The test meant to pin the explicit-root

@@ -1,0 +1,79 @@
+{
+  "@context": [
+    "https://w3id.org/zcap/v1",
+    "https://w3id.org/security/suites/ed25519-2020/v1"
+  ],
+  "id": "urn:uuid:9b7e3c1a-0d4f-4c41-8f0a-3a52c0e1b003",
+  "type": "https://w3id.org/zcap#CapabilityInvocationRequest",
+  "proof": {
+    "type": "Ed25519Signature2020",
+    "created": "2026-10-27T00:00:00.000000Z",
+    "proofPurpose": "capabilityInvocation",
+    "verificationMethod": "did:key:z6Mkr9XVJHgr8os96FL5UUrkdS226nfM3RuAMsqxKk1BJ8N2#z6Mkr9XVJHgr8os96FL5UUrkdS226nfM3RuAMsqxKk1BJ8N2",
+    "proofValue": "z2Wjp3uATD8TmYptQHbtHReGxmakvBYN9b9wRprREkT1T8WwgfKEpNfmyJ9dHXXtSDz7CqeXDHkpPgp9J2htjrak2",
+    "capability": {
+      "id": "urn:uuid:9b7e3c1a-0d4f-4c41-8f0a-3a52c0e1b002",
+      "@context": [
+        "https://w3id.org/zcap/v1",
+        "https://w3id.org/security/suites/ed25519-2020/v1",
+        "urn:zcap-dotnet:caveat-context:v1:EpsilonBudget"
+      ],
+      "controller": "did:key:z6Mkr9XVJHgr8os96FL5UUrkdS226nfM3RuAMsqxKk1BJ8N2",
+      "invocationTarget": "https://clinical.example/fhir/Observation",
+      "allowedAction": [
+        "query"
+      ],
+      "expires": "2099-01-01T00:00:00.000000Z",
+      "parentCapability": "urn:uuid:9b7e3c1a-0d4f-4c41-8f0a-3a52c0e1b001",
+      "proof": {
+        "type": "Ed25519Signature2020",
+        "created": "2026-10-27T00:00:00.000000Z",
+        "proofPurpose": "capabilityDelegation",
+        "verificationMethod": "did:key:z6Mkv4fhuJNepggTLQ4LtYSsiYFayjovLj1fpKMeqe9ss2Gw#z6Mkv4fhuJNepggTLQ4LtYSsiYFayjovLj1fpKMeqe9ss2Gw",
+        "capabilityChain": [
+          "urn:zcap:root:https%3A%2F%2Fclinical.example%2Ffhir%2FObservation",
+          {
+            "id": "urn:uuid:9b7e3c1a-0d4f-4c41-8f0a-3a52c0e1b001",
+            "@context": [
+              "https://w3id.org/zcap/v1",
+              "https://w3id.org/security/suites/ed25519-2020/v1",
+              "urn:zcap-dotnet:caveat-context:v1:EpsilonBudget"
+            ],
+            "controller": "did:key:z6Mkv4fhuJNepggTLQ4LtYSsiYFayjovLj1fpKMeqe9ss2Gw",
+            "invocationTarget": "https://clinical.example/fhir/Observation",
+            "allowedAction": [
+              "query"
+            ],
+            "expires": "2099-01-01T00:00:00.000000Z",
+            "parentCapability": "urn:zcap:root:https%3A%2F%2Fclinical.example%2Ffhir%2FObservation",
+            "proof": {
+              "type": "Ed25519Signature2020",
+              "created": "2026-10-27T00:00:00.000000Z",
+              "proofPurpose": "capabilityDelegation",
+              "verificationMethod": "did:key:z6MkneMkZqwqRiU5mJzSG3kDwzt9P8C59N4NGTfBLfSGE7c7#z6MkneMkZqwqRiU5mJzSG3kDwzt9P8C59N4NGTfBLfSGE7c7",
+              "capabilityChain": [
+                "urn:zcap:root:https%3A%2F%2Fclinical.example%2Ffhir%2FObservation"
+              ],
+              "proofValue": "zCgHJBh3YX9WJWbVejkmPg4kWMNVcHNqroe214xcGGXtVVzxkmkVJ8R2WF1bjUTaPYrbiPRB5Fx3X61W8XnXbTY5"
+            },
+            "caveat": [
+              {
+                "maxEpsilon": 8,
+                "type": "EpsilonBudget"
+              }
+            ]
+          }
+        ],
+        "proofValue": "z4Dza3YvjiTAqTVCjJ6WXjikCcLrNNGwRqtQfankzh2nLDFgrco3opydaSHiPZAnGDuRYbjUJ3oRmNqXPNNjmodmC"
+      },
+      "caveat": [
+        {
+          "maxEpsilon": 3,
+          "type": "EpsilonBudget"
+        }
+      ]
+    },
+    "invocationTarget": "https://clinical.example/fhir/Observation",
+    "capabilityAction": "query"
+  }
+}

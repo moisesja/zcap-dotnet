@@ -22,6 +22,12 @@ public sealed record VerificationResult
     /// <summary>True if and only if <see cref="Outcome"/> is <see cref="VerificationOutcome.Valid"/>.</summary>
     public bool IsValid => Outcome == VerificationOutcome.Valid;
 
+    /// <summary>
+    /// The authenticated caveats of a verified chain, root side first, when the outcome is
+    /// <see cref="VerificationOutcome.CaveatEnforcementRequired"/>; otherwise <see langword="null"/>.
+    /// </summary>
+    public IReadOnlyList<CaveatGrant>? Caveats { get; init; }
+
     /// <summary>The shared successful result.</summary>
     public static VerificationResult Valid { get; } = new() { Outcome = VerificationOutcome.Valid };
 

@@ -48,7 +48,7 @@ public class CapabilityProfileTests
     {
         var proof = cap.Proof!.Primary;
         var bytes = ProofSigningPayloadBuilder.CanonicalizeCapabilityPayload(
-            ProofSigningPayloadBuilder.CloneCapabilityWithoutProof(cap), proof);
+            ProofSigningPayloadBuilder.CloneCapabilityWithoutProof(cap), proof, LenientRdfcCanonicalizer.Instance);
         proof.ProofValue = MultibaseCodec.Encode((await _dids.SignAsync(signer, bytes)).Signature);
     }
 
@@ -219,7 +219,7 @@ public class CapabilityProfileTests
         }
         // Sign below the public boundary to exercise verification of a valid legacy signature.
         var bytes = ProofSigningPayloadBuilder.CanonicalizeInvocationPayload(
-            ProofSigningPayloadBuilder.CloneInvocationWithoutProof(request), request.Proof!);
+            ProofSigningPayloadBuilder.CloneInvocationWithoutProof(request), request.Proof!, LenientRdfcCanonicalizer.Instance);
         request.Proof!.ProofValue = MultibaseCodec.Encode((await _dids.SignAsync(_owner, bytes)).Signature);
         (await verifier.RevokeCapabilityAsync(leaf, request, root)).Should().BeFalse();
         (await store.GetByCapabilityIdAsync(leaf.Id)).Should().BeNull();
@@ -277,7 +277,7 @@ public class CapabilityProfileTests
         var (root, leaf) = await Chain();
         leaf.AdditionalProperties = new()
         {
-            ["https://example.com/extension"] = JsonSerializer.SerializeToElement(new int[65_536])
+            ["extension"] = JsonSerializer.SerializeToElement(new int[65_536])
         };
         var proofResult = await Verifier().VerifyCapabilityProofDetailedAsync(leaf, root);
         var chainResult = await Verifier().VerifyCapabilityChainDetailedAsync(leaf, root);
@@ -361,11 +361,20 @@ public class CapabilityProfileTests
     [Theory]
     [InlineData("caveat")]
     [InlineData("@context")]
-    public async Task GeneratedRevocationProof_MustMeetVerifierProfile(string reservedKey)
+    [InlineData("jira:id")]
+    public async Task RevocationMetadataKeys_AreLiteralData(string key)
     {
-        var (_, leaf) = await Chain();
-        await Assert.ThrowsAsync<CapabilityValidationException>(() => _signing.SignRevocationAsync(
-            leaf.Id, _owner, leaf.InvocationTarget, metadata: new Dictionary<string, string> { [reservedKey] = "unsupported" }));
+        // revocationMetadata is a JSON literal under the revocation context: its member names are
+        // data, not JSON-LD keys, so the signer and the verifier both accept and record them.
+        var (root, leaf) = await Chain();
+        var store = new InMemoryRevocationStore();
+        var verifier = new VerificationService(_dids, new RevocationService(store), new InMemoryNonceStore(),
+            relationshipResolver: _dids, rootResolver: _dids);
+        var request = await _signing.SignRevocationAsync(
+            leaf.Id, _owner, leaf.InvocationTarget, metadata: new Dictionary<string, string> { [key] = "data" });
+
+        (await verifier.RevokeCapabilityAsync(leaf, request, root)).Should().BeTrue();
+        (await store.GetByCapabilityIdAsync(leaf.Id))!.Metadata.Should().ContainKey(key).WhoseValue.Should().Be("data");
     }
 
     [Fact]
@@ -398,7 +407,6 @@ public class CapabilityProfileTests
     [InlineData("", "&section=one", false)]
     [InlineData("?section=one", "?view=summary", false)]
     [InlineData("?section=one", "/child", false)]
-    [InlineData("", "/../secret", false)]
     public async Task TargetPolicy_GatesDelegationAndBothInvocationForms(string baseSuffix, string suffix, bool validNarrowing)
     {
         var (root, leaf) = await Chain("https://example.com/r" + baseSuffix);
@@ -428,5 +436,77 @@ public class CapabilityProfileTests
         {
             await Assert.ThrowsAsync<ArgumentException>(() => _caps.DelegateCapabilityAsync(root, _holder, ["read"], DateTime.UtcNow.AddDays(1), invocationTarget: target));
         }
+    }
+
+    // RDFC signs a target after removing dot segments (literal or percent-encoded), so the signed
+    // target would lie outside the delegated path while the string still passes prefix matching.
+    [Theory]
+    [InlineData("/../secret")]
+    [InlineData("/%2E%2E/secret")]
+    [InlineData("/%2e%2e/secret")]
+    [InlineData("/./child")]
+    [InlineData("/child/.")]
+    public async Task DotSegmentTargets_RefusedAtSigningAndVerification(string suffix)
+    {
+        var (root, leaf) = await Chain("https://example.com/r/public");
+        var target = leaf.InvocationTarget + suffix;
+
+        Assert.Throws<ArgumentException>(() => _caps.CreateInvocation(leaf, "read", target));
+        await Assert.ThrowsAsync<CapabilityValidationException>(() => _signing.SignCapabilityInvocationAsync(
+            InvocationCapability.FromCapability(leaf), "read", target, _holder));
+        await Assert.ThrowsAsync<ArgumentException>(() => _caps.DelegateCapabilityAsync(
+            root, _holder, ["read"], DateTime.UtcNow.AddDays(1), invocationTarget: target));
+
+        // An attacker's own signer can still produce these; the verifier must refuse them.
+        var envelope = _caps.CreateInvocation(leaf, "read");
+        envelope.InvocationTarget = target;
+        envelope.Proof = await RawProofSigner.SignInvocationAsync(_dids, envelope, _holder);
+        var child = Copy(leaf);
+        child.InvocationTarget = target;
+        child.Proof = await RawProofSigner.SignCapabilityAsync(_dids, child, _owner, [root.Id]);
+        foreach (var allow in new[] { false, true })
+        {
+            (await Verifier(allow).VerifyInvocationAsync(envelope, leaf, root)).Should().BeFalse();
+            (await Verifier(allow).VerifyCapabilityChainAsync(child, root)).Should().BeFalse();
+            (await Verifier(allow).VerifyCapabilityProofAsync(child, root)).Should().BeFalse();
+        }
+    }
+
+    [Theory(DisplayName = "A proof member of the wrong JSON type is malformed on every path, not a verifier fault")]
+    [InlineData("domain", "123")]
+    [InlineData("challenge", "{}")]
+    [InlineData("nonce", "[1]")]
+    [InlineData("previousProof", "{\"x\":1}")]
+    public async Task WrongTypedProofMember_IsMalformed(string member, string json)
+    {
+        // DataProofs models these members with fixed types and cannot map such a proof. That used to
+        // surface as CouldNotVerify, which is reserved for infrastructure faults.
+        var (root, leaf) = await Chain();
+        var value = JsonDocument.Parse(json).RootElement.Clone();
+
+        var envelope = _caps.CreateInvocation(leaf, "read");
+        envelope.Proof = await _signing.SignInvocationAsync(envelope, _holder);
+        envelope.Proof.AdditionalProperties = new() { [member] = value };
+        var envelopeResult = await Verifier().VerifyInvocationDetailedAsync(envelope, leaf, root);
+        envelopeResult.Outcome.Should().Be(VerificationOutcome.MalformedCapability);
+        envelopeResult.Message.Should().Be(CapabilityProfile.ProofMemberTypeMessage);
+
+        var secured = await _signing.SignCapabilityInvocationAsync(
+            InvocationCapability.FromCapability(leaf), "read", leaf.InvocationTarget, _holder);
+        secured["proof"]![member] = JsonNode.Parse(json);
+        (await Verifier().VerifyCapabilityInvocationDetailedAsync(secured, "read", [leaf.InvocationTarget], rootCapability: root))
+            .Outcome.Should().Be(VerificationOutcome.MalformedCapability);
+
+        var delegated = Copy(leaf);
+        delegated.Proof!.Primary.AdditionalProperties = new() { [member] = value };
+        (await Verifier().VerifyCapabilityChainDetailedAsync(delegated, root)).Outcome.Should().Be(VerificationOutcome.MalformedCapability);
+        (await Verifier().VerifyCapabilityProofDetailedAsync(delegated, root)).Outcome.Should().Be(VerificationOutcome.MalformedCapability);
+
+        var store = new InMemoryRevocationStore();
+        var revocation = await _signing.SignRevocationAsync(leaf.Id, _owner, leaf.InvocationTarget);
+        revocation.Proof!.AdditionalProperties = new() { [member] = value };
+        (await new VerificationService(_dids, new RevocationService(store), new InMemoryNonceStore())
+            .RevokeCapabilityAsync(leaf, revocation, root)).Should().BeFalse();
+        (await store.GetByCapabilityIdAsync(leaf.Id)).Should().BeNull();
     }
 }

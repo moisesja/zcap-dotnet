@@ -90,7 +90,9 @@ as capability policy.
 Equivalent keys `https://w3id.org/security#caveat` and `sec:caveat` are also rejected.
 The bounded scan includes capability/proof extension JSON: `@nest`, `@graph`,
 `@included` and objects sharing the capability ID can otherwise add the same RDF
-predicate. Capability and proof contexts are limited to zcap/v1 and supported suite
+predicate. Keys that are JSON-LD keywords (other than `@context`) or IRIs are refused
+in every profile, because they can restate `allowedAction` or `expires` where the
+verifier's model does not read them. Capability and proof contexts are limited to zcap/v1 and supported suite
 contexts; inline aliases and unrelated offline vocabularies are refused even by
 signing and standalone proof verification. This is a deliberate profile restriction.
 Reserved caveat/context keys inside proof extensions are screened at signing too.
@@ -100,6 +102,28 @@ signature. Changing either could leave verification valid. `Expiration.expires`
 was covered because the context defines `expires`; that did not prove integrity
 of other caveat types. `CapabilityProfileTests` constructs legacy signed fixtures
 below the issuance gate so verifier regressions cannot be masked by signer rejection.
+
+## Opt-in caveat extension profile (#157)
+
+The contract above describes the standard profile (no `CaveatTypeRegistry`), and it is unchanged.
+A verifier configured with a registry admits `caveat` only as specified in
+[the caveat profile](CAVEAT-PROFILE.md). This is an extension outside ZCAP v0.4. Its rules and
+their tests:
+
+| Requirement | Tests |
+| --- | --- |
+| Type and every parameter value are signed; post-signing edits fail, including the embedded ancestor | `CaveatTamperingTests` |
+| Inputs RDFC would drop are rejected (undeclared parameter, unregistered type, missing type context, non-canonical number, null, aliases, nested placement) | `CaveatIntegrityTests` |
+| Children restate and narrow every inherited caveat, even when signed by the real parent controller | `CaveatAttenuationTests` |
+| Only invocation authorizes; chain/proof APIs return `CaveatEnforcementRequired`; missing handler is `UnsupportedCaveat` before the nonce is used | `CaveatIssuanceAndProfileTests`, `CaveatIntegrityTests` |
+| Handlers run after replay checks, atomically debit hierarchical budgets, release on later denial | `CaveatEnforcementTests` |
+| Published deterministic fixtures and RDFC literal = RFC 8785 number domain | `CaveatProfileFixtureTests` |
+| Registration rules (names, reserved terms, extension data, frozen registry) | `CaveatTypeRegistryTests`, ASP.NET `CaveatDependencyInjectionTests` |
+
+Fields the verifier keys on must be signed in every profile: envelope `created` is signed under
+the suite context, ids must be normalized absolute IRIs, and a proof-set link verifies only with
+the proof whose chain named its parent. Each chain the proofs name is tried, up to 16
+(`SignedBindingTests`, `ProofSetChainTests`).
 
 ## Revocation and optional verifier policies
 

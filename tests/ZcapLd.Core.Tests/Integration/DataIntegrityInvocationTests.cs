@@ -106,24 +106,31 @@ public class DataIntegrityInvocationTests
     [Fact]
     public async Task DataIntegrityInvocation_StrippedZcapContext_RejectedAsMalformed()
     {
-        // FORGERY DEFENSE: if the attacker strips zcap/v1 from the application document's @context, RDFC
-        // drops capabilityAction/invocationTarget/capability from the signed N-Quads (they are zcap/v1
-        // terms), leaving them unauthenticated and rewritable. The verifier MUST reject such a document
-        // before trusting the signature. Here the attacker signs over a stripped-context document and then
-        // rewrites the (now-unbound) action — without the @context gate this returned Valid.
+        // FORGERY DEFENSE: if the attacker strips zcap/v1 from the application document's @context, a
+        // lenient RDFC drops capabilityAction/invocationTarget/capability from the signed N-Quads (they are
+        // zcap/v1 terms), leaving them unauthenticated and rewritable. DataProofs 1.5.0 refuses to sign or
+        // verify such a document, and the verifier MUST also reject it before trusting the signature.
         const string owner = "did:key:z6MkDiStrip";
         const string target = "https://api.example.com/strip";
         _did.GenerateAndRegisterKeyPair(owner);
         var root = _did.RegisterRoot(await _caps.CreateRootCapabilityAsync(owner, target));
 
-        var attackerDoc = new JsonObject
+        JsonObject AttackerDoc(params string[] contexts) => new()
         {
-            ["@context"] = new JsonArray(SuiteContext), // zcap/v1 deliberately STRIPPED
+            ["@context"] = new JsonArray(contexts.Select(c => (JsonNode?)c).ToArray()),
             ["id"] = "urn:uuid:attacker-doc",
             ["type"] = "https://w3id.org/zcap#CapabilityInvocationRequest",
         };
+        var sign = () => _signing.SignCapabilityInvocationAsync(
+            InvocationCapability.FromId(root.Id), "read", target, owner, AttackerDoc(SuiteContext));
+        await sign.Should().ThrowAsync<DataProofsDotnet.ProofGenerationException>(
+            "the canonicalizer refuses proof options whose terms the document's contexts do not define");
+
+        // The forgery a lenient stack would accept: stripping zcap/v1 after signing leaves the signed graph
+        // without the invocation terms, so the action can be rewritten.
         var secured = await _signing.SignCapabilityInvocationAsync(
-            InvocationCapability.FromId(root.Id), "read", target, owner, attackerDoc);
+            InvocationCapability.FromId(root.Id), "read", target, owner, AttackerDoc("https://w3id.org/zcap/v1", SuiteContext));
+        secured["@context"] = new JsonArray(SuiteContext); // zcap/v1 deliberately STRIPPED
         secured["proof"]!.AsObject()["capabilityAction"] = "delete-everything"; // unbound rewrite
 
         var result = await _verifier.VerifyCapabilityInvocationDetailedAsync(secured, "delete-everything", target);

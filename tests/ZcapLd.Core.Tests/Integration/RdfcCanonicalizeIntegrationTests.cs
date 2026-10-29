@@ -73,4 +73,34 @@ public class RdfcCanonicalizeIntegrationTests
             results[i].Should().Equal(results[0]);
         }
     }
+
+    private const string Contexts =
+        "[\"https://w3id.org/zcap/v1\",\"https://w3id.org/security/suites/ed25519-2020/v1\"]";
+
+    [Theory(DisplayName = "The production canonicalizer refuses what a lenient one silently signs")]
+    [InlineData("\"invocationTarget\":\"https://example.com/foo\",\"maxUses\":1", "does not define")]
+    [InlineData("\"invocationTarget\":\"https://example.com/foo?filter[id]=1\"", "well-formed")]
+    [InlineData("\"invocationTarget\":\"https://example.com/a/%2E%2E/foo\"", "spell differently")]
+    [InlineData("\"invocationTarget\":\"HTTPS://example.com/foo\"", "spell differently")]
+    public void LossyInput_RefusedByProductionButSignedByLenient(string member, string cause)
+    {
+        // DataProofs 1.5.0 is a second layer behind zcap's own checks for RDFC proofs (its legacy
+        // verifier also accepts the JCS variant, which signs bytes verbatim). Tests that forge such
+        // documents sign them with LenientRdfcCanonicalizer and assert zcap's own outcome.
+        var json = $"{{\"@context\":{Contexts},\"id\":\"urn:uuid:lossy\",\"allowedAction\":\"read\",{member}}}";
+
+        var strict = () => new RdfcDocumentCanonicalizer().Canonicalize(json);
+
+        strict.Should().Throw<DataProofsDotnet.Rdfc.JsonLdDataLossException>().WithMessage($"*{cause}*");
+        LenientRdfcCanonicalizer.Instance.Canonicalize(json).Should().NotBeEmpty();
+    }
+
+    [Fact(DisplayName = "The lenient test canonicalizer matches production on input both accept")]
+    public void LenientCanonicalizer_MatchesProduction_OnAcceptedInput()
+    {
+        var json = $"{{\"@context\":{Contexts},\"id\":\"urn:uuid:ok\",\"invocationTarget\":\"https://example.com/foo\"," +
+                   "\"allowedAction\":[\"read\"],\"expires\":\"2027-01-01T00:00:00Z\"}";
+
+        LenientRdfcCanonicalizer.Instance.Canonicalize(json).Should().Equal(new RdfcDocumentCanonicalizer().Canonicalize(json));
+    }
 }

@@ -15,7 +15,8 @@ This library provides:
 - Capability creation and delegation
 - Delegation-chain verification
 - Invocation signing and verification
-- Native restrictions (`expires`, `allowedAction`, target narrowing); unsupported vocabulary caveats are rejected.
+- Native restrictions (`expires`, `allowedAction`, target narrowing); unregistered caveats are rejected.
+- Opt-in custom caveats with signed parameters and resource-owned enforcement ([caveat profile](docs/CAVEAT-PROFILE.md); not interoperable with other ZCAP stacks)
 - Cross-language wire-format compatibility — proven live against `@digitalbazaar/zcap` (RDFC-1.0 / W3C Data Integrity; see [`interop/`](interop/README.md))
 - Invocation replay protection with pluggable nonce stores
 - Revocation persistence with pluggable storage backends
@@ -54,8 +55,9 @@ The explicit root above supplies the trust anchor. Alternatively configure
 `SignCapabilityInvocationAsync` and `VerifyCapabilityInvocationAsync` with the
 relying party's expected action and targets. Run the console example for both paths.
 
-Version 5 removes typed caveats and their context-properties verification overloads.
-See [the breaking changes](CHANGELOG.md) and the native restriction policy below.
+Version 6 restores custom caveats as an opt-in extension profile whose parameters are signed
+(see [Custom caveats](#custom-caveats-opt-in-extension)). It also signs envelope `created` and
+requires normalized ids. See [the breaking changes](CHANGELOG.md).
 
 ### Single vs Multiple Controllers
 
@@ -219,14 +221,13 @@ Full developer guide: [`docs/REVOCATION-INTEGRATION.md`](docs/REVOCATION-INTEGRA
 
 The supported [ZCAP v0.4.0 profile](https://w3c-ccg.github.io/zcap-spec/v0.4.0/)
 uses `expires`, `allowedAction`, and `invocationTarget` to restrict delegated authority.
-Vocabulary-based `caveat` fields are rejected, including unknown types, empty arrays,
-and null values, throughout embedded chains. Equivalent absolute-IRI/prefixed keys
-and nested restriction nodes are rejected too. Capability/proof contexts are limited
-to zcap/v1 and supported proof-suite contexts; inline aliases are unsupported.
-Profile inspection is bounded to depth 64 and 65,536 visited values per scan;
-exceeding those limits produces a distinct resource-limit diagnostic.
-There is no custom caveat registry or
-remote `ValidWhileTrue` handler.
+Without a caveat registry, `caveat` fields are rejected, including unknown types, empty arrays
+and null values, throughout embedded chains. Equivalent absolute-IRI/prefixed keys and nested
+restriction nodes are rejected too. Capability/proof contexts are limited to zcap/v1, the
+supported proof-suite contexts and, when enabled, the generated caveat contexts. Inline aliases
+are unsupported. Profile inspection is bounded to depth 64 and 65,536 visited values per scan;
+exceeding those limits produces a distinct resource-limit diagnostic. There is no remote
+`ValidWhileTrue` handler and no capability-supplied URL is ever fetched.
 
 ```csharp
 var child = await capabilityService.DelegateCapabilityAsync(
@@ -251,6 +252,44 @@ interpret the authenticated target consistently, including percent encoding.
 
 Use native `expires` instead of `ExpirationCaveat`. Revocation belongs to the
 verifier responsible for the target; see [revocation integration](docs/REVOCATION-INTEGRATION.md).
+
+## Custom caveats (opt-in extension)
+
+Some restrictions do not fit `expires`, `allowedAction` or a target. A cumulative
+differential-privacy budget is one example. Deployments that need such restrictions can enable
+the [caveat extension profile](docs/CAVEAT-PROFILE.md). Capabilities carrying caveats are
+rejected by `@digitalbazaar/zcap` and by verifiers that have not registered the types.
+
+```csharp
+public sealed class EpsilonBudgetCaveat : Caveat
+{
+    public override string Type => "EpsilonBudget";
+    [JsonPropertyName("maxEpsilon")] public required double MaxEpsilon { get; init; }
+    public override bool IsAttenuationOf(Caveat parent)          // a child may only lower it
+        => parent is EpsilonBudgetCaveat p && MaxEpsilon <= p.MaxEpsilon;
+}
+
+var caveats = new CaveatTypeRegistry().Register<EpsilonBudgetCaveat>("EpsilonBudget");
+var signing = new SigningService(signer, resolver, caveats);
+var capabilities = new CapabilityService(signing, caveats);
+var grant = await capabilities.DelegateCapabilityAsync(parent, agentDid, new[] { "query" },
+    DateTime.UtcNow.AddHours(4), caveats: new Caveat[] { new EpsilonBudgetCaveat { MaxEpsilon = 3 } });
+
+// The resource enforces: one ICaveatHandler per type, run after every other check.
+var verifier = new VerificationService(resolver, revocations, nonces,
+    caveats: caveats, caveatHandlers: new ICaveatHandler[] { new EpsilonBudgetLedger(store) });
+```
+
+- Every parameter is signed. Each type gets a pinned context, and undeclared parameters,
+  unregistered types and non-canonical numbers are rejected rather than silently dropped.
+- Every delegated link must restate and narrow each parent caveat; the issuer inherits
+  unrestated ones.
+- Only invocation verification authorizes. Chain and proof checks return
+  `CaveatEnforcementRequired` with the authenticated grants. A type without a handler is
+  `UnsupportedCaveat`.
+- The resource owns cost calculation, atomic hierarchical accounting (debit every grant by
+  `GrantKey`), idempotency by invocation id, and shared state across replicas. See the
+  [enforcement contract](docs/CAVEAT-PROFILE.md#enforcement-contract-icaveathandler).
 
 ## Root vs Delegated Semantics
 
@@ -307,7 +346,7 @@ dotnet pack src/ZcapLd.AspNetCore/ZcapLd.AspNetCore.csproj -c Release
 - No default `IDidSigner` ships in the core package — consumers must provide their own (HSM/KMS/Key Vault).
 - `InMemoryDidProvider` (in examples and tests) stores private keys in plaintext memory and is NOT for production use.
 - Canonicalization is RDFC-1.0 (W3C RDF Dataset Canonicalization) only — the format that interoperates with `@digitalbazaar/zcap`. JCS support was removed in 4.0.0; there is no canonicalization option. Known W3C JSON-LD contexts are embedded for offline operation.
-- Cryptography is provided by [NetCrypto](https://www.nuget.org/packages/NetCrypto) (Ed25519 / P-256 sign + verify), reached via [NetDid](https://www.nuget.org/packages/NetDid.Core) 3.1.0 for W3C-compliant did:key resolution; multibase via [NetCid](https://www.nuget.org/packages/NetCid); RDFC-1.0 via [DataProofsDotnet.Rdfc](https://www.nuget.org/packages/DataProofsDotnet.Rdfc).
+- Cryptography is provided by [NetCrypto](https://www.nuget.org/packages/NetCrypto) (Ed25519 / P-256 sign + verify), reached via [NetDid](https://www.nuget.org/packages/NetDid.Core) 4.0.0 for W3C-compliant did:key resolution; multibase via [NetCid](https://www.nuget.org/packages/NetCid); RDFC-1.0 via [DataProofsDotnet.Rdfc](https://www.nuget.org/packages/DataProofsDotnet.Rdfc).
 - Ed25519 and P-256 are the supported signature suites; cryptography is delegated to NetCrypto (via DataProofs), not extended through a zcap API.
 
 ### Cross-stack interop caveats (`@digitalbazaar/zcap`)
