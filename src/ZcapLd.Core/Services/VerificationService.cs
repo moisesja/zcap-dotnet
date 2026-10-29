@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using System.Runtime.ExceptionServices;
+using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.Extensions.Logging;
@@ -1189,8 +1190,9 @@ public class VerificationService : IVerificationService
     /// </para>
     /// </summary>
     private async Task<VerificationResult> VerifyBuiltChainAsync(
-        List<Capability> chain, IReadOnlyList<Proof?> linkProofs, bool applyExpirationCeiling = true,
-        bool applyCreatedCheck = true, bool requireDelegatedExpires = true, bool applyCaveatPolicy = true)
+        List<Capability> chain, IReadOnlyList<Proof?> linkProofs, ChainSearch search,
+        bool applyExpirationCeiling = true, bool applyCreatedCheck = true, bool requireDelegatedExpires = true,
+        bool applyCaveatPolicy = true)
     {
         try
         {
@@ -1204,9 +1206,16 @@ public class VerificationService : IVerificationService
             // 2. Revocation check for all capabilities in the chain.
             foreach (var chainCapability in chain)
             {
-                if (CapabilityProfile.Validate(chainCapability, caveats: _caveats) is { } profileFailure)
-                    return profileFailure;
-                if (await IsCapabilityRevokedAsync(chainCapability.Id))
+                if (!search.Validated.Contains(chainCapability))
+                {
+                    if (CapabilityProfile.Validate(chainCapability, caveats: _caveats) is { } profileFailure)
+                        return profileFailure;
+                    search.Validated.Add(chainCapability);
+                }
+
+                if (!search.Revoked.TryGetValue(chainCapability.Id, out var revoked))
+                    search.Revoked[chainCapability.Id] = revoked = await IsCapabilityRevokedAsync(chainCapability.Id);
+                if (revoked)
                 {
                     return VerificationResult.Fail(VerificationOutcome.Revoked,
                         $"Capability '{chainCapability.Id}' in the chain has been revoked.");
@@ -1252,12 +1261,20 @@ public class VerificationService : IVerificationService
                 // in the set names its own chain and is tried as its own candidate (#157). Propagate the
                 // specific reason (signature / authorization / attenuation / expiry) so a broken link
                 // surfaces precisely (Issue #70).
-                var linkResult = linkProof is null
-                    ? VerificationResult.Fail(VerificationOutcome.InvalidDelegation,
-                        $"No delegation proof of '{child.Id}' names its parent.")
-                    : await VerifySingleDelegationProofAsync(
-                        child, linkProof, parent, requireParentAuthorization: true,
-                        applyCreatedCheck: applyCreatedCheck, applyCaveatPolicy: applyCaveatPolicy);
+                VerificationResult linkResult;
+                if (linkProof is null)
+                {
+                    linkResult = VerificationResult.Fail(VerificationOutcome.InvalidDelegation,
+                        $"No delegation proof of '{child.Id}' names its parent.");
+                }
+                else
+                {
+                    var linkKey = search.LinkKey(child, linkProof, parent);
+                    if (!search.Links.TryGetValue(linkKey, out linkResult!))
+                        search.Links[linkKey] = linkResult = await VerifySingleDelegationProofAsync(
+                            child, linkProof, parent, requireParentAuthorization: true,
+                            applyCreatedCheck: applyCreatedCheck, applyCaveatPolicy: applyCaveatPolicy);
+                }
                 if (!linkResult.IsValid)
                     return linkResult;
 
@@ -1357,6 +1374,34 @@ public class VerificationService : IVerificationService
         List<Capability> Chain, Proof?[] LinkProofs, CapabilityValidationException? BuildFailure);
 
     /// <summary>
+    /// Work shared by the candidates of one chain search. Candidates usually share their links (the
+    /// proofs of a set embed copies of the same ancestors), so each result is computed once per call:
+    /// a link's verification by the RFC 8785 content of child, proof and parent, revocation status and
+    /// roots by id, profile validation by reference, and the controllers already refused for a revoker.
+    /// Everything memoized depends only on that input and on verifier state that is fixed for the call.
+    /// </summary>
+    private sealed class ChainSearch
+    {
+        private readonly Dictionary<object, string> _contentKeys = new(ReferenceEqualityComparer.Instance);
+
+        public Dictionary<string, VerificationResult> Links { get; } = new(StringComparer.Ordinal);
+        public Dictionary<string, bool> Revoked { get; } = new(StringComparer.Ordinal);
+        public Dictionary<string, Capability> Roots { get; } = new(StringComparer.Ordinal);
+        public HashSet<Capability> Validated { get; } = new(ReferenceEqualityComparer.Instance);
+        public HashSet<string> RefusedControllers { get; } = new(StringComparer.Ordinal);
+
+        public string LinkKey(Capability child, Proof proof, Capability parent)
+            => $"{ContentKey(child)}|{ContentKey(proof)}|{ContentKey(parent)}";
+
+        private string ContentKey(object value)
+        {
+            if (!_contentKeys.TryGetValue(value, out var key))
+                _contentKeys[value] = key = Convert.ToHexString(SHA256.HashData(CanonicalForComparison(value)));
+            return key;
+        }
+    }
+
+    /// <summary>
     /// Builds and verifies the capability's chain. A proof set may name several chains (for example two
     /// representations of the same parent), and the capability is valid when at least one delegation
     /// proof verifies together with the chain it names. Candidates are tried depth first in proof order
@@ -1369,13 +1414,14 @@ public class VerificationService : IVerificationService
     private async Task<(VerificationResult Result, List<Capability>? Chain)> BuildAndVerifyChainAsync(
         Capability capability, Capability? explicitRoot, bool applyExpirationCeiling = true,
         bool applyCreatedCheck = true, bool requireDelegatedExpires = true, bool applyCaveatPolicy = true,
-        Func<List<Capability>, Task<bool>>? accept = null)
+        Func<List<Capability>, ChainSearch, Task<bool>>? accept = null)
     {
         VerificationResult? lastResult = null;
         CapabilityValidationException? lastFailure = null;
         var examined = 0;
+        var search = new ChainSearch();
         await foreach (var candidate in ExtendChainAsync(
-                           capability, [], [], expectedRootId: null, requiredChainIds: null, explicitRoot))
+                           capability, [], [], expectedRootId: null, requiredChainIds: null, explicitRoot, search))
         {
             if (++examined > MaxChainCandidates)
                 return (VerificationResult.Fail(VerificationOutcome.InvalidDelegation,
@@ -1388,9 +1434,9 @@ public class VerificationService : IVerificationService
             }
 
             var result = await VerifyBuiltChainAsync(
-                candidate.Chain, candidate.LinkProofs, applyExpirationCeiling, applyCreatedCheck,
+                candidate.Chain, candidate.LinkProofs, search, applyExpirationCeiling, applyCreatedCheck,
                 requireDelegatedExpires, applyCaveatPolicy);
-            if (result.IsValid && (accept is null || await accept(candidate.Chain)))
+            if (result.IsValid && (accept is null || await accept(candidate.Chain, search)))
                 return (result, candidate.Chain);
             (lastFailure, lastResult) = (null, result.IsValid
                 ? VerificationResult.Fail(VerificationOutcome.InvalidDelegation, "The verified chain was not accepted.")
@@ -1419,9 +1465,10 @@ public class VerificationService : IVerificationService
     /// which <paramref name="current"/>'s proof must name; <see langword="null"/> for the leaf.</param>
     /// <param name="expectedRootId">The root id the walk has committed to, once known.</param>
     /// <param name="explicitRoot">A root supplied by the caller, preferred over the resolver.</param>
+    /// <param name="search">Work shared by the candidates of this search.</param>
     private async IAsyncEnumerable<ChainCandidate> ExtendChainAsync(
         Capability current, ImmutableList<Capability> below, ImmutableList<Proof?> belowProofs,
-        string? expectedRootId, string[]? requiredChainIds, Capability? explicitRoot)
+        string? expectedRootId, string[]? requiredChainIds, Capability? explicitRoot, ChainSearch search)
     {
         static ChainCandidate Failed(CapabilityValidationException failure) => new([], [], failure);
         static ChainCandidate Complete(ImmutableList<Capability> leafFirst, ImmutableList<Proof?> proofs)
@@ -1517,11 +1564,15 @@ public class VerificationService : IVerificationService
 
                 // Strictly validate this link's chain shape and obtain its immediate parent (the resolved
                 // root for a first-level delegation, the embedded last entry for a deeper one).
-                parent = await ValidateChainShapeAndResolveParentAsync(rawChain, current, chainRootId, explicitRoot);
+                parent = await ValidateChainShapeAndResolveParentAsync(rawChain, current, chainRootId, explicitRoot, search);
             }
-            catch (CapabilityValidationException ex)
+            catch (Exception ex) when (ex is CapabilityValidationException or DelegationException
+                                           or InvocationException or FormatException or JsonException)
             {
-                failure = ex;
+                // Malformed input in this proof's chain (an embedded parent that does not parse, a
+                // non-spec shape) fails this candidate only, classified as VerifySingleDelegationProofAsync
+                // classifies it; other proofs are still tried. Infrastructure faults propagate.
+                failure = ex as CapabilityValidationException ?? new CapabilityValidationException(ex.Message, ex);
             }
 
             if (failure is not null)
@@ -1535,7 +1586,7 @@ public class VerificationService : IVerificationService
                 ? null
                 : rawChain[..^1].Select(entry => TryExtractStringValue(entry) ?? string.Empty).ToArray();
             await foreach (var candidate in ExtendChainAsync(
-                               parent!, path, belowProofs.Add(proof), chainRootId, parentChainIds, explicitRoot))
+                               parent!, path, belowProofs.Add(proof), chainRootId, parentChainIds, explicitRoot, search))
                 yield return candidate;
         }
     }
@@ -1554,7 +1605,8 @@ public class VerificationService : IVerificationService
     /// ancestor-id prefix exactly equal to the parent's own chain rendered by id (order + minimality).
     /// </summary>
     private async Task<Capability> ValidateChainShapeAndResolveParentAsync(
-        object[] rawChain, Capability current, string chainRootId, Capability? explicitRoot)
+        object[] rawChain, Capability current, string chainRootId, Capability? explicitRoot,
+        ChainSearch? search = null)
     {
         var parentId = current.ParentCapability!;
 
@@ -1574,7 +1626,11 @@ public class VerificationService : IVerificationService
                     "First-level delegation capabilityChain MUST be exactly [rootCapabilityId] (root referenced by id only).");
             }
 
-            return await ResolveRootCapabilityAsync(chainRootId, explicitRoot);
+            if (search is null)
+                return await ResolveRootCapabilityAsync(chainRootId, explicitRoot);
+            if (!search.Roots.TryGetValue(chainRootId, out var root))
+                search.Roots[chainRootId] = root = await ResolveRootCapabilityAsync(chainRootId, explicitRoot);
+            return root;
         }
 
         // Deeper delegation: [rootId, ...ancestorIds, {immediate parent embedded}].
@@ -1863,13 +1919,18 @@ public class VerificationService : IVerificationService
     /// independently.
     /// </remarks>
     private async Task<bool> IsControllerAuthorizedAsync(
-        string verificationMethod, Capability capability, VerificationRelationship relationship)
+        string verificationMethod, Capability capability, VerificationRelationship relationship,
+        HashSet<string>? refused = null)
     {
         if (capability.Controller is null || capability.Controller.IsEmpty)
             return false;
 
         foreach (var controller in capability.Controller.Values)
         {
+            // Within one search the method and relationship are fixed, so a refusal holds for every chain.
+            if (refused is not null && !refused.Add(controller))
+                continue;
+
             var result = await _relationshipResolver.IsAuthorizedForRelationshipAsync(
                 controller, verificationMethod, relationship);
 
@@ -2421,12 +2482,13 @@ public class VerificationService : IVerificationService
             var (result, _) = await BuildAndVerifyChainAsync(
                 capability, explicitRoot, applyExpirationCeiling: false, applyCreatedCheck: false,
                 requireDelegatedExpires: false, applyCaveatPolicy: false,
-                accept: async chain =>
+                accept: async (chain, search) =>
                 {
                     foreach (var link in chain)
                     {
                         if (await IsControllerAuthorizedAsync(
-                                verificationMethod, link, VerificationRelationship.CapabilityDelegation))
+                                verificationMethod, link, VerificationRelationship.CapabilityDelegation,
+                                search.RefusedControllers))
                             return true;
                     }
 
