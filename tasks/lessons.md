@@ -34,6 +34,24 @@
   When adding a pre-check over attacker-shaped input, write the "attacker reshapes the input" test
   first, and keep the pre-check inside the fail-closed `try`.
 
+## 2026-10-29 — PR #162 review: shape validation is not authentication; a global early return is a veto
+
+- My red-team fix made the standalone sweep check the *shape* of the presented ancestry (prefix,
+  parent id, embedding) and then trusted the `verificationMethod` it found there. The owner swapped
+  that method on a copy of a revoked parent and the sweep queried the wrong scope. Whenever a
+  decision depends on *who signed* something, the only evidence is a verified signature plus the
+  parent-controller authorization that binds the key to the chain, up to a trusted root; structure
+  tells you nothing about authorship. Ask "who could have produced this bytes-for-bytes?" of every
+  field a scope or key is derived from.
+- Returning `MalformedCapability` for the whole capability when one leaf proof's ancestry was
+  unusable recreated exactly the veto the chain walk is designed to avoid ("never let an unverified
+  proof hide a valid chain"). A per-candidate rule (verify the link, then its ancestry, first to pass
+  wins) must be applied all the way through; any early `return` outside the candidate loop is a veto.
+  Test proof sets with the junk proof in both positions.
+- When fixing a reviewer's or red team's finding, re-run the original attack *and* its natural
+  variants (strip, swap, reorder, duplicate) before declaring it closed; the first fix closed only the
+  variant that had been demonstrated.
+
 ## 2026-10-27 — Issue #157 red team: RDFC drops malformed IRIs, not only undefined terms
 
 - I measured how dotNetRDF normalizes ids but only probed well-formed variants, so the id rule

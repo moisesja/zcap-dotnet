@@ -432,12 +432,69 @@ public class VerificationServiceRevocationScopeTests
         var aroundBlank = CapabilityJson.Parse(CapabilityJson.Serialize(leaf));
         aroundBlank.Proof = await RawProofSigner.SignCapabilityAsync(_dids, aroundBlank, mid, new object[] { root.Id, blank });
         var blankAct = () => _verifier.VerifyCapabilityProofDetailedAsync(aroundBlank);
-        (await blankAct.Should().NotThrowAsync()).Which.Outcome.Should().Be(VerificationOutcome.MalformedCapability);
+        (await blankAct.Should().NotThrowAsync()).Which.IsValid.Should().BeFalse();
 
         // An embedded parent that does not deserialize escaped as a JsonException.
         var unparsable = CapabilityJson.Edit(leaf, json => json["proof"]!["capabilityChain"]![1]!["expires"] = 123);
         var unparsableAct = () => _verifier.VerifyCapabilityProofDetailedAsync(unparsable);
         (await unparsableAct.Should().NotThrowAsync()).Which.IsValid.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Standalone_EmbeddedParentWithASwappedVerificationMethod_FailsClosedInsteadOfQueryingTheWrongScope()
+    {
+        // PR #162 review, finding 1: the parent's controller keeps its key after the parent is revoked.
+        // It clones the parent, points the parent's proof at a fresh DID (the signature is now invalid,
+        // but the standalone path never checked it), re-signs the leaf around that copy with the
+        // ordinary signing service, and the sweep would query the parent under the fabricated delegator.
+        var owner = _dids.GenerateDidKey();
+        var mid = _dids.GenerateDidKey();
+        var holder = _dids.GenerateDidKey();
+        var root = await RootAsync(owner, "https://example.com/swapped-method");
+        var p = await DelegateAsync(root, mid);
+        var leaf = await DelegateAsync(p, holder);
+        (await RevokeAsync(_verifier, p, owner)).Should().BeTrue();
+        (await _verifier.VerifyCapabilityProofDetailedAsync(leaf)).Outcome.Should().Be(VerificationOutcome.Revoked);
+
+        var swapped = CapabilityJson.Parse(CapabilityJson.Serialize(p));
+        swapped.Proof!.Primary.VerificationMethod = await _dids.GetVerificationMethodAsync(_dids.GenerateDidKey());
+        var resigned = CapabilityJson.Parse(CapabilityJson.Serialize(leaf));
+        resigned.Proof = await _signing.SignCapabilityAsync(resigned, mid, "capabilityDelegation", new object[] { root.Id, swapped });
+
+        var standalone = await _verifier.VerifyCapabilityProofDetailedAsync(resigned);
+        standalone.IsValid.Should().BeFalse("the ancestor's delegator is established only by verifying its proof");
+        standalone.Outcome.Should().Be(VerificationOutcome.InvalidSignature);
+        (await _verifier.VerifyCapabilityChainDetailedAsync(resigned)).IsValid.Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Standalone_UnusableExtraProof_DoesNotVetoTheGenuineOne(bool genuineFirst)
+    {
+        // PR #162 review, finding 2: a proof set with the genuine leaf proof and a clone whose embedded
+        // parent lost its proof. Nothing is re-signed; the genuine proof stays valid and must win on the
+        // standalone path as it does on the chain path, in either order.
+        var owner = _dids.GenerateDidKey();
+        var mid = _dids.GenerateDidKey();
+        var holder = _dids.GenerateDidKey();
+        var root = await RootAsync(owner, $"https://example.com/no-veto/{genuineFirst}");
+        var p = await DelegateAsync(root, mid);
+        var leaf = await DelegateAsync(p, holder);
+
+        var genuine = leaf.Proof!.Primary;
+        var junk = JsonSerializer.Deserialize<Proof>(JsonSerializer.Serialize(genuine, ZcapJsonOptions.Default), ZcapJsonOptions.Default)!;
+        var prooflessParent = CapabilityJson.Parse(CapabilityJson.Serialize(p));
+        prooflessParent.Proof = null;
+        junk.CapabilityChain = new object[] { root.Id, prooflessParent };
+        leaf.Proof = ProofSet.FromValues(genuineFirst ? [genuine, junk] : [junk, genuine]);
+
+        (await _verifier.VerifyCapabilityProofDetailedAsync(leaf)).Outcome.Should().Be(VerificationOutcome.Valid);
+        (await _verifier.VerifyCapabilityChainDetailedAsync(leaf)).Outcome.Should().Be(VerificationOutcome.Valid);
+
+        // The same set still reports a revocation found on the genuine route.
+        (await RevokeAsync(_verifier, p, owner)).Should().BeTrue();
+        (await _verifier.VerifyCapabilityProofDetailedAsync(leaf)).Outcome.Should().Be(VerificationOutcome.Revoked);
     }
 
     /// <summary>Drops writes while <see cref="LoseWrites"/> is set, as a store with a broken key column would.</summary>

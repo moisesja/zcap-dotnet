@@ -214,10 +214,14 @@ id and scope disagree with its key, reads each record back after writing it, and
 expired records by exact key, so a store that drops or rewrites the scope fails
 verification closed instead of widening a revocation. Revocation is looked up after a
 link's proof verifies, once per chain, where the JS stack runs `inspectCapabilityChain`;
-the standalone proof path reaches every ancestor's delegator through the nested embedded
-parents and fails closed (`MalformedCapability`) when an embedded parent carries no proof
-fitting its route, because that ancestry is unverified there. Root resolvers return null
-for unknown ids rather than throwing, because
+the standalone proof path evaluates each leaf proof as its own candidate (link first, then
+its ancestry), reaches every ancestor through the nested embedded parents, and verifies
+each ancestor's delegation proof as a chain link before trusting its delegator, failing
+that candidate closed when an embedded parent has no proof that fits its route and
+verifies: the presented ancestry is otherwise unauthenticated, and a revoked delegator
+could re-sign a child around a copy of its capability with the proof stripped or its
+verification method swapped. A failing candidate never vetoes a valid one. Root resolvers
+return null for unknown ids rather than throwing, because
 revocation looks up the revoked id and a fault fails the revocation closed.
 
 ## Concurrency and limits

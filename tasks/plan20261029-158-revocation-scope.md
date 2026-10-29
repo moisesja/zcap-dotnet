@@ -130,6 +130,27 @@ one-time migration of legacy `revocation_registry` rows to `Unscoped`.
     `IsCapabilityRevokedAsync(id, Unscoped)` footgun documented; co-signed-parent and self-asserted-root
     consequences documented on `RevokeCapabilityAsync` and in architecture.md.
   - Final: 776 tests (728 Core + 48 ASP.NET), warnings identical to baseline.
+- **PR #162 review round 1 (owner, 2026-10-29), both findings valid and fixed (third commit):**
+  - *[P2] The standalone sweep trusted an unauthenticated ancestor scope.* My route walk validated
+    the ancestry's shape and then read the embedded parent's `verificationMethod` as its delegator;
+    the parent's controller swapped that method on a copy of the revoked parent and the sweep
+    queried the wrong scope. Fix: `WalkRouteAsync` verifies each embedded ancestor's fitting proof as
+    a chain link (`VerifySingleDelegationProofAsync`: signature, parent-controller authorization,
+    attenuation, expiry; created/caveat policy off) against the next ancestor up to the resolved or
+    explicit root before trusting its delegator; a parent with no proof that fits and verifies fails
+    the candidate with that proof's reason (`InvalidSignature` for the swap). Below the first level
+    the standalone path now needs a root resolver or explicit root.
+  - *[P2] An unusable extra proof vetoed a valid proof.* The early `return MalformedCapability`
+    rejected the whole capability. Fix: the standalone core evaluates each delegation proof as its
+    own candidate (link first, then its authenticated ancestry and revocation sweep); the first to
+    pass wins; otherwise a `Revoked` found on a verified route is reported, else the last failure.
+    `VerifyDelegationProofAsync` is removed (its loop is now the core).
+  - Tests: the owner's two reproductions (`…SwappedVerificationMethod…`, `…UnusableExtraProof…` in
+    both orders, the latter also re-checking `Revoked` after revoking the parent). One existing
+    caveat test moved from `CaveatEnforcementRequired` to `InvalidSignature` for a tampered embedded
+    parent (the chain path already said so); one of my earlier tests relaxed to "not valid" because
+    the leaf-link shape check now runs first. Ablations A9 (no ancestor authentication), A10 (first
+    failure vetoes), A11 (no `Revoked` precedence) each go red. 779 tests; warnings unchanged.
 - **Open (#161):** a signed revocation binds only the capability id, so a captured request replayed
   within the freshness window with another verified copy writes further records before the nonce
   denies it (bounded by the revoker's own authority; the review extended a revocation to a co-signer's

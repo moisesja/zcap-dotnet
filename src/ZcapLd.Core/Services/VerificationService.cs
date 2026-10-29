@@ -303,53 +303,70 @@ public class VerificationService : IVerificationService
 
         try
         {
-            // Revocation on the standalone path (Issue #63), swept per delegation proof because any proof
-            // in a set may be the one that verifies; sweeping only the first let a junk first proof hide a
-            // revoked ancestor (#157). Records are scoped to the delegator that signed each link (#158):
-            // the leaf is looked up under each proof's delegator, the root in the root scope, and every
-            // ancestor under the delegator of the proof that fits the route, reached through the nested
-            // embedded parents (StandaloneRevocationLookups). The ancestry is presented and unverified
-            // here, so an embedded parent that carries no proof fitting the route makes the proof
-            // unusable: otherwise a delegator whose own capability was revoked could re-sign a child
-            // around a proof-less copy of it. Inside the try so a store fault or an unexpected shape
-            // fails closed through LogFailedClosed instead of escaping (red-team, #158).
+            // Per ZCAP-LD v0.4.0 a delegated zcap's proof may be a set; the capability is valid if at least
+            // one delegation proof verifies. Each proof is a candidate evaluated on its own, as the chain
+            // walk evaluates each chain a proof set names: the link is verified first (signature, parent
+            // authorization, attenuation, expiry), then the ancestry that proof names is authenticated and
+            // swept for revocation (#63, #158), and the first candidate passing both wins. A proof that
+            // fails never vetoes another (PR #162 review); when every candidate fails the result is a
+            // revocation found on any verified route, else the last failure (Issue #70). Revocation is
+            // swept per candidate because the proof that verifies may be any of them, and a junk proof
+            // must neither hide nor force a revocation (#157).
+            VerificationResult? revokedResult = null;
+            var last = capability.Proof is null
+                ? VerificationResult.Fail(VerificationOutcome.MalformedCapability, "Delegated capability is missing a proof.")
+                : VerificationResult.Fail(VerificationOutcome.InvalidDelegation, "No capabilityDelegation proof could be verified.");
             foreach (var delegationProof in capability.Proof?.DelegationProofs() ?? Enumerable.Empty<Proof>())
             {
                 if (delegationProof.CapabilityChain?.Any(entry => !CanonicalIri.IsCanonical(ExtractCapabilityId(entry))) == true)
-                    return VerificationResult.Fail(VerificationOutcome.MalformedCapability,
+                {
+                    last = VerificationResult.Fail(VerificationOutcome.MalformedCapability,
                         $"Every capabilityChain id {CanonicalIri.RequirementMessage}.");
+                    continue;
+                }
 
-                if (StandaloneRevocationLookups(capability, delegationProof) is not { } lookups)
-                    return VerificationResult.Fail(VerificationOutcome.MalformedCapability,
-                        "A delegation proof's capabilityChain embeds an ancestor without a delegation proof that names " +
-                        "the chain's prefix and embeds its own parent, or the ancestry exceeds the revocation sweep budget.");
+                // 1. The link itself. For a first-level delegation the parent is the root (referenced by
+                // id only), obtained via explicitRoot or the configured resolver inside
+                // VerifySingleDelegationProofAsync.
+                var link = await VerifySingleDelegationProofAsync(
+                    capability, delegationProof, parentCapabilityOverride: null,
+                    requireParentAuthorization: true, explicitRoot);
+                if (!link.IsValid)
+                {
+                    last = link;
+                    continue;
+                }
+
+                // 2. Revocation of the leaf and of every ancestor this proof names, each under the
+                // delegator of a proof that has verified (SweepStandaloneRouteAsync).
+                var (sweepFailure, lookups) = await SweepStandaloneRouteAsync(capability, delegationProof, explicitRoot);
+                if (sweepFailure is not null)
+                {
+                    last = sweepFailure;
+                    continue;
+                }
 
                 if (await _revocationService.FindRevocationAsync(lookups) is { } revoked)
                 {
-                    return VerificationResult.Fail(VerificationOutcome.Revoked,
+                    // A revocation found on a verified route is reported over any other candidate's
+                    // failure, so a junk proof in the set cannot mask it in the outcome.
+                    last = revokedResult = VerificationResult.Fail(VerificationOutcome.Revoked,
                         string.Equals(revoked.CapabilityId, capability.Id, StringComparison.Ordinal)
                             ? $"Capability '{capability.Id}' has been revoked."
                             : "An ancestor capability in the delegation chain has been revoked.");
+                    continue;
                 }
+
+                // A single link never authorizes caveats: only invocation verification enforces them
+                // (#157). Below the first level the ancestors' caveats are checked for integrity but not
+                // for policy here, so with caveats enabled such a link is never reported as valid on its own.
+                var mayCarryCaveats = capability.AdditionalProperties?.ContainsKey(CaveatCodec.Property) == true ||
+                    (_caveats is { IsEmpty: false } &&
+                     capability.Proof?.DelegationProofs().Any(proof => proof.CapabilityChain is { Length: > 1 }) == true);
+                return mayCarryCaveats ? CaveatEnforcementRequired(grants: null) : link;
             }
 
-            // Standalone proof verification requires parent authorization context. For a first-level
-            // delegation the parent is the root (referenced by id only), obtained via explicitRoot or
-            // the configured resolver inside VerifySingleDelegationProofAsync.
-            var result = await VerifyDelegationProofAsync(
-                capability,
-                parentCapabilityOverride: null,
-                requireParentAuthorization: true,
-                explicitRoot: explicitRoot);
-
-            // A single link never authorizes caveats: only invocation verification enforces them
-            // (#157). Below the first level the embedded parent's own proof is not verified here,
-            // so its caveats (and its parent's) cannot be trusted to be absent: with caveats
-            // enabled, such a link is never reported as valid on its own.
-            var mayCarryCaveats = capability.AdditionalProperties?.ContainsKey(CaveatCodec.Property) == true ||
-                (_caveats is { IsEmpty: false } &&
-                 capability.Proof?.DelegationProofs().Any(proof => proof.CapabilityChain is { Length: > 1 }) == true);
-            return result.IsValid && mayCarryCaveats ? CaveatEnforcementRequired(grants: null) : result;
+            return revokedResult ?? last;
         }
         catch (Exception ex)
         {
@@ -361,51 +378,6 @@ public class VerificationService : IVerificationService
                 "VerifyCapabilityProofAsync failed closed for capability {CapabilityId}", capability.Id);
             return VerificationResult.Fail(VerificationOutcome.CouldNotVerify, ex.Message);
         }
-    }
-
-    /// <summary>
-    /// Verifies a delegated capability proof, optionally using an already-resolved parent. Returns the
-    /// outcome of the first delegation proof that fully verifies, otherwise the most-recent failure
-    /// reason (Issue #70).
-    /// </summary>
-    private async Task<VerificationResult> VerifyDelegationProofAsync(
-        Capability capability,
-        Capability? parentCapabilityOverride,
-        bool requireParentAuthorization,
-        Capability? explicitRoot = null,
-        bool applyCreatedCheck = true,
-        bool applyCaveatPolicy = true)
-    {
-        if (capability.Proof == null)
-        {
-            return VerificationResult.Fail(VerificationOutcome.MalformedCapability,
-                "Delegated capability is missing a proof.");
-        }
-
-        // Per ZCAP-LD v0.4.0 a delegated zcap's proof may be an array; it is valid if AT LEAST
-        // ONE capabilityDelegation proof fully verifies (signature + parent authorization +
-        // chain). Try each delegation proof in turn — a single proof's failure (unsupported
-        // suite, unresolvable key, bad signature, unauthorized signer) must not reject the
-        // others, and non-delegation proofs in the set are simply ignored here. When every proof
-        // fails, surface the last specific reason (the common single-proof case is exact). Each
-        // proof resolves its own parent from its own capabilityChain. (The chain walk does not come
-        // here: it verifies each link with the proof whose chain it followed.)
-        var lastFailure = VerificationResult.Fail(VerificationOutcome.InvalidDelegation,
-            "No capabilityDelegation proof could be verified.");
-        foreach (var proof in capability.Proof.DelegationProofs())
-        {
-            var result = await VerifySingleDelegationProofAsync(
-                capability, proof, parentCapabilityOverride, requireParentAuthorization, explicitRoot,
-                applyCreatedCheck, applyCaveatPolicy);
-            if (result.IsValid)
-            {
-                return result;
-            }
-
-            lastFailure = result;
-        }
-
-        return lastFailure;
     }
 
     private async Task<VerificationResult> VerifySingleDelegationProofAsync(
@@ -2218,73 +2190,90 @@ public class VerificationService : IVerificationService
 
     /// <summary>
     /// Upper bound on the distinct lookups one standalone sweep sends to the store. A genuine chain
-    /// needs about two per link; reaching the bound fails the sweep closed.
+    /// needs about two per link; reaching the bound fails the candidate closed.
     /// </summary>
     private const int MaxStandaloneRevocationLookups = 256;
 
     /// <summary>How one delegation proof relates to the route the standalone sweep is walking.</summary>
     private enum RouteStep
     {
-        /// <summary>The proof names the required prefix and its ancestry is usable; lookups were added.</summary>
+        /// <summary>The proof names the required prefix, verifies, and its ancestry is usable; lookups were added.</summary>
         Fits,
 
         /// <summary>The proof does not belong to this route (wrong prefix or parent, non-canonical id,
-        /// unparsable or non-embedded parent); it is skipped, as the chain walk skips it.</summary>
+        /// unparsable or non-embedded parent) or does not verify; it is skipped, as the chain walk skips it.</summary>
         DoesNotFit,
 
-        /// <summary>The route cannot be swept: an embedded parent has no fitting proof, or the budget is spent.</summary>
+        /// <summary>The route cannot be swept: an embedded parent has no proof that fits and verifies,
+        /// the budget is spent, or an infrastructure fault interrupted the walk.</summary>
         Unusable,
     }
 
-    /// <summary>
-    /// The revocation lookups for one of the leaf's delegation proofs on the standalone
-    /// <see cref="VerifyCapabilityProofAsync(Capability)"/> path (#158), or null when the proof's
-    /// ancestry is unusable, which the caller reports as <see cref="VerificationOutcome.MalformedCapability"/>.
-    /// The leaf is looked up under the proof's delegator; <see cref="WalkRoute"/> then descends the
-    /// proof's <c>capabilityChain</c> the way the chain walk does: the first entry is the root (root
-    /// scope); a deeper chain embeds the immediate parent as its last entry, and that parent's own
-    /// delegation proofs must name the chain's prefix and embed <i>its</i> parent in turn. Every
-    /// ancestor is looked up under the delegator of each proof that fits, so the sweep covers the same
-    /// delegators the chain path verifies (Issue #63). An embedded parent with no fitting proof makes
-    /// the route unusable rather than unscoped: the ancestry is presented and unverified, and a
-    /// delegator whose own capability was revoked must not hide the record by re-signing a child
-    /// around a proof-less copy of it. A leaf proof that itself does not fit yields only the leaf's
-    /// lookup; the verification step rejects such a proof. Lookups are de-duplicated and capped at
-    /// <see cref="MaxStandaloneRevocationLookups"/>, and the cap fails closed.
-    /// </summary>
-    private static List<RevocationLookup>? StandaloneRevocationLookups(Capability leaf, Proof delegationProof)
+    /// <summary>State of one standalone sweep: the lookups and the failure to report if the route is unusable.</summary>
+    private sealed class StandaloneSweep
     {
-        var lookups = new List<RevocationLookup>();
-        var seen = new HashSet<RevocationLookup>();
-        if (!RevocationScope.TryForDelegationProof(delegationProof, out var leafScope))
-            return lookups; // Cannot verify either; the verification step rejects it.
-        if (!AddLookup(lookups, seen, leaf.Id, leafScope))
-            return null;
+        public List<RevocationLookup> Lookups { get; } = new();
+        private readonly HashSet<RevocationLookup> _seen = new();
 
-        return WalkRoute(lookups, seen, leaf, delegationProof, requiredChainIds: null, depth: 1) == RouteStep.Unusable
-            ? null
-            : lookups;
-    }
+        /// <summary>Why the last ancestor proof fitting the route did not verify, a fault, or the spent budget.</summary>
+        public VerificationResult? Failure { get; set; }
 
-    /// <summary>Adds a lookup once; false when the sweep budget is spent.</summary>
-    private static bool AddLookup(List<RevocationLookup> lookups, HashSet<RevocationLookup> seen, string id, RevocationScope scope)
-    {
-        var lookup = new RevocationLookup(id, scope);
-        if (!seen.Add(lookup))
-            return true;
-        lookups.Add(lookup);
-        return lookups.Count <= MaxStandaloneRevocationLookups;
+        /// <summary>Adds a lookup once; false when the sweep budget is spent (and records that failure).</summary>
+        public bool Add(string id, RevocationScope scope)
+        {
+            var lookup = new RevocationLookup(id, scope);
+            if (!_seen.Add(lookup))
+                return true;
+            Lookups.Add(lookup);
+            if (Lookups.Count <= MaxStandaloneRevocationLookups)
+                return true;
+            Failure = VerificationResult.Fail(VerificationOutcome.MalformedCapability,
+                $"The delegation proof's ancestry exceeds the revocation sweep budget of {MaxStandaloneRevocationLookups} lookups.");
+            return false;
+        }
     }
 
     /// <summary>
-    /// Walks one delegation <paramref name="proof"/> of <paramref name="current"/>, adding the lookups
-    /// of the ancestors it reaches. <paramref name="requiredChainIds"/> is the prefix a nested proof must
-    /// name (null for the leaf's own proof). Unparsable embeddings do not throw: a proof that does not fit
-    /// is reported as such, and the leaf's verification step rejects it.
+    /// The revocation lookups for one <b>verified</b> delegation proof of the leaf on the standalone
+    /// <see cref="VerifyCapabilityProofAsync(Capability)"/> path (#158), or the failure to report when the
+    /// ancestry that proof names cannot be authenticated. The leaf is looked up under the proof's
+    /// delegator, authentic because the proof has verified. <see cref="WalkRouteAsync"/> then descends the
+    /// proof's <c>capabilityChain</c> as the chain walk does: the first entry is the root (root scope); a
+    /// deeper chain embeds the immediate parent as its last entry, whose own delegation proofs must name
+    /// the chain's prefix and embed <i>its</i> parent in turn. Before an embedded parent's delegator is
+    /// trusted, that parent's proof is verified as a chain link against the next ancestor (signature,
+    /// parent-controller authorization, attenuation, expiry), up to the resolved or explicit root. The
+    /// presented ancestry is otherwise unauthenticated: its controller could re-sign a child around a copy
+    /// of a revoked parent with its proof stripped or its <c>verificationMethod</c> swapped, and the sweep
+    /// would query the wrong scope (PR #162 review). A nested proof that does not fit or does not verify
+    /// is skipped, as the chain walk skips it; an embedded parent with no such proof fails this candidate
+    /// with the last proof's reason, else <see cref="VerificationOutcome.MalformedCapability"/>. Lookups
+    /// are de-duplicated and capped; the cap fails closed.
     /// </summary>
-    private static RouteStep WalkRoute(
-        List<RevocationLookup> lookups, HashSet<RevocationLookup> seen, Capability current, Proof proof,
-        string[]? requiredChainIds, int depth)
+    private async Task<(VerificationResult? Failure, List<RevocationLookup> Lookups)> SweepStandaloneRouteAsync(
+        Capability leaf, Proof verifiedProof, Capability? explicitRoot)
+    {
+        var sweep = new StandaloneSweep();
+        if (!sweep.Add(leaf.Id, RevocationScope.ForDelegationProof(verifiedProof)))
+            return (sweep.Failure, sweep.Lookups);
+
+        var step = await WalkRouteAsync(sweep, leaf, verifiedProof, requiredChainIds: null, depth: 1, explicitRoot);
+        if (step == RouteStep.Fits)
+            return (null, sweep.Lookups);
+
+        return (sweep.Failure ?? VerificationResult.Fail(VerificationOutcome.MalformedCapability,
+            "The delegation proof's capabilityChain embeds an ancestor without a delegation proof that names the " +
+            "chain's prefix, embeds its own parent and verifies."), sweep.Lookups);
+    }
+
+    /// <summary>
+    /// Walks one delegation <paramref name="proof"/> of <paramref name="current"/>, adding the lookups of
+    /// the ancestors it reaches. <paramref name="requiredChainIds"/> is the prefix a nested proof must name
+    /// (null for the leaf's own, already verified proof). Unparsable embeddings do not throw.
+    /// </summary>
+    private async Task<RouteStep> WalkRouteAsync(
+        StandaloneSweep sweep, Capability current, Proof proof, string[]? requiredChainIds, int depth,
+        Capability? explicitRoot)
     {
         if (depth > MaxChainLength || proof.CapabilityChain is not { Length: > 0 } chain)
             return RouteStep.DoesNotFit;
@@ -2299,7 +2288,7 @@ public class VerificationService : IVerificationService
         {
             if (!string.Equals(current.ParentCapability, ids[0], StringComparison.Ordinal))
                 return RouteStep.DoesNotFit;
-            return AddLookup(lookups, seen, ids[0], RevocationScope.Root) ? RouteStep.Fits : RouteStep.Unusable;
+            return sweep.Add(ids[0], RevocationScope.Root) ? RouteStep.Fits : RouteStep.Unusable;
         }
 
         // Deeper: [rootId, ...ancestorIds, {immediate parent}], ancestors as id strings only.
@@ -2317,27 +2306,34 @@ public class VerificationService : IVerificationService
 
         if (!string.Equals(parent.Id, current.ParentCapability, StringComparison.Ordinal))
             return RouteStep.DoesNotFit;
-
-        if (!AddLookup(lookups, seen, ids[0], RevocationScope.Root))
+        if (!sweep.Add(ids[0], RevocationScope.Root))
             return RouteStep.Unusable;
-        for (var i = 1; i < ids.Length - 1; i++)
-        {
-            // Intermediate ancestors by id: an unscoped floor, refined when the descent reaches them.
-            if (!AddLookup(lookups, seen, ids[i], RevocationScope.Unscoped))
-                return RouteStep.Unusable;
-        }
 
-        // The embedded parent is looked up under the delegator of each of its proofs that fits the
-        // prefix; a parent with no fitting proof could never verify on the chain path, so the route is
-        // unusable here too.
+        // The embedded parent is trusted only through a proof of its own that names the prefix AND
+        // verifies as a chain link against the next ancestor; it is then looked up under that proof's
+        // delegator. Intermediate ancestors are reached the same way through their own embeddings.
         var prefix = ids[..^1];
         var fitted = false;
         foreach (var parentProof in parent.Proof?.DelegationProofs() ?? Enumerable.Empty<Proof>())
         {
-            if (!RevocationScope.TryForDelegationProof(parentProof, out var parentScope))
+            if (parentProof.CapabilityChain is not { Length: > 0 } parentChain ||
+                !ChainIds(parentChain).SequenceEqual(prefix, StringComparer.Ordinal) ||
+                !RevocationScope.TryForDelegationProof(parentProof, out var parentScope))
                 continue;
 
-            switch (WalkRoute(lookups, seen, parent, parentProof, prefix, depth + 1))
+            var verified = await VerifySingleDelegationProofAsync(
+                parent, parentProof, parentCapabilityOverride: null, requireParentAuthorization: true,
+                explicitRoot, applyCreatedCheck: false, applyCaveatPolicy: false);
+            if (!verified.IsValid)
+            {
+                sweep.Failure = verified;
+                // An infrastructure fault is reported as such, never as a bad ancestor.
+                if (verified.Outcome == VerificationOutcome.CouldNotVerify)
+                    return RouteStep.Unusable;
+                continue;
+            }
+
+            switch (await WalkRouteAsync(sweep, parent, parentProof, prefix, depth + 1, explicitRoot))
             {
                 case RouteStep.Unusable:
                     return RouteStep.Unusable;
@@ -2345,7 +2341,7 @@ public class VerificationService : IVerificationService
                     continue;
             }
 
-            if (!AddLookup(lookups, seen, parent.Id, parentScope))
+            if (!sweep.Add(parent.Id, parentScope))
                 return RouteStep.Unusable;
             fitted = true;
         }

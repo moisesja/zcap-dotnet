@@ -175,9 +175,12 @@ Planned as 6.0.0 (breaking: new interface/constructor parameters and in-stack si
   verification method), to the root (`Root`), or, for migrated 5.x and operator records only, to
   every chain (`Unscoped`). Each chain link is looked up under the delegator of the proof that
   verified it, after that proof verifies, in one store read per chain; the standalone proof path
-  reaches every ancestor's delegator through the nested embedded parents and fails closed when an
-  embedded parent carries no proof fitting its route (the ancestry is unverified there, so a revoked
-  delegator must not be able to re-sign a child around a proof-less copy). The signed path records
+  evaluates each leaf proof as its own candidate and verifies every embedded ancestor's delegation
+  proof as a chain link before trusting its delegator, failing the candidate closed otherwise (the
+  ancestry is presented, not authenticated, so a revoked delegator must not be able to re-sign a
+  child around a copy of its capability with the proof stripped or its verification method
+  swapped); below the first level this path now needs a root resolver or explicit root, and a
+  failing proof in a set no longer vetoes a valid one. The signed path records
   the delegator of the accepted chain and every co-signer of the same chain, so a proof set cannot
   be revived by dropping a proof. A forged copy of an id is signed by the forger and lands in the
   forger's scope, where no genuine chain looks. Store keys are opaque digests of id and scope;

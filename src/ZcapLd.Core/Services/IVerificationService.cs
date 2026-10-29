@@ -16,12 +16,19 @@ public interface IVerificationService
     /// is sound — not future-dated beyond the clock skew, nor present-but-unparseable (Issue #99). A
     /// root capability is valid iff it carries no proof.
     /// <para>
-    /// This is <b>not</b> a full authorization gate: it does not walk the whole chain back to the root
-    /// or independently verify every ancestor's own proof (signature, attenuation, <c>created</c>). In
-    /// particular, on a deep delegation only the <i>leaf</i> link's <c>created</c> is checked here; an
-    /// intermediate ancestor's <c>created</c> — like its signature — is gated only by the full-chain
-    /// path. For an authorization decision, use <see cref="VerifyCapabilityChainAsync(Capability)"/> (full chain)
-    /// or <see cref="VerifyInvocationAsync(Invocation, Capability)"/>. With a caveat registry (#157), a
+    /// This is <b>not</b> a full authorization gate. Revocation records are scoped to the delegator that
+    /// signed each capability (#158), so to check the ancestry's revocation this path verifies each
+    /// embedded ancestor's delegation proof as a chain link (signature, parent-controller authorization,
+    /// attenuation, expiry) up to the resolved or explicit root before trusting its delegator, and a
+    /// candidate whose ancestry cannot be authenticated fails closed; below the first level a root
+    /// resolver or explicit root is therefore required. It does not apply the delegation-time
+    /// (<c>created</c>, Issue #99), expiration-ceiling, required-<c>expires</c> or caveat-policy checks
+    /// to ancestors; those are gated only by the full-chain path. Each delegation proof in a set is
+    /// evaluated on its own (link first, then its ancestry), the first to pass wins, and a failing proof
+    /// never vetoes another; when all fail, a revocation found on a verified route is reported, else
+    /// the last proof's failure. For an authorization decision, use
+    /// <see cref="VerifyCapabilityChainAsync(Capability)"/> (full chain) or
+    /// <see cref="VerifyInvocationAsync(Invocation, Capability)"/>. With a caveat registry (#157), a
     /// link that carries caveats or sits below the first delegation level is reported as
     /// <see cref="VerificationOutcome.CaveatEnforcementRequired"/> rather than valid.
     /// </para>
