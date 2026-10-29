@@ -50,7 +50,11 @@ public sealed record RevocationScope
     /// <summary>The scope of a root capability's record.</summary>
     public static RevocationScope Root { get; } = new(RevocationScopeKind.Root, null);
 
-    /// <summary>A record that applies to its capability id on every link (legacy and operator records).</summary>
+    /// <summary>
+    /// A record that applies to its capability id on every link (migrated 5.x and operator records).
+    /// A <i>lookup</i> in this scope sees only unscoped records, never the signed path's: to ask about a
+    /// delegated capability use <see cref="ForDelegationProof"/>, about a root <see cref="Root"/>.
+    /// </summary>
     public static RevocationScope Unscoped { get; } = new(RevocationScopeKind.Unscoped, null);
 
     /// <summary>

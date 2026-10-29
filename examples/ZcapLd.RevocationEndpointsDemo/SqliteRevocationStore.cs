@@ -232,8 +232,13 @@ public sealed class SqliteRevocationStore : IRevocationStore
         using var connection = new SqliteConnection(_connectionString);
         connection.Open();
 
+        // The transaction starts IMMEDIATE, so a second process starting at the same moment waits here
+        // and then finds the table already gone, instead of racing the DROP below.
+        using var transaction = connection.BeginTransaction();
+
         using (var probe = connection.CreateCommand())
         {
+            probe.Transaction = transaction;
             probe.CommandText = "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'revocation_registry';";
             if (probe.ExecuteScalar() is null)
             {
@@ -241,8 +246,10 @@ public sealed class SqliteRevocationStore : IRevocationStore
             }
         }
 
-        using var transaction = connection.BeginTransaction();
-
+        // A row that cannot be migrated must not keep the host from starting, and a revocation must not
+        // be lost to a malformed date: an unparsable revoked_at becomes "now" and an unparsable expires_at
+        // "never", the safe direction. Only a row with no capability id is skipped; nothing can be keyed
+        // for it, and it never matched a chain before either.
         var legacy = new List<RevocationRecord>();
         using (var read = connection.CreateCommand())
         {
@@ -254,22 +261,34 @@ public sealed class SqliteRevocationStore : IRevocationStore
             using var reader = read.ExecuteReader();
             while (reader.Read())
             {
+                var capabilityId = reader.IsDBNull(0) ? null : reader.GetString(0);
+                if (string.IsNullOrWhiteSpace(capabilityId))
+                {
+                    Console.Error.WriteLine("revocation migration: skipped a legacy row with an empty capability_id.");
+                    continue;
+                }
+
                 IReadOnlyDictionary<string, string>? metadata = null;
                 if (!reader.IsDBNull(6))
                 {
-                    metadata = JsonSerializer.Deserialize<Dictionary<string, string>>(reader.GetString(6), JsonOptions);
+                    try
+                    {
+                        metadata = JsonSerializer.Deserialize<Dictionary<string, string>>(reader.GetString(6), JsonOptions);
+                    }
+                    catch (JsonException)
+                    {
+                        Console.Error.WriteLine($"revocation migration: dropped unreadable metadata of '{capabilityId}'.");
+                    }
                 }
 
                 legacy.Add(new RevocationRecord
                 {
-                    CapabilityId = reader.GetString(0),
+                    CapabilityId = capabilityId,
                     Scope = RevocationScope.Unscoped,
                     RootCapabilityId = reader.IsDBNull(1) ? null : reader.GetString(1),
-                    RevokedBy = reader.GetString(2),
-                    RevokedAt = DateTime.Parse(reader.GetString(3), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind),
-                    ExpiresAt = reader.IsDBNull(4)
-                        ? null
-                        : DateTime.Parse(reader.GetString(4), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind),
+                    RevokedBy = reader.IsDBNull(2) ? "unknown" : reader.GetString(2),
+                    RevokedAt = TryReadUtc(reader, 3) ?? DateTime.UtcNow,
+                    ExpiresAt = TryReadUtc(reader, 4),
                     Reason = reader.IsDBNull(5) ? null : reader.GetString(5),
                     Metadata = metadata
                 });
@@ -299,4 +318,10 @@ public sealed class SqliteRevocationStore : IRevocationStore
 
         transaction.Commit();
     }
+
+    private static DateTime? TryReadUtc(SqliteDataReader reader, int ordinal)
+        => !reader.IsDBNull(ordinal) &&
+           DateTime.TryParse(reader.GetString(ordinal), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var value)
+            ? value
+            : null;
 }

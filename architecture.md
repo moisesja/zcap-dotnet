@@ -199,7 +199,12 @@ residual cases match the reference stack: a delegator that issues two children w
 (the library mints `urn:uuid` ids); a holder who re-routes a revoked capability under
 another chain they already hold, which grants nothing they lacked; a proof set naming
 several chains, which is revoked on the chain the request presents; and verifiers that
-share a store but disagree on what a root id means.
+share a store but disagree on what a root id means. Two further consequences are
+documented on `RevokeCapabilityAsync`: a capability co-signed by several co-controllers
+and revoked from a one-proof copy stays alive under the other signer's proof until that
+proof or co-controller revokes it, and a revoked delegated id re-presented as a
+self-asserted root is not matched, which matters only to an application that accepts a
+holder-supplied root object.
 
 The store key is `RevocationScope.KeyFor(id)`, a SHA-256 over the RFC 8785 form of the id
 and the scope's text, so no bare id is ever a key and collation cannot merge records.
@@ -210,7 +215,9 @@ expired records by exact key, so a store that drops or rewrites the scope fails
 verification closed instead of widening a revocation. Revocation is looked up after a
 link's proof verifies, once per chain, where the JS stack runs `inspectCapabilityChain`;
 the standalone proof path reaches every ancestor's delegator through the nested embedded
-parents. Root resolvers return null for unknown ids rather than throwing, because
+parents and fails closed (`MalformedCapability`) when an embedded parent carries no proof
+fitting its route, because that ancestry is unverified there. Root resolvers return null
+for unknown ids rather than throwing, because
 revocation looks up the revoked id and a fault fails the revocation closed.
 
 ## Concurrency and limits

@@ -205,6 +205,50 @@ public sealed class RevocationStoreContractTests : IDisposable
     }
 
     [Fact]
+    public async Task Sqlite_MigrationSkipsOnlyUnkeyableRows_AndKeepsRevocationsWithBadDates()
+    {
+        await using (var connection = new SqliteConnection(ConnectionString))
+        {
+            await connection.OpenAsync();
+            await using var create = connection.CreateCommand();
+            create.CommandText = """
+                CREATE TABLE revocation_registry
+                (
+                    capability_id TEXT PRIMARY KEY,
+                    root_capability_id TEXT NULL,
+                    revoked_by TEXT NOT NULL,
+                    revoked_at TEXT NOT NULL,
+                    expires_at TEXT NULL,
+                    reason TEXT NULL,
+                    metadata_json TEXT NULL
+                );
+                INSERT INTO revocation_registry VALUES
+                    ('', NULL, 'did:key:z6MkOwner', '2026-01-02T03:04:05.0000000Z', NULL, NULL, NULL),
+                    ('urn:uuid:bad-dates', NULL, 'did:key:z6MkOwner', 'not a date', 'also not', NULL, 'not json'),
+                    ('urn:uuid:good', NULL, 'did:key:z6MkOwner', '2026-01-02T03:04:06.0000000Z', NULL, NULL, NULL);
+                """;
+            await create.ExecuteNonQueryAsync();
+        }
+
+        // Must not throw: a crash here would repeat on every restart and keep the host down (red team).
+        var store = new SqliteRevocationStore(ConnectionString);
+
+        (await store.GetAsync([RevocationScope.Unscoped.KeyFor("urn:uuid:good")])).Should().ContainSingle();
+        var kept = (await store.GetAsync([RevocationScope.Unscoped.KeyFor("urn:uuid:bad-dates")])).Should().ContainSingle().Subject;
+        kept.ExpiresAt.Should().BeNull("an unparsable expiry must not expire the revocation");
+        kept.RevokedAt.Should().BeCloseTo(DateTime.UtcNow, TimeSpan.FromMinutes(1));
+        kept.Metadata.Should().BeNull();
+
+        await using (var connection = new SqliteConnection(ConnectionString))
+        {
+            await connection.OpenAsync();
+            await using var probe = connection.CreateCommand();
+            probe.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'revocation_registry';";
+            (await probe.ExecuteScalarAsync()).Should().Be(0L, "the legacy table is dropped once the usable rows are migrated");
+        }
+    }
+
+    [Fact]
     public async Task Sqlite_PrimaryKeyIsTheRecordKey()
     {
         _ = new SqliteRevocationStore(ConnectionString);

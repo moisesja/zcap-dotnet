@@ -1,5 +1,7 @@
+using System.Text.Json;
 using FluentAssertions;
 using Xunit;
+using ZcapLd.Core.Cryptography;
 using ZcapLd.Core.Models;
 using ZcapLd.Core.Services;
 using ZcapLd.Core.Tests.Helpers;
@@ -364,6 +366,78 @@ public class VerificationServiceRevocationScopeTests
 
         result.Outcome.Should().Be(VerificationOutcome.CouldNotVerify,
             "a store that ignores the scope is a misconfiguration to surface, not a record to honour");
+    }
+
+    // ----- (k) the standalone path reads an unverified ancestry: it must fail closed, never throw -----
+
+    [Fact]
+    public async Task Standalone_EmbeddedParentWithoutAProof_FailsClosedInsteadOfLookingUpUnscoped()
+    {
+        var owner = _dids.GenerateDidKey();
+        var mid = _dids.GenerateDidKey();
+        var holder = _dids.GenerateDidKey();
+        var root = await RootAsync(owner, "https://example.com/proofless-parent");
+        var p = await DelegateAsync(root, mid);
+        var leaf = await DelegateAsync(p, holder);
+        (await RevokeAsync(_verifier, p, owner)).Should().BeTrue();
+        (await _verifier.VerifyCapabilityProofDetailedAsync(leaf)).Outcome.Should().Be(VerificationOutcome.Revoked);
+
+        // mid still holds its key and re-signs the leaf around a copy of p stripped of its proof, so the
+        // sweep could look p up only unscoped. The route is unusable instead (red team, #158).
+        var strippedParent = CapabilityJson.Parse(CapabilityJson.Serialize(p));
+        strippedParent.Proof = null;
+        var resigned = CapabilityJson.Parse(CapabilityJson.Serialize(leaf));
+        resigned.Proof = await RawProofSigner.SignCapabilityAsync(_dids, resigned, mid, new object[] { root.Id, strippedParent });
+
+        (await _verifier.VerifyCapabilityProofDetailedAsync(resigned)).Outcome.Should().Be(VerificationOutcome.MalformedCapability);
+        (await _verifier.VerifyCapabilityChainDetailedAsync(resigned)).IsValid.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Standalone_JunkProofAheadOfTheGenuineOneOnTheEmbeddedParent_StillFindsTheRevocation()
+    {
+        var owner = _dids.GenerateDidKey();
+        var mid = _dids.GenerateDidKey();
+        var holder = _dids.GenerateDidKey();
+        var root = await RootAsync(owner, "https://example.com/decoy-parent");
+        var p = await DelegateAsync(root, mid);
+        var leaf = await DelegateAsync(p, holder);
+        (await RevokeAsync(_verifier, p, owner)).Should().BeTrue();
+
+        // A proof naming another route is skipped, not counted against the budget or the genuine proof.
+        var decoy = CapabilityJson.Parse(CapabilityJson.Serialize(p));
+        var genuine = decoy.Proof!.Primary;
+        var junk = JsonSerializer.Deserialize<Proof>(JsonSerializer.Serialize(genuine, ZcapJsonOptions.Default), ZcapJsonOptions.Default)!;
+        junk.CapabilityChain = new object[] { "urn:uuid:" + Guid.NewGuid() };
+        decoy.Proof = ProofSet.FromValues([junk, genuine]);
+        var resigned = CapabilityJson.Parse(CapabilityJson.Serialize(leaf));
+        resigned.Proof = await RawProofSigner.SignCapabilityAsync(_dids, resigned, mid, new object[] { root.Id, decoy });
+
+        (await _verifier.VerifyCapabilityProofDetailedAsync(resigned)).Outcome.Should().Be(VerificationOutcome.Revoked);
+    }
+
+    [Fact]
+    public async Task Standalone_NestedWhitespaceIdOrUnparsableParent_ReturnsAResultInsteadOfThrowing()
+    {
+        var owner = _dids.GenerateDidKey();
+        var mid = _dids.GenerateDidKey();
+        var holder = _dids.GenerateDidKey();
+        var root = await RootAsync(owner, "https://example.com/crafted-ancestry");
+        var p = await DelegateAsync(root, mid);
+        var leaf = await DelegateAsync(p, holder);
+
+        // A whitespace id nested in the embedded parent's chain reached the store as an ArgumentException.
+        var blank = CapabilityJson.Parse(CapabilityJson.Serialize(p));
+        blank.Proof!.Primary.CapabilityChain = new object[] { " " };
+        var aroundBlank = CapabilityJson.Parse(CapabilityJson.Serialize(leaf));
+        aroundBlank.Proof = await RawProofSigner.SignCapabilityAsync(_dids, aroundBlank, mid, new object[] { root.Id, blank });
+        var blankAct = () => _verifier.VerifyCapabilityProofDetailedAsync(aroundBlank);
+        (await blankAct.Should().NotThrowAsync()).Which.Outcome.Should().Be(VerificationOutcome.MalformedCapability);
+
+        // An embedded parent that does not deserialize escaped as a JsonException.
+        var unparsable = CapabilityJson.Edit(leaf, json => json["proof"]!["capabilityChain"]![1]!["expires"] = 123);
+        var unparsableAct = () => _verifier.VerifyCapabilityProofDetailedAsync(unparsable);
+        (await unparsableAct.Should().NotThrowAsync()).Which.IsValid.Should().BeFalse();
     }
 
     /// <summary>Drops writes while <see cref="LoseWrites"/> is set, as a store with a broken key column would.</summary>

@@ -15,7 +15,11 @@ namespace ZcapLd.Core.Services;
 /// or whose stored id and scope disagree with its key, and reads each record back after writing it,
 /// so a store that drops or rewrites the scope fails verification closed instead of widening a
 /// revocation. Keys are fixed-width hex, so collation does not matter, but compare them exactly. A
-/// lookup asks for a few dozen keys at most (two per chain link).
+/// lookup asks for a few dozen keys at most (two per chain link). The store must be read-your-writes
+/// for the writer: the service reads a record back immediately after <see cref="UpsertAsync"/>, so an
+/// eventually consistent backend fails that revocation (the request can be retried; its nonce is not
+/// consumed). <see cref="DeleteAsync"/> is called during verification to evict an expired record, so a
+/// read-only replica fails such a verification closed (<c>CouldNotVerify</c>).
 /// </remarks>
 public interface IRevocationStore
 {

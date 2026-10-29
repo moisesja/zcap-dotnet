@@ -13,6 +13,27 @@
 - The same applies to removing a feature: the status GET had no basis in the spec or the JS stack, and
   the owner removed it once that was stated plainly.
 
+## 2026-10-29 — Issue #158: check the signed wire shape before accepting a coverage narrowing
+
+- The plan accepted that the standalone proof path could no longer see revocations of intermediate
+  ancestors ("only their ids are present"), and a design reviewer agreed. A pre-existing test went red
+  and showed the premise was wrong: in the spec-exact `capabilityChain` each embedded parent carries
+  its own proof, which embeds *its* parent, so every ancestor's delegator is recoverable by descending
+  the nested objects. Before writing "X is not available on this path" into a plan, open a real
+  instance of the signed structure and look; and treat a newly red pre-existing test as a claim
+  about the design, not just a fixture to update.
+- A multi-level test fixture that gives every link `UtcNow + 1 day` fails attenuation for a grandchild
+  minted milliseconds later. Bound a child's expiry by its parent's in any helper that builds chains.
+- A long tool batch can fail the harness permission check as a whole (transient "no verdict");
+  retry once, then split into smaller batches. Large agent prompts failed the same way; writing the
+  brief to a scratch file and spawning the agent with a two-line prompt worked.
+- The red team found what my own tests missed because my tests only exercised honest structures:
+  a pre-check that reads an *unverified* structure (here the standalone sweep over the presented
+  ancestry) must apply the same acceptance rules as the verified path and fail closed when the
+  structure cannot be fitted, or an actor who controls that structure chooses what gets looked up.
+  When adding a pre-check over attacker-shaped input, write the "attacker reshapes the input" test
+  first, and keep the pre-check inside the fail-closed `try`.
+
 ## 2026-10-27 — Issue #157 red team: RDFC drops malformed IRIs, not only undefined terms
 
 - I measured how dotNetRDF normalizes ids but only probed well-formed variants, so the id rule

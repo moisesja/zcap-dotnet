@@ -198,6 +198,14 @@ public interface IVerificationService
     /// looks. Only the chain the request presents is revoked; a capability that also verifies on another
     /// chain is revoked there by presenting that chain.
     /// </para>
+    /// <para>
+    /// Consequences of scoping: a capability co-signed by several co-controllers of its parent, presented
+    /// with only one of those proofs, is recorded for that signer alone, and a copy carrying another
+    /// signer's proof verifies until a request presenting that proof, or that co-controller, revokes it;
+    /// present the fullest copy you hold. A revoked delegated id re-presented as a self-asserted root is
+    /// not matched by its record, so, as everywhere, never pass a holder-supplied root object to the
+    /// chain or envelope verification APIs.
+    /// </para>
     /// </remarks>
     /// <param name="capability">The capability to revoke, with its full delegation chain.</param>
     /// <param name="signedRevocation">The signed request from <see cref="ISigningService.SignRevocationAsync"/>.</param>
@@ -218,6 +226,11 @@ public interface IVerificationService
     /// retried because its nonce is not consumed. Without a configured resolver nothing else is
     /// consulted.
     /// </para>
+    /// <para>
+    /// <paramref name="rootCapability"/> is a trust anchor the caller vouches for: a request to revoke
+    /// that root's own id is authorized against this object, not against the resolver. Never build it
+    /// from request input, or a root-shaped request naming the caller as controller revokes the root (#155).
+    /// </para>
     /// All authentication, authorization, replay and audit semantics of
     /// <see cref="RevokeCapabilityAsync(Capability, Invocation)"/> apply.
     /// </summary>
@@ -233,6 +246,8 @@ public interface IVerificationService
     /// scope, or by an unscoped one. Use <see cref="RevocationScope.Root"/> for a root and
     /// <see cref="RevocationScope.ForDelegationProof"/> with the delegation proof a verifier accepted for
     /// a delegated capability. Chain and invocation verification perform this check for every link.
+    /// Passing <see cref="RevocationScope.Unscoped"/> consults only unscoped (migrated or operator)
+    /// records and is false for every revocation the signed path recorded; it is not the 5.x bare-id check.
     /// COMPLIANCE FIX: MUST-21 - Check revocation status
     /// </summary>
     /// <param name="capabilityId">The ID of the capability to check</param>

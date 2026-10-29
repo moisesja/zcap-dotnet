@@ -120,7 +120,9 @@ Planned as 6.0.0 (breaking: new interface/constructor parameters and in-stack si
   rewritten: key rows by `Key`, never by the capability id, and persist the scope. Migrate 5.x
   rows to `RevocationScope.Unscoped` records, which every chain honours as before; the demo's
   `SqliteRevocationStore` does this at startup. Operator writes through `RevokeAsync` must choose a
-  scope explicitly.
+  scope explicitly. `IsCapabilityRevokedAsync(id, RevocationScope.Unscoped)` is not the old bare-id
+  check: it sees only unscoped records; ask with the capability's own scope
+  (`RevocationScope.ForDelegationProof(proof)` or `RevocationScope.Root`).
 - Breaking (ASP.NET): the anonymous `GET {prefix}/{capabilityId}` status endpoint is removed. The
   ZCAP specification and the Digital Bazaar stack define only the POST, and a bare id has no
   single status once records are scoped. Holders learn of revocation from a `Revoked` outcome;
@@ -173,7 +175,9 @@ Planned as 6.0.0 (breaking: new interface/constructor parameters and in-stack si
   verification method), to the root (`Root`), or, for migrated 5.x and operator records only, to
   every chain (`Unscoped`). Each chain link is looked up under the delegator of the proof that
   verified it, after that proof verifies, in one store read per chain; the standalone proof path
-  reaches every ancestor's delegator through the nested embedded parents. The signed path records
+  reaches every ancestor's delegator through the nested embedded parents and fails closed when an
+  embedded parent carries no proof fitting its route (the ancestry is unverified there, so a revoked
+  delegator must not be able to re-sign a child around a proof-less copy). The signed path records
   the delegator of the accepted chain and every co-signer of the same chain, so a proof set cannot
   be revived by dropping a proof. A forged copy of an id is signed by the forger and lands in the
   forger's scope, where no genuine chain looks. Store keys are opaque digests of id and scope;

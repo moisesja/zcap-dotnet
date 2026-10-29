@@ -72,8 +72,8 @@ one-time migration of legacy `revocation_registry` rows to `Unscoped`.
 7. [x] Docs (CHANGELOG, architecture.md, REVOCATION-INTEGRATION.md, spec requirements, READMEs,
    PACKAGE_READMEs, AGENTS.md, XML docs).
 8. [x] Build (warnings vs baseline: 4), tests, run examples and demo.
-9. [ ] Commit; adversarial agents on the committed diff; fix confirmed findings.
-10. [ ] Follow-up issue (signed revocation binds only the id); lessons; results below. Ask before
+9. [x] Commit; adversarial agents on the committed diff; fix confirmed findings.
+10. [x] Follow-up issue (#161: signed revocation binds only the id); lessons; results below. Ask before
     pushing or opening a PR.
 
 ## Results
@@ -110,6 +110,27 @@ one-time migration of legacy `revocation_registry` rows to `Unscoped`.
   `examples/ZcapLd.Examples` prints `Descendant rejected after revocation: True`; the demo on a copy
   of the real 5.x `revocations-demo.db` migrated `revocation_registry` → `revocation_records`
   (1 row, scope `unscoped`), GET → 405, unsigned POST → 403 (id match) / 400 (mismatch).
-- **Open:** a signed revocation binds only the capability id, so a captured request replayed within
-  the freshness window with another verified copy writes another record (bounded by the revoker's
-  own authority). Tracked as a follow-up issue (step 10).
+- **Red team (two agents on commit 1182b28, each with executed probes in its own worktree):** no
+  write-side forgery, cross-tenant write, "already revoked" block or un-revoke survived; every forged
+  record landed in the forger's own scope. Fixed before merge (second commit):
+  - *F1 (medium):* the standalone sweep ran outside the method's `try` and the nested descent
+    deserialized embedded parents, so crafted JSON (a whitespace nested id, `"expires": 123`) threw out
+    of `VerifyCapabilityProofDetailedAsync`. The sweep now runs inside the `try`, validates every nested
+    id, and treats an unparsable embedding as a proof that does not fit.
+  - *F2 (medium):* the sweep trusted the presented, unverified embedded parent to name each ancestor's
+    delegator, so a delegator whose own capability was revoked could re-sign a child around a
+    proof-less copy of it and pass the standalone path (the 5.x id sweep caught this). The sweep is now
+    a route walk mirroring the chain walk's acceptance rules: a nested proof must name the chain's
+    prefix and embed the right parent; an embedded parent with no fitting proof fails closed as
+    `MalformedCapability`; lookups are de-duplicated and the 256 cap fails closed. Three regression
+    tests; ablations A7 (no-fitting-proof not fail-closed) and A8 (no nested descent) each go red.
+  - *Low:* explicit-root overload comment and XML warning (the root argument is a caller-vouched trust
+    anchor); demo migration no longer crash-loops on a bad legacy row and probes inside an IMMEDIATE
+    transaction (test added); store contract documents read-your-writes and delete-during-read;
+    `IsCapabilityRevokedAsync(id, Unscoped)` footgun documented; co-signed-parent and self-asserted-root
+    consequences documented on `RevokeCapabilityAsync` and in architecture.md.
+  - Final: 776 tests (728 Core + 48 ASP.NET), warnings identical to baseline.
+- **Open (#161):** a signed revocation binds only the capability id, so a captured request replayed
+  within the freshness window with another verified copy writes further records before the nonce
+  denies it (bounded by the revoker's own authority; the review extended a revocation to a co-signer's
+  scope this way). Options recorded in the issue.
