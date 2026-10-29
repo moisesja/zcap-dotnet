@@ -110,8 +110,10 @@ that routing and URL normalization agree with the authenticated target.
 Ids used as keys (capability, chain, invocation, document and revocation-request ids) must be
 absolute IRIs in `Uri.AbsoluteUri` form, because RDFC signs only the normalized IRI. Envelope
 invocations and signed revocations are canonicalized under zcap/v1 plus the suite context so
-`created` is signed. On the chain walk, a link verifies only with a delegation proof that signed
-the chain its parent was resolved from.
+`created` is signed. A proof set can name several chains, for example two representations of the
+same parent. The chain walk tries each one, depth first and at most 16, and verifies every link only
+with the delegation proof whose chain named its parent. The first chain that verifies is used for
+caveats, root pinning and revocation sweeps.
 
 `LegacyProofCrypto` delegates to DataProofs' Ed25519Signature2020 and
 EcdsaSecp256r1Signature2019 suites. `ZcapSuiteCatalog` binds proof type, key type and

@@ -153,8 +153,11 @@ bash interop/run-interop.sh
   document's unrelated fields are outside the capability scan.
 - **Roots and proofs**: roots are referenced by ID and resolved through a trust boundary.
   An ID-only delegated invocation is rejected. Proof sets accept at least one valid
-  delegation proof, but unsupported profile content in any member is rejected. On the chain
-  walk only a proof that signed the chain the parent was resolved from may authorize a link.
+  delegation proof, but unsupported profile content in any member is rejected. The chain walk
+  tries each chain the delegation proofs name, depth first and at most `MaxChainCandidates` (16),
+  and verifies each link only with the proof whose chain it followed. A parent is reached only
+  through its proof naming the ancestors its child lists. Never let one proof choose the parent
+  another proof is judged against, and never let an unverified proof hide a valid chain.
   Standalone proof verification checks a single link, not full authorization.
 - **Results**: detailed verify APIs return `VerificationResult` with a named outcome;
   bool APIs wrap `.IsValid`. `CouldNotVerify` distinguishes infrastructure faults.

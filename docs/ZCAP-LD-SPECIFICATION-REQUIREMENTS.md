@@ -122,7 +122,8 @@ their tests:
 
 Fields the verifier keys on must be signed in every profile: envelope `created` is signed under
 the suite context, ids must be normalized absolute IRIs, and a proof-set link verifies only with
-the proof that signed its parent's chain (`SignedBindingTests`).
+the proof whose chain named its parent. Each chain the proofs name is tried, up to 16
+(`SignedBindingTests`, `ProofSetChainTests`).
 
 ## Revocation and optional verifier policies
 

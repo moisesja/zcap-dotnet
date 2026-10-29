@@ -1,3 +1,5 @@
+using System.Collections.Immutable;
+using System.Runtime.ExceptionServices;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.Extensions.Logging;
@@ -37,6 +39,12 @@ public class VerificationService : IVerificationService
     private readonly CaveatTypeRegistry? _caveats;
     private readonly IReadOnlyDictionary<string, ICaveatHandler> _caveatHandlers;
     private const int MaxChainLength = 10; // Per spec: SHOULD limit to 10
+
+    /// <summary>
+    /// The most chains the delegation proofs of one capability may name before the search stops. A chain
+    /// with one proof per link names exactly one.
+    /// </summary>
+    internal const int MaxChainCandidates = 16;
     private const string RootIdPrefix = "urn:zcap:root:";
     private const string ZcapV1Context = "https://w3id.org/zcap/v1";
 
@@ -356,7 +364,6 @@ public class VerificationService : IVerificationService
         bool requireParentAuthorization,
         Capability? explicitRoot = null,
         bool applyCreatedCheck = true,
-        object[]? requiredChain = null,
         bool applyCaveatPolicy = true)
     {
         if (capability.Proof == null)
@@ -370,23 +377,13 @@ public class VerificationService : IVerificationService
         // chain). Try each delegation proof in turn — a single proof's failure (unsupported
         // suite, unresolvable key, bad signature, unauthorized signer) must not reject the
         // others, and non-delegation proofs in the set are simply ignored here. When every proof
-        // fails, surface the last specific reason (the common single-proof case is exact).
-        //
-        // On the chain walk the parent was resolved from one proof's capabilityChain
-        // (requiredChain). Only a proof that signed that same chain may authorize the link;
-        // otherwise a junk proof could choose the parent a different, valid proof is judged
-        // against (#157).
+        // fails, surface the last specific reason (the common single-proof case is exact). Each
+        // proof resolves its own parent from its own capabilityChain. (The chain walk does not come
+        // here: it verifies each link with the proof whose chain it followed.)
         var lastFailure = VerificationResult.Fail(VerificationOutcome.InvalidDelegation,
             "No capabilityDelegation proof could be verified.");
         foreach (var proof in capability.Proof.DelegationProofs())
         {
-            if (requiredChain is not null && !IsSameChain(proof.CapabilityChain, requiredChain))
-            {
-                lastFailure = VerificationResult.Fail(VerificationOutcome.InvalidDelegation,
-                    "Delegation proof does not carry the capabilityChain its parent was resolved from.");
-                continue;
-            }
-
             var result = await VerifySingleDelegationProofAsync(
                 capability, proof, parentCapabilityOverride, requireParentAuthorization, explicitRoot,
                 applyCreatedCheck, applyCaveatPolicy);
@@ -755,9 +752,8 @@ public class VerificationService : IVerificationService
             // 5. Verify the capability chain (delegation proofs, attenuation, @context, expiry, revocation).
             if ((CapabilityProfile.Validate(capability, caveats: _caveats) ?? CapabilityProfile.Validate(explicitRoot, caveats: _caveats)) is { } profileFailure)
                 return profileFailure;
-            var chain = await BuildCapabilityChainAsync(capability, explicitRoot);
-            var chainResult = await VerifyBuiltChainAsync(chain);
-            if (!chainResult.IsValid)
+            var (chainResult, chain) = await BuildAndVerifyChainAsync(capability, explicitRoot);
+            if (chain is null)
                 return chainResult;
 
             // 5a. SECURITY (defense in depth): if the relying party pinned the acceptable root
@@ -862,14 +858,13 @@ public class VerificationService : IVerificationService
             }
 
             // 1. Verify the capability chain is valid. Build it once here and reuse the same chain
-            // instead of rebuilding it (BuildCapabilityChainAsync
-            // throwing is caught by this method's outer fail-closed catch). Propagate the chain's
+            // instead of rebuilding it (a chain that cannot be built throws, which this method's
+            // outer fail-closed catch handles). Propagate the chain's
             // specific failure reason (revoked / attenuation / chain-too-long / …) unchanged.
             if ((CapabilityProfile.Validate(capability, caveats: _caveats) ?? CapabilityProfile.Validate(explicitRoot, caveats: _caveats)) is { } profileFailure)
                 return profileFailure;
-            var chain = await BuildCapabilityChainAsync(capability, explicitRoot);
-            var chainResult = await VerifyBuiltChainAsync(chain);
-            if (!chainResult.IsValid)
+            var (chainResult, chain) = await BuildAndVerifyChainAsync(capability, explicitRoot);
+            if (chain is null)
                 return chainResult;
 
             // 1a. Caveats (#157): every caveat type needs a handler here, checked before any nonce is used.
@@ -1146,9 +1141,8 @@ public class VerificationService : IVerificationService
             // can build once and reuse it instead of rebuilding (see VerifyBuiltChainAsync callers).
             if ((CapabilityProfile.Validate(capability, caveats: _caveats) ?? CapabilityProfile.Validate(explicitRoot, caveats: _caveats)) is { } profileFailure)
                 return profileFailure;
-            var chain = await BuildCapabilityChainAsync(capability, explicitRoot);
-            var result = await VerifyBuiltChainAsync(chain);
-            if (!result.IsValid)
+            var (result, chain) = await BuildAndVerifyChainAsync(capability, explicitRoot);
+            if (chain is null)
                 return result;
 
             // A valid chain with caveats is authentic but not authorized: only invocation verification
@@ -1195,8 +1189,8 @@ public class VerificationService : IVerificationService
     /// </para>
     /// </summary>
     private async Task<VerificationResult> VerifyBuiltChainAsync(
-        List<Capability> chain, bool applyExpirationCeiling = true, bool applyCreatedCheck = true,
-        bool requireDelegatedExpires = true, bool applyCaveatPolicy = true)
+        List<Capability> chain, IReadOnlyList<Proof?> linkProofs, bool applyExpirationCeiling = true,
+        bool applyCreatedCheck = true, bool requireDelegatedExpires = true, bool applyCaveatPolicy = true)
     {
         try
         {
@@ -1247,22 +1241,23 @@ public class VerificationService : IVerificationService
                 // An unknown/absent proof type yields a null suite context — skip the suite-context
                 // assertion deliberately (the signature gate below rejects an unknown suite anyway);
                 // the check only applies when we know which suite context the proof terms require.
-                var suiteContextUrl = ZcapSuiteCatalog.GetByProofType(
-                    child.Proof?.FirstDelegationProof()?.Type)?.ContextUrl;
+                var linkProof = linkProofs[i];
+                var suiteContextUrl = ZcapSuiteCatalog.GetByProofType(linkProof?.Type)?.ContextUrl;
                 if (suiteContextUrl is not null && !childContext.Contains(suiteContextUrl))
                     return VerificationResult.Fail(VerificationOutcome.MalformedCapability,
                         $"Delegated capability '{child.Id}' @context MUST include the signing suite context " +
                         $"'{suiteContextUrl}'.");
 
-                // Verify delegation proof — propagate its specific reason (signature / authorization /
-                // attenuation / expiry) so a broken link surfaces precisely (Issue #70).
-                var linkResult = await VerifyDelegationProofAsync(
-                    child,
-                    parentCapabilityOverride: parent,
-                    requireParentAuthorization: true,
-                    applyCreatedCheck: applyCreatedCheck,
-                    requiredChain: child.Proof?.FirstDelegationProofWithChain()?.CapabilityChain,
-                    applyCaveatPolicy: applyCaveatPolicy);
+                // Verify the delegation proof that named this parent, and only that one: another proof
+                // in the set names its own chain and is tried as its own candidate (#157). Propagate the
+                // specific reason (signature / authorization / attenuation / expiry) so a broken link
+                // surfaces precisely (Issue #70).
+                var linkResult = linkProof is null
+                    ? VerificationResult.Fail(VerificationOutcome.InvalidDelegation,
+                        $"No delegation proof of '{child.Id}' names its parent.")
+                    : await VerifySingleDelegationProofAsync(
+                        child, linkProof, parent, requireParentAuthorization: true,
+                        applyCreatedCheck: applyCreatedCheck, applyCaveatPolicy: applyCaveatPolicy);
                 if (!linkResult.IsValid)
                     return linkResult;
 
@@ -1354,110 +1349,200 @@ public class VerificationService : IVerificationService
     }
 
     /// <summary>
-    /// Builds the complete capability chain from leaf to root, strictly validating each link's
-    /// <c>capabilityChain</c> against the spec-exact shape. The root is referenced by id only, so it
-    /// is obtained via <see cref="ResolveRootCapabilityAsync"/> (an explicit root, else the configured
-    /// <see cref="IRootCapabilityResolver"/>, else fail closed). Rejects any non-spec shape — an
-    /// embedded root, a missing/duplicated root id, an immediate parent that is missing/wrong/also
-    /// referenced by id, or an out-of-order/non-minimal ancestor list (Issue #50).
+    /// One root→leaf chain that a capability's proofs name, with the delegation proof of each link whose
+    /// <c>capabilityChain</c> resolved that link's parent (<see langword="null"/> for the root), or the
+    /// reason the chain could not be built.
     /// </summary>
-    private async Task<List<Capability>> BuildCapabilityChainAsync(Capability capability, Capability? explicitRoot)
+    private sealed record ChainCandidate(
+        List<Capability> Chain, Proof?[] LinkProofs, CapabilityValidationException? BuildFailure);
+
+    /// <summary>
+    /// Builds and verifies the capability's chain. A proof set may name several chains (for example two
+    /// representations of the same parent), and the capability is valid when at least one delegation
+    /// proof verifies together with the chain it names. Candidates are tried depth first in proof order
+    /// (one per proof when every link has a single proof), at most <see cref="MaxChainCandidates"/> of
+    /// them. Returns the first chain that verifies, otherwise the last candidate's failure. When that
+    /// candidate could not be built its exception is rethrown, so a malformed single chain fails closed
+    /// exactly as it did before proof sets were searched. <paramref name="accept"/>, when given, must
+    /// also hold for a verified chain (revocation: the revoker controls one of its links).
+    /// </summary>
+    private async Task<(VerificationResult Result, List<Capability>? Chain)> BuildAndVerifyChainAsync(
+        Capability capability, Capability? explicitRoot, bool applyExpirationCeiling = true,
+        bool applyCreatedCheck = true, bool requireDelegatedExpires = true, bool applyCaveatPolicy = true,
+        Func<List<Capability>, Task<bool>>? accept = null)
     {
-        var chain = new List<Capability>();
-        var current = capability;
-        var visitedIds = new HashSet<string>(StringComparer.Ordinal);
-        string? expectedRootId = null;
-
-        while (true)
+        VerificationResult? lastResult = null;
+        CapabilityValidationException? lastFailure = null;
+        var examined = 0;
+        await foreach (var candidate in ExtendChainAsync(
+                           capability, [], [], expectedRootId: null, requiredChainIds: null, explicitRoot))
         {
-            if (string.IsNullOrWhiteSpace(current.Id))
+            if (++examined > MaxChainCandidates)
+                return (VerificationResult.Fail(VerificationOutcome.InvalidDelegation,
+                    $"None of the first {MaxChainCandidates} chains named by the capability's delegation proofs verified."), null);
+
+            if (candidate.BuildFailure is { } failure)
             {
-                throw new CapabilityValidationException("Capability in chain is missing required id.");
+                (lastFailure, lastResult) = (failure, null);
+                continue;
             }
 
-            if (!CanonicalIri.IsCanonical(current.Id))
-            {
-                throw new CapabilityValidationException(
-                    $"Capability id '{current.Id}' in chain {CanonicalIri.RequirementMessage}.");
-            }
-
-            if (!visitedIds.Add(current.Id))
-            {
-                throw new CapabilityValidationException(
-                    $"Detected a cycle in capability chain at capability ID '{current.Id}'.");
-            }
-
-            chain.Insert(0, current); // Add to beginning to build root->leaf order
-
-            // Bound the WORK, not just the final acceptance: stop walking as soon as the chain exceeds
-            // the maximum length, BEFORE deserializing the next embedded parent. Previously the
-            // MaxChainLength gate ran only in VerifyBuiltChainAsync, after the entire attacker-supplied
-            // nesting had been walked and re-deserialized. Returning the over-length chain (rather than
-            // throwing) lets that gate still reject it with the precise ChainTooLong outcome; the root
-            // invariants below are intentionally skipped for the truncated chain since it is rejected
-            // for length regardless.
-            if (chain.Count > MaxChainLength)
-            {
-                return chain;
-            }
-
-            if (string.IsNullOrEmpty(current.ParentCapability))
-            {
-                // Reached root
-                break;
-            }
-
-            // A delegated zcap may carry several proofs; the delegation chain lives on a
-            // capabilityDelegation proof. Use the first delegation proof that carries one.
-            // Assumption: every capabilityDelegation proof in a set describes the SAME chain
-            // (they are independent signatures over one delegation), so the first one with a
-            // chain is representative — VerifyDelegationProofAsync independently accepts any
-            // delegation proof whose signature and parent authorization hold.
-            var chainProof = current.Proof?.FirstDelegationProofWithChain();
-            if (chainProof?.CapabilityChain is not { Length: > 0 } rawChain)
-            {
-                throw new CapabilityValidationException(
-                    "Delegated capability missing capabilityChain in proof");
-            }
-
-            // capabilityChain[0] MUST be the root id string, consistent across the whole walk.
-            var chainRootId = TryExtractStringValue(rawChain[0]);
-            if (string.IsNullOrWhiteSpace(chainRootId))
-            {
-                throw new CapabilityValidationException(
-                    "capabilityChain first entry MUST be the root capability ID string");
-            }
-
-            if (expectedRootId == null)
-            {
-                expectedRootId = chainRootId;
-            }
-            else if (!string.Equals(expectedRootId, chainRootId, StringComparison.Ordinal))
-            {
-                throw new CapabilityValidationException(
-                    $"Inconsistent root capability IDs in capabilityChain. Expected '{expectedRootId}', got '{chainRootId}'.");
-            }
-
-            // Strictly validate this link's chain shape and obtain its immediate parent (the resolved
-            // root for a first-level delegation, the embedded last entry for a deeper one).
-            current = await ValidateChainShapeAndResolveParentAsync(rawChain, current, chainRootId, explicitRoot);
+            var result = await VerifyBuiltChainAsync(
+                candidate.Chain, candidate.LinkProofs, applyExpirationCeiling, applyCreatedCheck,
+                requireDelegatedExpires, applyCaveatPolicy);
+            if (result.IsValid && (accept is null || await accept(candidate.Chain)))
+                return (result, candidate.Chain);
+            (lastFailure, lastResult) = (null, result.IsValid
+                ? VerificationResult.Fail(VerificationOutcome.InvalidDelegation, "The verified chain was not accepted.")
+                : result);
         }
 
-        var root = chain[0];
-
-        if (!string.IsNullOrWhiteSpace(expectedRootId) &&
-            !string.Equals(expectedRootId, root.Id, StringComparison.Ordinal))
-        {
-            throw new CapabilityValidationException(
-                $"Root capability ID '{root.Id}' does not match capabilityChain root ID '{expectedRootId}'.");
-        }
-
-        // Structural root invariants (shared with the standalone proof path); also covers a direct-root
-        // verification, where the leaf IS the root and ResolveRootCapabilityAsync is never reached.
-        ValidateRootCapabilityInvariants(root, _policy.RejectUnknownRootFields);
-
-        return chain;
+        if (lastFailure is not null)
+            ExceptionDispatchInfo.Throw(lastFailure);
+        return (lastResult ?? VerificationResult.Fail(VerificationOutcome.InvalidDelegation,
+            "No delegation chain could be built."), null);
     }
+
+    /// <summary>
+    /// Enumerates the chains from <paramref name="current"/> up to the root, strictly validating each
+    /// link's <c>capabilityChain</c> against the spec-exact shape (Issue #50). The root is referenced by id
+    /// only, so it is obtained via <see cref="ResolveRootCapabilityAsync"/> (an explicit root, else the
+    /// configured <see cref="IRootCapabilityResolver"/>, else fail closed). Each delegation proof is
+    /// followed only with the parent its own chain names, and a parent is reached only through a proof
+    /// naming exactly the ancestors its child lists, so an unverified proof can neither choose the parent
+    /// another proof is judged against (#157) nor hide a valid chain.
+    /// </summary>
+    /// <param name="current">The capability whose parent this step resolves.</param>
+    /// <param name="below">The links already walked, leaf first.</param>
+    /// <param name="belowProofs">For each of <paramref name="below"/>, the proof that named its parent.</param>
+    /// <param name="requiredChainIds">The ancestor ids the child lists before <paramref name="current"/>,
+    /// which <paramref name="current"/>'s proof must name; <see langword="null"/> for the leaf.</param>
+    /// <param name="expectedRootId">The root id the walk has committed to, once known.</param>
+    /// <param name="explicitRoot">A root supplied by the caller, preferred over the resolver.</param>
+    private async IAsyncEnumerable<ChainCandidate> ExtendChainAsync(
+        Capability current, ImmutableList<Capability> below, ImmutableList<Proof?> belowProofs,
+        string? expectedRootId, string[]? requiredChainIds, Capability? explicitRoot)
+    {
+        static ChainCandidate Failed(CapabilityValidationException failure) => new([], [], failure);
+        static ChainCandidate Complete(ImmutableList<Capability> leafFirst, ImmutableList<Proof?> proofs)
+            => new(leafFirst.Reverse().ToList(), proofs.Reverse().ToArray(), null);
+
+        if (string.IsNullOrWhiteSpace(current.Id))
+        {
+            yield return Failed(new CapabilityValidationException("Capability in chain is missing required id."));
+            yield break;
+        }
+
+        if (!CanonicalIri.IsCanonical(current.Id))
+        {
+            yield return Failed(new CapabilityValidationException(
+                $"Capability id '{current.Id}' in chain {CanonicalIri.RequirementMessage}."));
+            yield break;
+        }
+
+        if (below.Any(link => string.Equals(link.Id, current.Id, StringComparison.Ordinal)))
+        {
+            yield return Failed(new CapabilityValidationException(
+                $"Detected a cycle in capability chain at capability ID '{current.Id}'."));
+            yield break;
+        }
+
+        var path = below.Add(current);
+
+        // Bound the WORK, not just the final acceptance: stop walking as soon as the chain exceeds the
+        // maximum length, BEFORE deserializing the next embedded parent. The over-length chain is still
+        // returned so VerifyBuiltChainAsync rejects it with the precise ChainTooLong outcome; the root
+        // invariants are skipped because it is rejected for length regardless.
+        if (path.Count > MaxChainLength)
+        {
+            yield return Complete(path, belowProofs.Add(null));
+            yield break;
+        }
+
+        if (string.IsNullOrEmpty(current.ParentCapability))
+        {
+            CapabilityValidationException? rootFailure = null;
+            if (!string.IsNullOrWhiteSpace(expectedRootId) &&
+                !string.Equals(expectedRootId, current.Id, StringComparison.Ordinal))
+            {
+                rootFailure = new CapabilityValidationException(
+                    $"Root capability ID '{current.Id}' does not match capabilityChain root ID '{expectedRootId}'.");
+            }
+            else
+            {
+                // Structural root invariants (shared with the standalone proof path); also covers a
+                // direct-root verification, where the leaf IS the root and no resolver is consulted.
+                try
+                {
+                    ValidateRootCapabilityInvariants(current, _policy.RejectUnknownRootFields);
+                }
+                catch (CapabilityValidationException ex)
+                {
+                    rootFailure = ex;
+                }
+            }
+
+            yield return rootFailure is null ? Complete(path, belowProofs.Add(null)) : Failed(rootFailure);
+            yield break;
+        }
+
+        var proofs = current.Proof?.DelegationProofs()
+            .Where(proof => proof.CapabilityChain is { Length: > 0 } chain &&
+                            (requiredChainIds is null || ChainIds(chain).SequenceEqual(requiredChainIds, StringComparer.Ordinal)))
+            .ToList() ?? [];
+        if (proofs.Count == 0)
+        {
+            yield return Failed(new CapabilityValidationException(requiredChainIds is null
+                ? "Delegated capability missing capabilityChain in proof"
+                : "capabilityChain ancestor ids are not minimal/ordered per spec (must equal the parent's chain rendered by id)."));
+            yield break;
+        }
+
+        foreach (var proof in proofs)
+        {
+            var rawChain = proof.CapabilityChain!;
+            string? chainRootId = null;
+            Capability? parent = null;
+            CapabilityValidationException? failure = null;
+            try
+            {
+                // capabilityChain[0] MUST be the root id string, consistent across the whole walk.
+                chainRootId = TryExtractStringValue(rawChain[0]);
+                if (string.IsNullOrWhiteSpace(chainRootId))
+                    throw new CapabilityValidationException(
+                        "capabilityChain first entry MUST be the root capability ID string");
+                if (expectedRootId is not null && !string.Equals(expectedRootId, chainRootId, StringComparison.Ordinal))
+                    throw new CapabilityValidationException(
+                        $"Inconsistent root capability IDs in capabilityChain. Expected '{expectedRootId}', got '{chainRootId}'.");
+
+                // Strictly validate this link's chain shape and obtain its immediate parent (the resolved
+                // root for a first-level delegation, the embedded last entry for a deeper one).
+                parent = await ValidateChainShapeAndResolveParentAsync(rawChain, current, chainRootId, explicitRoot);
+            }
+            catch (CapabilityValidationException ex)
+            {
+                failure = ex;
+            }
+
+            if (failure is not null)
+            {
+                yield return Failed(failure);
+                continue;
+            }
+
+            // A deeper parent must itself be reached through a proof naming exactly these ancestors.
+            var parentChainIds = string.Equals(current.ParentCapability, chainRootId, StringComparison.Ordinal)
+                ? null
+                : rawChain[..^1].Select(entry => TryExtractStringValue(entry) ?? string.Empty).ToArray();
+            await foreach (var candidate in ExtendChainAsync(
+                               parent!, path, belowProofs.Add(proof), chainRootId, parentChainIds, explicitRoot))
+                yield return candidate;
+        }
+    }
+
+    /// <summary>A <c>capabilityChain</c> rendered by id: strings as written, an embedded capability by its id.</summary>
+    private static string[] ChainIds(object[] chain)
+        => chain.Select(entry => ExtractCapabilityId(entry) ?? string.Empty).ToArray();
 
     /// <summary>
     /// Strictly validates one delegated capability's <c>capabilityChain</c> against the spec-exact
@@ -1541,13 +1626,16 @@ public class VerificationService : IVerificationService
 
         // Order + minimality: this chain's ancestor-id prefix MUST equal the embedded parent's own
         // chain rendered by id (root + the parent's ancestors). This binds each level to its parent's
-        // chain, rejecting injected, reordered, or extra ancestor ids.
-        var parentChain = embeddedParent.Proof?.FirstDelegationProofWithChain()?.CapabilityChain;
-        IEnumerable<string> expectedPrefix = parentChain is { Length: > 0 }
-            ? parentChain.Select(e => ExtractCapabilityId(e) ?? string.Empty)
-            : new[] { chainRootId };
-        var actualPrefix = rawChain.Take(rawChain.Length - 1).Select(e => TryExtractStringValue(e) ?? string.Empty);
-        if (!expectedPrefix.SequenceEqual(actualPrefix, StringComparer.Ordinal))
+        // chain, rejecting injected, reordered, or extra ancestor ids. A parent with several delegation
+        // proofs may name different chains; the chain walk then follows only the proofs naming this one.
+        var parentChains = embeddedParent.Proof?.DelegationProofs()
+            .Where(p => p.CapabilityChain is { Length: > 0 })
+            .Select(p => ChainIds(p.CapabilityChain!))
+            .ToList() ?? [];
+        if (parentChains.Count == 0)
+            parentChains.Add(new[] { chainRootId });
+        var actualPrefix = rawChain.Take(rawChain.Length - 1).Select(e => TryExtractStringValue(e) ?? string.Empty).ToArray();
+        if (!parentChains.Any(expectedPrefix => expectedPrefix.SequenceEqual(actualPrefix, StringComparer.Ordinal)))
         {
             throw new CapabilityValidationException(
                 "capabilityChain ancestor ids are not minimal/ordered per spec (must equal the parent's chain rendered by id).");
@@ -2070,8 +2158,8 @@ public class VerificationService : IVerificationService
     }
 
     /// <summary>
-    /// True when two <c>capabilityChain</c> values are the same JSON (compared by RFC 8785
-    /// canonical form, so an in-memory <see cref="Capability"/> equals its wire JSON).
+    /// True when two values are the same JSON (compared by RFC 8785 canonical form, so an in-memory
+    /// <see cref="Capability"/> equals its wire JSON).
     /// </summary>
     // Comparison only, never signing: allow canonical forms larger than NetCid's 1 MB default so a
     // legitimate maximum-length chain is not refused as CouldNotVerify.
@@ -2082,15 +2170,6 @@ public class VerificationService : IVerificationService
 
     private static bool IsSameJson(object first, object second)
         => CanonicalForComparison(first).AsSpan().SequenceEqual(CanonicalForComparison(second));
-
-    private static bool IsSameChain(object[]? first, object[] second)
-    {
-        if (first is null || first.Length != second.Length)
-            return false;
-
-        return ReferenceEquals(first, second) ||
-               CanonicalForComparison(first).AsSpan().SequenceEqual(CanonicalForComparison(second));
-    }
 
     /// <summary>
     /// Extracts the capability id from a <c>capabilityChain</c> element — a bare id string for
@@ -2317,12 +2396,10 @@ public class VerificationService : IVerificationService
                 return false;
             }
 
-            // Build the chain once, then verify it cryptographically before trusting controller fields.
-            // Without that verification, a caller passing a crafted Capability with a tampered controller
-            // could authorize themselves to revoke a legitimate capability. (VerifyBuiltChainAsync reuses
-            // this built chain instead of rebuilding it — see VerifyCapabilityChainAsync.)
-            var chain = await BuildCapabilityChainAsync(capability, explicitRoot);
-
+            // Verify the chain cryptographically before trusting controller fields. Without that
+            // verification, a caller passing a crafted Capability with a tampered controller could
+            // authorize themselves to revoke a legitimate capability.
+            //
             // Do NOT apply the opt-in 3-month expiration ceiling (Issue #73), the delegation-proof
             // `created` soundness check (Issue #99), nor the delegated-`expires` MUST here: revocation
             // must stay possible for a long-lived, malformed-`created`, or non-expiring delegation —
@@ -2330,33 +2407,37 @@ public class VerificationService : IVerificationService
             // accepting/invoking a zcap, not on revoking one.
             // Caveat policy (Validate, IsAttenuationOf) is skipped for the same reason; caveat integrity
             // (registered types, declared parameters, signed context) is still required (#157).
-            if (!(await VerifyBuiltChainAsync(
-                    chain, applyExpirationCeiling: false, applyCreatedCheck: false,
-                    requireDelegatedExpires: false, applyCaveatPolicy: false)).IsValid)
-                return false;
-
+            //
             // Document-based authorization (Issue #65): the revoker is authorized when ANY link in
-            // the cryptographically verified chain authorizes its verification method for the
+            // a cryptographically verified chain authorizes its verification method for the
             // capabilityDelegation relationship — revocation is a delegation-authority action (the
             // authority to delegate is the authority to revoke that delegation). This resolves each
             // controller's DID document (via the same IVerificationRelationshipResolver the
             // invocation/delegation paths use), so it honors cross-DID references and per-purpose key
             // separation: a key the controller's document lists only under capabilityInvocation can
             // no longer revoke. Self-revoke (the leaf's own controller) and up-chain delegators are
-            // both covered because every link is checked.
-            foreach (var link in chain)
-            {
-                if (await IsControllerAuthorizedAsync(
-                        verificationMethod, link, VerificationRelationship.CapabilityDelegation))
-                    return true;
-            }
+            // both covered because every link is checked. When the proofs name several chains, each
+            // verified chain is checked in turn.
+            var (result, _) = await BuildAndVerifyChainAsync(
+                capability, explicitRoot, applyExpirationCeiling: false, applyCreatedCheck: false,
+                requireDelegatedExpires: false, applyCaveatPolicy: false,
+                accept: async chain =>
+                {
+                    foreach (var link in chain)
+                    {
+                        if (await IsControllerAuthorizedAsync(
+                                verificationMethod, link, VerificationRelationship.CapabilityDelegation))
+                            return true;
+                    }
 
-            return false;
+                    return false;
+                });
+            return result.IsValid;
         }
         catch (Exception ex)
         {
             // Fail closed on ANY fault from the chain walk, not just a malformed chain.
-            // BuildCapabilityChainAsync can throw CapabilityValidationException, JsonException, or a
+            // Building the chain can throw CapabilityValidationException, JsonException, or a
             // DID-resolution error — all of which mean "cannot establish authorization", i.e. not
             // authorized. RevokeCapabilityAsync's own top-level catch would also fail closed (no caller
             // was ever at crash risk), but catching here keeps the authorization decision local and

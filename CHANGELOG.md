@@ -92,8 +92,11 @@ Planned as 6.0.0 (breaking: new interface/constructor parameters and in-stack si
 - Caveat type names that are ZCAP or suite context terms are refused at registration.
 - In a proof set the chain walk took the parent from the first delegation proof but accepted
   any proof's signature, so a junk first proof could choose the parent that a valid proof was
-  judged against. A link now verifies only with a proof that signed that same chain, and the
-  standalone path sweeps every delegation proof's ancestry for revocation.
+  judged against. The walk now tries each chain the delegation proofs name (depth first, at most
+  16) and verifies each link only with the proof whose chain it followed. An unverified proof
+  therefore can neither choose another proof's parent nor exclude a valid proof that embeds a
+  different representation of the parent. Revocation is authorized against each verified chain in
+  turn. The standalone path sweeps every delegation proof's ancestry for revocation.
 
 ### Changed
 
