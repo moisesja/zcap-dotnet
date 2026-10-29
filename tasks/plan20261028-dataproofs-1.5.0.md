@@ -129,8 +129,19 @@ It did find one critical pre-existing bypass and three smaller issues:
    This is pre-existing and not a forgery, because JCS signs bytes verbatim. CHANGELOG, AGENTS and
    test comments are corrected. Follow-up candidate: verify the RDFC variant only.
 
-Not fixed: a malformed modeled proof member (`"domain": 123`) returns `CouldNotVerify` instead
-of `MalformedCapability`. It is pre-existing, low severity and fails closed; follow-up candidate.
+### Follow-up fixes (the owner, 2026-10-28: "don't file issues, fix them")
+
+- **Malformed modeled proof member: fixed in 75fdf9f.** `CapabilityProfile` now refuses a proof
+  DataProofs cannot map, as `MalformedCapability`. The check runs after the bounded scan, so
+  cyclic proofs still report the inspection limit. `LegacyProofCrypto.Verify` keeps its
+  never-throw contract.
+- **JCS-variant acceptance.** The owner chose the DataProofs option and said PR #160 should not
+  wait for it. Severity: low. It is not a forgery path, because JCS signs bytes verbatim; it is
+  out of profile.
+  - moisesja/dataproofs-dotnet#39 (branch `feat/legacy-constructed-variant-only`) adds
+    `LegacyVariantVerification.ConstructedVariantOnly`.
+  - zcap will construct its legacy suites with `(Rdfc, canonicalizer, ConstructedVariantOnly)`
+    once the release is published.
 
 Verification after the fixes:
 
