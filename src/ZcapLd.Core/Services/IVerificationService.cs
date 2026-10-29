@@ -25,7 +25,9 @@ public interface IVerificationService
     /// (<c>created</c>, Issue #99), expiration-ceiling, required-<c>expires</c> or caveat-policy checks
     /// to ancestors; those are gated only by the full-chain path. Each delegation proof in a set is
     /// evaluated on its own (link first, then its ancestry), the first to pass wins, and a failing proof
-    /// never vetoes another; when all fail, a revocation found on a verified route is reported, else
+    /// never vetoes another, at the leaf or at any embedded ancestor: an ancestor's proof whose own
+    /// ancestry cannot be authenticated is discarded, and the ancestor fits through any of its proofs
+    /// that reaches the root. When all fail, a revocation found on a verified route is reported, else
     /// the last proof's failure. For an authorization decision, use
     /// <see cref="VerifyCapabilityChainAsync(Capability)"/> (full chain) or
     /// <see cref="VerifyInvocationAsync(Invocation, Capability)"/>. With a caveat registry (#157), a

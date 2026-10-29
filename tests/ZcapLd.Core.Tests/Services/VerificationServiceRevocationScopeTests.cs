@@ -497,6 +497,63 @@ public class VerificationServiceRevocationScopeTests
         (await _verifier.VerifyCapabilityProofDetailedAsync(leaf)).Outcome.Should().Be(VerificationOutcome.Revoked);
     }
 
+    /// <summary>
+    /// root → a → p → leaf, where p carries its genuine proof (embedding the genuine a) and a second proof,
+    /// validly signed by a's controller, that embeds a copy of a with its proof's verificationMethod
+    /// swapped (PR #162 review, round 2). Both proofs name the same ancestor ids. The leaf is delegated
+    /// from that p, so its proof authenticates the whole parent proof set.
+    /// </summary>
+    private async Task<(Capability Root, Capability A, Capability Leaf, string Owner)> FourLevelChainWithAnUnusableParentBranchAsync(
+        string target, bool genuineFirst, bool includeGenuine = true)
+    {
+        var owner = _dids.GenerateDidKey();
+        var aDid = _dids.GenerateDidKey();
+        var pDid = _dids.GenerateDidKey();
+        var holder = _dids.GenerateDidKey();
+        var root = await RootAsync(owner, target);
+        var a = await DelegateAsync(root, aDid);
+        var p = await DelegateAsync(a, pDid);
+
+        var brokenA = CapabilityJson.Parse(CapabilityJson.Serialize(a));
+        brokenA.Proof!.Primary.VerificationMethod = await _dids.GetVerificationMethodAsync(_dids.GenerateDidKey());
+        var genuine = p.Proof!.Primary;
+        var unusable = await _signing.SignCapabilityAsync(p, aDid, "capabilityDelegation", new object[] { root.Id, brokenA });
+        p.Proof = ProofSet.FromValues(
+            !includeGenuine ? [unusable] : genuineFirst ? [genuine, unusable] : [unusable, genuine]);
+
+        var leaf = await DelegateAsync(p, holder);
+        return (root, a, leaf, owner);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Standalone_UnusableNestedParentBranch_DoesNotVetoTheCompleteRoute(bool genuineFirst)
+    {
+        var (_, a, leaf, owner) = await FourLevelChainWithAnUnusableParentBranchAsync(
+            $"https://example.com/nested-no-veto/{genuineFirst}", genuineFirst);
+
+        (await _verifier.VerifyCapabilityProofDetailedAsync(leaf)).Outcome.Should().Be(VerificationOutcome.Valid,
+            "the genuine parent proof walks to the root; the broken branch is discarded, not propagated");
+        (await _verifier.VerifyCapabilityChainDetailedAsync(leaf)).Outcome.Should().Be(VerificationOutcome.Valid);
+
+        // The genuine branch still carries its ancestors' scopes: revoking a is seen through it.
+        (await RevokeAsync(_verifier, a, owner)).Should().BeTrue();
+        (await _verifier.VerifyCapabilityProofDetailedAsync(leaf)).Outcome.Should().Be(VerificationOutcome.Revoked);
+    }
+
+    [Fact]
+    public async Task Standalone_OnlyUnusableNestedParentBranches_StillFailClosed()
+    {
+        var (_, _, leaf, _) = await FourLevelChainWithAnUnusableParentBranchAsync(
+            "https://example.com/nested-all-unusable", genuineFirst: true, includeGenuine: false);
+
+        var standalone = await _verifier.VerifyCapabilityProofDetailedAsync(leaf);
+
+        standalone.IsValid.Should().BeFalse("no parent proof reaches an authenticated ancestry");
+        standalone.Outcome.Should().Be(VerificationOutcome.InvalidSignature, "the broken ancestor's signature is the reason");
+    }
+
     /// <summary>Drops writes while <see cref="LoseWrites"/> is set, as a store with a broken key column would.</summary>
     private sealed class LossyStore : IRevocationStore
     {

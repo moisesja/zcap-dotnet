@@ -220,7 +220,10 @@ each ancestor's delegation proof as a chain link before trusting its delegator, 
 that candidate closed when an embedded parent has no proof that fits its route and
 verifies: the presented ancestry is otherwise unauthenticated, and a revoked delegator
 could re-sign a child around a copy of its capability with the proof stripped or its
-verification method swapped. A failing candidate never vetoes a valid one. Root resolvers
+verification method swapped. Candidate isolation is recursive: each ancestor proof is
+walked as its own route with its own lookups, a route that fails is discarded with
+everything it collected, and an ancestor fits through any of its proofs that reaches the
+root, so a failing candidate never vetoes a valid one at any level. Root resolvers
 return null for unknown ids rather than throwing, because
 revocation looks up the revoked id and a fault fails the revocation closed.
 

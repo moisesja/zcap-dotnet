@@ -151,6 +151,18 @@ one-time migration of legacy `revocation_registry` rows to `Unscoped`.
     parent (the chain path already said so); one of my earlier tests relaxed to "not valid" because
     the leaf-link shape check now runs first. Ablations A9 (no ancestor authentication), A10 (first
     failure vetoes), A11 (no `Revoked` precedence) each go red. 779 tests; warnings unchanged.
+- **PR #162 review round 2 (owner), valid and fixed (fourth commit):** candidate isolation stopped at
+  the leaf. In `WalkRouteAsync` a nested branch's `Unusable` propagated straight up and every branch
+  wrote into one shared sweep state, so with root → a → p → leaf, where p carries its genuine proof
+  plus a validly signed second proof embedding a copy of a with its proof's verification method
+  swapped, the standalone path returned `InvalidSignature` while the chain path (and the base) said
+  `Valid`. Fix: the walk returns a `RouteWalk` (step, its own lookups, failure); each nested proof is
+  its own branch, a failing branch is discarded with everything it collected, a parent fits through
+  any branch that completes, and only a parent with no complete branch fails the candidate (a fault
+  over an invalidity, else the last branch's reason). Tests: the four-level case in both parent-proof
+  orders (also re-checking `Revoked` after revoking a through the genuine branch) and an all-unusable
+  control that stays `InvalidSignature`. Ablation A12 (nested branch vetoes) turns both order cases
+  red. 782 tests; warnings unchanged.
 - **Open (#161):** a signed revocation binds only the capability id, so a captured request replayed
   within the freshness window with another verified copy writes further records before the nonce
   denies it (bounded by the revoker's own authority; the review extended a revocation to a co-signer's

@@ -51,6 +51,12 @@
 - When fixing a reviewer's or red team's finding, re-run the original attack *and* its natural
   variants (strip, swap, reorder, duplicate) before declaring it closed; the first fix closed only the
   variant that had been demonstrated.
+- Round 2 of the same review: I fixed the veto at the leaf and left it one level down (`case
+  Unusable: return Unusable` inside the recursion, plus one shared lookup list across sibling
+  branches). An invariant stated as "a failing proof never vetoes another" is recursive by nature;
+  when a fix introduces a rule, walk every recursion level and every shared mutable state and ask
+  whether the rule holds there too. The owner's test shape is the one to copy: the variant at depth
+  N+1, in both orders, plus an all-unusable control that must still fail.
 
 ## 2026-10-27 — Issue #157 red team: RDFC drops malformed IRIs, not only undefined terms
 
