@@ -181,7 +181,9 @@ Planned as 6.0.0 (breaking: new interface/constructor parameters and in-stack si
   child around a copy of its capability with the proof stripped or its verification method
   swapped); below the first level this path now needs a root resolver or explicit root, and a
   failing proof in a set never vetoes a valid one, at the leaf or at any embedded ancestor (each
-  ancestor proof is walked as its own route and discarded whole when it fails). The signed path records
+  ancestor proof is walked as its own route and discarded whole when it fails), and revocation is
+  judged per route (a co-signed ancestor yields one route per co-signer; the first unrevoked route is
+  accepted, as on the chain path). The signed path records
   the delegator of the accepted chain and every co-signer of the same chain, so a proof set cannot
   be revived by dropping a proof. A forged copy of an id is signed by the forger and lands in the
   forger's scope, where no genuine chain looks. Store keys are opaque digests of id and scope;

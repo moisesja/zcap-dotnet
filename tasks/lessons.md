@@ -57,6 +57,13 @@
   when a fix introduces a rule, walk every recursion level and every shared mutable state and ask
   whether the rule holds there too. The owner's test shape is the one to copy: the variant at depth
   N+1, in both orders, plus an all-unusable control that must still fail.
+- Round 3: isolation held through authentication but I unioned the surviving routes into one
+  deny-on-any revocation read, so an ancestor revoked under one co-signer rejected a route through the
+  other. A candidate is the whole pipeline a decision runs through (parse, authenticate, revoke,
+  policy); "alternatives are independent" must be carried through every stage, and any step that
+  merges alternatives before deciding (a union, a shared set, a single batched read over all of them)
+  reintroduces the veto. When the chain path already has the right per-candidate shape, mirror it
+  stage for stage instead of re-deriving it; the three rounds here were each one stage short.
 
 ## 2026-10-27 — Issue #157 red team: RDFC drops malformed IRIs, not only undefined terms
 

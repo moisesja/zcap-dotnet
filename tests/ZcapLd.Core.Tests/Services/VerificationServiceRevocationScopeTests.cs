@@ -554,6 +554,76 @@ public class VerificationServiceRevocationScopeTests
         standalone.Outcome.Should().Be(VerificationOutcome.InvalidSignature, "the broken ancestor's signature is the reason");
     }
 
+    /// <summary>
+    /// A root controlled by Alice and Bob, a parent p delegated with proofs from both, and a child under
+    /// p (PR #162 review, round 3). Revoking a copy of p that carries only Alice's proof records Alice's
+    /// scope alone, so Bob's route must stay usable; <paramref name="parentProofs"/> picks which proofs the
+    /// child's embedded p carries and in which order.
+    /// </summary>
+    private async Task<(Capability Root, Capability P, Proof Alice, Proof Bob, string AliceDid, string BobDid, Func<Proof[], Task<Capability>> ChildWith)>
+        CoSignedParentAsync(string target)
+    {
+        var alice = _dids.GenerateDidKey();
+        var bob = _dids.GenerateDidKey();
+        var pDid = _dids.GenerateDidKey();
+        var root = await RootAsync(new[] { alice, bob }, target);
+        var p = await DelegateAsync(root, pDid, signerDid: alice);
+        var aliceProof = p.Proof!.Primary;
+        var bobProof = await _signing.SignCapabilityAsync(p, bob, "capabilityDelegation", new object[] { root.Id });
+
+        return (root, p, aliceProof, bobProof, alice, bob, async parentProofs =>
+        {
+            var parent = CapabilityJson.Parse(CapabilityJson.Serialize(p));
+            parent.Proof = ProofSet.FromValues(parentProofs);
+            return await DelegateAsync(parent, _dids.GenerateDidKey());
+        });
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Standalone_AncestorRevokedUnderOneCoSigner_DoesNotRejectTheRouteThroughTheOther(bool aliceFirst)
+    {
+        var (_, p, aliceProof, bobProof, alice, bob, childWith) =
+            await CoSignedParentAsync($"https://example.com/co-signed-routes/{aliceFirst}");
+
+        // Alice revokes the copy of p that carries only her proof: her scope is recorded, Bob's is not.
+        var aliceOnly = CapabilityJson.Parse(CapabilityJson.Serialize(p));
+        aliceOnly.Proof = aliceProof;
+        (await RevokeAsync(_verifier, aliceOnly, alice)).Should().BeTrue();
+        (await _verifier.IsCapabilityRevokedAsync(p.Id, RevocationScope.Delegated(alice))).Should().BeTrue();
+        (await _verifier.IsCapabilityRevokedAsync(p.Id, RevocationScope.Delegated(bob))).Should().BeFalse();
+
+        var child = await childWith(aliceFirst ? [aliceProof, bobProof] : [bobProof, aliceProof]);
+
+        (await _verifier.VerifyCapabilityProofDetailedAsync(child)).Outcome.Should().Be(VerificationOutcome.Valid,
+            "the route through Bob's proof has no revoked link; Alice's revoked route must not veto it");
+        (await _verifier.VerifyCapabilityChainDetailedAsync(child)).Outcome.Should().Be(VerificationOutcome.Valid);
+    }
+
+    [Fact]
+    public async Task Standalone_CoSignedParent_BobOnlyCopyIsValid_AndAllRoutesRevokedStillRejects()
+    {
+        var (_, p, aliceProof, bobProof, alice, bob, childWith) =
+            await CoSignedParentAsync("https://example.com/co-signed-controls");
+        var aliceOnly = CapabilityJson.Parse(CapabilityJson.Serialize(p));
+        aliceOnly.Proof = aliceProof;
+        (await RevokeAsync(_verifier, aliceOnly, alice)).Should().BeTrue();
+
+        // Positive control: a child whose embedded parent carries only Bob's proof.
+        var bobOnlyChild = await childWith([bobProof]);
+        (await _verifier.VerifyCapabilityProofDetailedAsync(bobOnlyChild)).Outcome.Should().Be(VerificationOutcome.Valid);
+
+        // Negative control: once Bob's scope is revoked too, no route survives, on either copy.
+        var bobOnly = CapabilityJson.Parse(CapabilityJson.Serialize(p));
+        bobOnly.Proof = bobProof;
+        (await RevokeAsync(_verifier, bobOnly, bob)).Should().BeTrue();
+        var bothChild = await childWith([aliceProof, bobProof]);
+        (await _verifier.VerifyCapabilityProofDetailedAsync(bobOnlyChild)).Outcome.Should().Be(VerificationOutcome.Revoked);
+        (await _verifier.VerifyCapabilityProofDetailedAsync(bothChild)).Outcome.Should().Be(VerificationOutcome.Revoked);
+        (await _verifier.VerifyCapabilityChainDetailedAsync(bothChild)).Outcome.Should().Be(VerificationOutcome.Revoked);
+    }
+
     /// <summary>Drops writes while <see cref="LoseWrites"/> is set, as a store with a broken key column would.</summary>
     private sealed class LossyStore : IRevocationStore
     {

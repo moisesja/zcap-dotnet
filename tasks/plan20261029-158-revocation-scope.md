@@ -163,6 +163,19 @@ one-time migration of legacy `revocation_registry` rows to `Unscoped`.
   orders (also re-checking `Revoked` after revoking a through the genuine branch) and an all-unusable
   control that stays `InvalidSignature`. Ablation A12 (nested branch vetoes) turns both order cases
   red. 782 tests; warnings unchanged.
+- **PR #162 review round 3 (owner), valid and fixed (fifth commit):** isolation did not extend through
+  revocation. The walk kept cryptographic alternatives apart but unioned every complete branch's
+  lookups into one deny-on-any `FindRevocationAsync`, so with a root controlled by Alice and Bob, p
+  delegated with both proofs, and a copy of p carrying only Alice's proof revoked, a child embedding
+  both proofs was `Revoked` on the standalone path while the chain path (and the documented
+  one-proof-copy contract) said `Valid`. Fix: `WalkRouteAsync` returns the alternative routes (one per
+  combination of fitting ancestor proofs, each with the lookups of its own links, depth first in proof
+  order, at most `MaxChainCandidates` per level as the chain walk bounds candidates); the core checks
+  revocation per route and accepts the first unrevoked one; when every enumerated route is revoked it
+  reports `Revoked` (or the candidate-bound failure if the enumeration was cut). The per-route lookup
+  cap became unnecessary (one lookup per link) and was removed. Tests: both parent-proof orders, the
+  Bob-only positive control, and the all-routes-revoked negative control. Ablation A13 (routes unioned)
+  turns both order cases red. 785 tests; warnings unchanged.
 - **Open (#161):** a signed revocation binds only the capability id, so a captured request replayed
   within the freshness window with another verified copy writes further records before the nonce
   denies it (bounded by the revoker's own authority; the review extended a revocation to a co-signer's

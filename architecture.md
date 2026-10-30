@@ -223,7 +223,10 @@ could re-sign a child around a copy of its capability with the proof stripped or
 verification method swapped. Candidate isolation is recursive: each ancestor proof is
 walked as its own route with its own lookups, a route that fails is discarded with
 everything it collected, and an ancestor fits through any of its proofs that reaches the
-root, so a failing candidate never vetoes a valid one at any level. Root resolvers
+root, so a failing candidate never vetoes a valid one at any level. The same holds
+through revocation: a co-signed ancestor yields one route per co-signer, each route is
+checked against its own links only, and the first unrevoked route is accepted, as the
+chain walk accepts the first unrevoked chain. Root resolvers
 return null for unknown ids rather than throwing, because
 revocation looks up the revoked id and a fault fails the revocation closed.
 

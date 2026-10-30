@@ -27,8 +27,11 @@ public interface IVerificationService
     /// evaluated on its own (link first, then its ancestry), the first to pass wins, and a failing proof
     /// never vetoes another, at the leaf or at any embedded ancestor: an ancestor's proof whose own
     /// ancestry cannot be authenticated is discarded, and the ancestor fits through any of its proofs
-    /// that reaches the root. When all fail, a revocation found on a verified route is reported, else
-    /// the last proof's failure. For an authorization decision, use
+    /// that reaches the root. Revocation is likewise judged per route: a co-signed ancestor yields one
+    /// route per co-signer, a route is rejected only when one of its own links is revoked, and the first
+    /// unrevoked route is accepted, as the chain path accepts the first unrevoked chain. When all fail, a
+    /// revocation found on a verified route is reported, else the last proof's failure. For an
+    /// authorization decision, use
     /// <see cref="VerifyCapabilityChainAsync(Capability)"/> (full chain) or
     /// <see cref="VerifyInvocationAsync(Invocation, Capability)"/>. With a caveat registry (#157), a
     /// link that carries caveats or sits below the first delegation level is reported as
