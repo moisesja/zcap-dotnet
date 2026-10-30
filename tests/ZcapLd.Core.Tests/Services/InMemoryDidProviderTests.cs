@@ -3,6 +3,7 @@ using NetCrypto;
 using Xunit;
 using ZcapLd.Core.Cryptography;
 using ZcapLd.Core.Exceptions;
+using ZcapLd.Core.Services;
 using ZcapLd.Core.Tests.Helpers;
 
 namespace ZcapLd.Core.Tests.Services;
@@ -368,6 +369,43 @@ public class InMemoryDidProviderTests
         results.Should().HaveCount(50);
         results.Should().OnlyContain(r => r.Signature.Length == 64);
         results.Should().OnlyContain(r => r.SignatureType == "Ed25519Signature2020");
+    }
+
+    #endregion
+
+    #region P-256 (#159)
+
+    [Fact]
+    public async Task GenerateDidKey_P256_ResolvesAndSignsWithTheP256Suite()
+    {
+        var did = _provider.GenerateDidKey(KeyType.P256);
+        did.Should().StartWith("did:key:zDn", "P-256 did:key identifiers use the p256-pub multicodec");
+
+        var resolved = await _provider.ResolvePublicKeyAsync(did);
+        resolved.KeyType.Should().Be("EcdsaSecp256r1VerificationKey2019");
+        resolved.PublicKeyBytes.Should().HaveCount(33, "the key model stores the compressed SEC1 point");
+
+        // The registered key and the real did:key resolver agree on the public key and its type.
+        var fromDidKey = await new DidKeyResolver().ResolvePublicKeyAsync(did);
+        resolved.PublicKeyBytes.Should().Equal(fromDidKey.PublicKeyBytes);
+        resolved.KeyType.Should().Be(fromDidKey.KeyType);
+
+        var data = "hello p-256"u8.ToArray();
+        var result = await _provider.SignAsync(did, data);
+        result.SignatureType.Should().Be("EcdsaSecp256r1Signature2019");
+        result.Signature.Should().HaveCount(64, "the helper signs the IEEE P1363 r||s wire form");
+        Crypto.Verify(KeyType.P256, resolved.PublicKeyBytes, data, result.Signature, EcdsaSignatureFormat.IeeeP1363)
+            .Should().BeTrue();
+    }
+
+    [Fact]
+    public void RegisterKey_UnsupportedKeyType_Throws()
+    {
+        var kp = KeyGen.Generate(KeyType.Secp256k1);
+
+        var act = () => _provider.RegisterKey("did:key:zQ3sUnsupported", kp.PrivateKey, KeyType.Secp256k1);
+
+        act.Should().Throw<ArgumentException>().WithMessage("*Unsupported key type*");
     }
 
     #endregion

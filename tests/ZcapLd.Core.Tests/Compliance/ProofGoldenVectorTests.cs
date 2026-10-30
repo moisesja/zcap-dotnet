@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using System.Text;
 using FluentAssertions;
 using NetCrypto;
@@ -107,5 +108,95 @@ public class ProofGoldenVectorTests
 
         // Surface the canonical payload in test output for cross-stack diffing.
         _ = Encoding.UTF8.GetString(canonicalBytes);
+    }
+
+    // ─── P-256 / EcdsaSecp256r1Signature2019 (#159) ──────────────────────────────────────────
+    // ECDSA signatures are randomized, so a fresh P-256 proofValue is never byte-reproducible. These
+    // vectors pin what is deterministic (the did:key for the fixed scalar and the RDFC-1.0 signing
+    // payload) and verify a proofValue frozen from one signing run, which is the byte-compatibility
+    // lock for the suite: a canonicalizer, context or crypto swap that changes the payload breaks it.
+    private const string ExpectedP256PublicKeyMultibase = "zDnaeVuZeVRqvscGkiEoR9PFFra2xZUMp97ZPuGFK1VLU7iYN";
+    private const string ExpectedP256PayloadSha256 = "6FE7C1E0E5554CA0E2CB43B16CE6CDA5E7989413CF7393FB45C6A919CDF8BE21";
+    private const string FrozenP256ProofValue =
+        "z38qrvaTyGrUjStLEorTzEWfYcos2pWcsaGfkcXWMr6bSGoLWwP9zp6wRTfLocdJjpU6nhbriaUvPCwmdBPnrPF1w";
+
+    [Fact(DisplayName = "Golden: key derivation from the fixed P-256 scalar is stable")]
+    public void FixedSeed_DerivesExpectedP256DidKey()
+    {
+        var kp = new DefaultKeyGenerator().FromPrivateKey(KeyType.P256, FixedPrivateKey);
+
+        kp.MultibasePublicKey.Should().Be(ExpectedP256PublicKeyMultibase,
+            "the compressed P-256 point and its p256-pub multicodec must stay byte-stable");
+        kp.PublicKey.Should().HaveCount(33);
+    }
+
+    [Fact(DisplayName = "Golden: P-256 delegated-capability signing payload and frozen proofValue (locks the suite's bytes)")]
+    public async Task DelegatedCapability_P256_PayloadAndFrozenProofValue_MatchGolden()
+    {
+        var kp = new DefaultKeyGenerator().FromPrivateKey(KeyType.P256, FixedPrivateKey);
+        var did = $"did:key:{kp.MultibasePublicKey}";
+
+        var provider = new InMemoryDidProvider();
+        provider.RegisterKey(did, FixedPrivateKey, KeyType.P256);
+        var signingService = new SigningService(provider, provider);
+
+        var capability = new Capability
+        {
+            // The context CapabilityService emits for a P-256 signer (#159).
+            Context = new object[] { "https://w3id.org/zcap/v1", ZcapSuiteCatalog.P256ContextUrl },
+            Id = "urn:uuid:00000000-0000-0000-0000-0000000000de",
+            ParentCapability = "urn:zcap:root:https%3A%2F%2Fexample.com%2Fapi%2Fresource",
+            Controller = did,
+            InvocationTarget = "https://example.com/api/resource",
+            AllowedAction = new[] { "read" },
+            Expires = "2027-01-01T00:00:00.000000Z",
+        };
+        var chain = new object[] { "urn:zcap:root:https%3A%2F%2Fexample.com%2Fapi%2Fresource" };
+
+        var proof = await signingService.SignCapabilityAsync(
+            capability, did, "capabilityDelegation", chain,
+            createdOverride: new DateTime(2026, 6, 13, 0, 0, 0, DateTimeKind.Utc));
+
+        proof.Type.Should().Be("EcdsaSecp256r1Signature2019");
+        proof.Created.Should().Be(ExpectedCreated);
+        proof.VerificationMethod.Should().Be($"{did}#{kp.MultibasePublicKey}");
+        MultibaseCodec.Decode(proof.ProofValue).Should().HaveCount(64, "IEEE P1363 r||s for P-256");
+
+        // 1. The RDFC-1.0 signing payload (proof options hash || document hash) is deterministic and pinned.
+        var options = new Proof
+        {
+            Type = proof.Type,
+            Created = proof.Created,
+            ProofPurpose = proof.ProofPurpose,
+            VerificationMethod = proof.VerificationMethod,
+            CapabilityChain = proof.CapabilityChain,
+            ProofValue = string.Empty,
+        };
+        var withoutProof = ProofSigningPayloadBuilder.CloneCapabilityWithoutProof(capability);
+        var payload = ProofSigningPayloadBuilder.CanonicalizeCapabilityPayload(withoutProof, options);
+        Convert.ToHexString(SHA256.HashData(payload)).Should().Be(ExpectedP256PayloadSha256,
+            "the P-256 RDFC-1.0 signing payload must stay byte-stable");
+
+        // 2. The fresh (randomized) signature verifies over that payload.
+        var crypto = new DefaultCryptoProvider();
+        crypto.Verify(KeyType.P256, kp.PublicKey, payload, MultibaseCodec.Decode(proof.ProofValue), EcdsaSignatureFormat.IeeeP1363)
+            .Should().BeTrue();
+
+        // 3. The proofValue frozen from one signing run still verifies, at the raw-crypto layer and through
+        //    the production dispatch: previously issued P-256 capabilities keep verifying.
+        crypto.Verify(KeyType.P256, kp.PublicKey, payload, MultibaseCodec.Decode(FrozenP256ProofValue), EcdsaSignatureFormat.IeeeP1363)
+            .Should().BeTrue("the frozen P-256 proofValue must verify over the pinned RDFC-1.0 payload");
+        var frozen = new Proof
+        {
+            Type = options.Type,
+            Created = options.Created,
+            ProofPurpose = options.ProofPurpose,
+            VerificationMethod = options.VerificationMethod,
+            CapabilityChain = options.CapabilityChain,
+            ProofValue = FrozenP256ProofValue,
+        };
+        new LegacyProofCrypto()
+            .Verify(withoutProof, frozen, new ResolvedKey(kp.PublicKey, "EcdsaSecp256r1VerificationKey2019"))
+            .Should().BeTrue();
     }
 }

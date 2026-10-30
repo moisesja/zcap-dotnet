@@ -1,5 +1,25 @@
 # Lessons Learned
 
+## 2026-10-29 — Issue #159: a catalog entry that names an external resource needs a test that loads it
+
+- `ZcapSuiteCatalog` advertised P-256 with a context URL (`…/suites/ecdsa-2019/v1`) that nothing ever
+  loaded: it came from a 2022 CG draft and was never published (404). Every P-256 signing failed, and the
+  caveat registry silently `continue`d past it. Nothing caught it because no test signed a P-256 capability
+  end to end and the only P-256 tests covered key resolution. Rule: when a table binds a suite, method or
+  profile to an external identifier, add a test that resolves/loads that identifier through the production
+  path, and run one end-to-end flow per advertised variant. A silent `continue` on "cannot serve" in a
+  reserved-term loader is a smell: a supported context that cannot be served is a build defect, throw.
+- Before choosing a replacement context, probe the candidates with the real canonicalizer (scratch console
+  project, `RdfcDocumentCanonicalizer` + a map loader). That showed every candidate (security/v2,
+  credentials/v1, a local type-scoped context) yields byte-identical N-Quads, which turned a hard
+  design question into a wire-naming question and made the choice cheap to reverse.
+- A sibling repo checked out locally can be AHEAD of its published package. DataProofs'
+  `LegacyVariantVerification` existed in the local source (unreleased branch) but not in the 1.5.0 NuGet
+  package zcap pins, so code written against the source did not build. Check `~/.nuget/packages/<pkg>/<ver>`
+  (or the NuGet flat-container index) before relying on an API seen in a sibling checkout.
+- `gh issue create` is blocked by the auto-mode classifier in autonomous sessions; record the follow-up in
+  the plan file and the final message and leave filing to the owner.
+
 ## 2026-10-29 — Issue #158: ground a protocol design choice in the spec and the reference stack first
 
 - I presented three revocation-scope designs (my own route scoping, a prefix variant, and the JS

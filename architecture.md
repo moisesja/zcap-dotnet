@@ -120,7 +120,14 @@ EcdsaSecp256r1Signature2019 suites. `ZcapSuiteCatalog` binds proof type, key typ
 context. `ProofSigningPayloadBuilder` supplies clone helpers and the test oracle.
 Signing bytes remain `SHA-256(RDFC(proofOptions)) || SHA-256(RDFC(document))`.
 `RdfcContextDocumentLoader` serves embedded contexts offline; `ZcapJsonOptions`
-provides consistent serialization and rejects duplicate JSON properties.
+provides consistent serialization and rejects duplicate JSON properties. A P-256 capability
+carries zcap-dotnet's own suite context, `urn:zcap-dotnet:ecdsa-secp256r1-2019-context:v1`
+(the ed25519-2020/v1 shape with the P-256 suite and key type names), because no suite context
+is published for `EcdsaSecp256r1Signature2019` (#159). It defines the same terms as the published
+definitions of the type, so the signed N-Quads do not depend on it. `ZcapSuiteCatalog.ContextUrls`
+drives the loader and the caveat reserved terms, and a test loads every catalog context. The
+DataProofs legacy suites also accept a JCS-variant proof of the same type; zcap never produces
+one, and the acceptance is pinned until DataProofs lets a verifier refuse it.
 
 The DI verifier requires expected action/targets and can pin root IDs. It validates
 the application context before trusting the proof so invocation fields cannot be

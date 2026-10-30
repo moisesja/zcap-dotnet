@@ -44,7 +44,10 @@ Community Group draft; interoperability claims are limited to the tested cases.
 - **Proofs** use RDFC-1.0 with `Ed25519Signature2020` or
   `EcdsaSecp256r1Signature2019`. Use the shared DataProofs/NetCrypto foundation;
   do not implement crypto or canonicalization inside zcap. Modernized v0.4 examples
-  do not mandate a suite migration. Golden vectors pin supported proof bytes.
+  do not mandate a suite migration. Golden vectors pin supported proof bytes. P-256 is a
+  zcap-dotnet-only profile (#159): its capabilities carry `urn:zcap-dotnet:ecdsa-secp256r1-2019-context:v1`,
+  because no suite context is published for the type (the `…/suites/ecdsa-2019/v1` URL never
+  resolved). Every `ZcapSuiteCatalog` context must be served by `RdfcContextDocumentLoader`.
 - **Chains** are exactly `[rootId]` for the first delegation and
   `[rootId, ...ancestorIds, {immediateParent}]` for deeper links. Each delegation
   requires parent-controller authorization. Validate every link before granting

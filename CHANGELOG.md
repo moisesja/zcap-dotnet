@@ -130,6 +130,25 @@ Planned as 6.0.0 (breaking: new interface/constructor parameters and in-stack si
 
 ### Fixed
 
+- **P-256 (`EcdsaSecp256r1Signature2019`) could not sign or RDFC-verify (#159).** The suite catalog
+  advertised it with `https://w3id.org/security/suites/ecdsa-2019/v1`, a URL from the 2022 CG draft
+  that was never published, so the offline context loader failed closed and every P-256 delegation,
+  invocation and revocation failed with `ProofGenerationException`. A P-256 capability now carries
+  zcap-dotnet's own suite context, `urn:zcap-dotnet:ecdsa-secp256r1-2019-context:v1` (the
+  `ed25519-2020/v1` shape with the P-256 suite and key type names, embedded and never fetched). It
+  defines the same terms as the published definitions of the type (`security/v2`, `credentials/v1`),
+  so the signed N-Quads do not depend on the choice; the unpublished URL is no longer a supported
+  context. P-256 remains a zcap-dotnet-only profile. New tests sign and verify P-256 delegation, chain
+  verification, envelope and Data Integrity invocation, revocation, a mixed Ed25519/P-256 chain and the
+  suite-context binding; golden vectors pin the fixed-key did:key, the RDFC-1.0 signing payload and a
+  frozen proof. Caveat registration now reserves the terms of every catalog suite context and fails
+  loudly when the loader cannot serve one (it silently skipped the P-256 context). The test
+  `InMemoryDidProvider` holds P-256 keys.
+- **JCS-variant verification is pinned (#159).** DataProofs 1.5.0's legacy suites also verify a proof
+  made with their JCS variant (the variants share a proof type). zcap never produces one and the
+  fallback is not a forgery path, but it is wider than the RDFC-1.0 profile.
+  `LegacyProofCryptoVariantTests` pins the current acceptance for both suites; the fallback is turned
+  off once DataProofs ships `LegacyVariantVerification.ConstructedVariantOnly` (follow-up to #159).
 - A proof member DataProofs models with a fixed JSON type, given another type (`"domain": 123`,
   `"challenge": {}`), made the proof mapping throw. Verification reported `CouldNotVerify`, which is
   reserved for infrastructure faults, and logged it as one. The profile gate now refuses such a proof

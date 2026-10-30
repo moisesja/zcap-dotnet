@@ -26,8 +26,8 @@ internal sealed class LegacyProofCrypto
 {
     private const string ZcapContext = "https://w3id.org/zcap/v1";
 
-    // RDFC canonicalizer wired with zcap's offline context loader (serves zcap/v1 + ed25519-2020/v1,
-    // plus the generated context of each registered caveat type). RDFC-1.0 (W3C RDF Dataset
+    // RDFC canonicalizer wired with zcap's offline context loader (serves zcap/v1, the suite contexts,
+    // the revocation context and the generated context of each registered caveat type). RDFC-1.0 (W3C RDF Dataset
     // Canonicalization) is the ONLY canonicalization zcap supports — it is what makes proofs
     // interoperable with @digitalbazaar/zcap. Immutable, thread-safe.
     private readonly DataProofsRdfc.RdfcDocumentCanonicalizer _rdfCanonicalizer;
@@ -106,6 +106,12 @@ internal sealed class LegacyProofCrypto
         };
     }
 
+    // zcap signs RDFC-1.0 only. DataProofs 1.5.0's legacy suites verify the construction-time variant
+    // first and then fall back to the other, because the JCS and RDFC variants share the proof type:
+    // a proof made with DataProofs' JCS variant therefore still verifies here (#159). That is not a
+    // forgery path (JCS binds every member verbatim) and LegacyProofCryptoVariantTests pins it. Once
+    // DataProofs ships LegacyVariantVerification.ConstructedVariantOnly, construct both suites with
+    // it and flip that test (tracked follow-up to #159).
     private ICryptosuite Create(string proofType)
         => proofType == Ed25519Signature2020Cryptosuite.ProofType
             ? new Ed25519Signature2020Cryptosuite(LegacyCanonicalization.Rdfc, _rdfCanonicalizer)

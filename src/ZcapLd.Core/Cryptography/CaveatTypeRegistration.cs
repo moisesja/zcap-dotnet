@@ -1,7 +1,6 @@
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using DataProofsDotnet.Rdfc;
 using ZcapLd.Core.Models;
 
 namespace ZcapLd.Core.Cryptography;
@@ -87,24 +86,12 @@ internal sealed class CaveatTypeRegistration
     private static HashSet<string> LoadReservedTerms()
     {
         var terms = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var url in new[]
-                 {
-                     "https://w3id.org/zcap/v1",
-                     "https://w3id.org/security/suites/ed25519-2020/v1",
-                     "https://w3id.org/security/suites/ecdsa-2019/v1",
-                 })
+        // Every context a capability may carry besides caveat contexts: zcap/v1 and each supported
+        // suite's (#159). The loader must serve all of them. A supported suite whose context it cannot
+        // serve is a build defect, so this throws rather than silently reserving nothing for it.
+        foreach (var url in new[] { "https://w3id.org/zcap/v1" }.Concat(ZcapSuiteCatalog.ContextUrls))
         {
-            string content;
-            try
-            {
-                content = RdfcContextDocumentLoader.Instance.Load(new Uri(url)).Content;
-            }
-            catch (RdfCanonicalizationException)
-            {
-                continue; // A context the loader cannot serve cannot appear in a verified capability.
-            }
-
-            using var document = JsonDocument.Parse(content);
+            using var document = JsonDocument.Parse(RdfcContextDocumentLoader.Instance.Load(new Uri(url)).Content);
             Collect(document.RootElement);
         }
 

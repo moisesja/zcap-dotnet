@@ -6,10 +6,10 @@ namespace ZcapLd.Core.Cryptography;
 
 /// <summary>
 /// A DataProofs.Rdfc <see cref="IDocumentLoader"/> that serves ZCAP-LD's JSON-LD contexts
-/// (<c>zcap/v1</c>, <c>ed25519-2020/v1</c>, and zcap-dotnet's revocation context) from embedded
-/// assembly resources, delegating any
-/// other context to DataProofs' <see cref="OfflineDocumentLoader"/>. Offline and fail-closed:
-/// no ambient network I/O during signing or verification.
+/// (<c>zcap/v1</c>, <c>ed25519-2020/v1</c>, zcap-dotnet's P-256 suite context (#159) and its
+/// revocation context) from embedded assembly resources, delegating any other context to
+/// DataProofs' <see cref="OfflineDocumentLoader"/>. Offline and fail-closed: no ambient network I/O
+/// during signing or verification.
 /// </summary>
 /// <remarks>
 /// Serving zcap's own embedded context bytes — the exact resources the canonicalizer used before
@@ -44,6 +44,8 @@ internal sealed class RdfcContextDocumentLoader : IDocumentLoader
                 "ZcapLd.Core.Cryptography.Contexts.zcap-v1.jsonld",
             ["https://w3id.org/security/suites/ed25519-2020/v1"] =
                 "ZcapLd.Core.Cryptography.Contexts.ed25519-2020-v1.jsonld",
+            [ZcapSuiteCatalog.P256ContextUrl] =
+                "ZcapLd.Core.Cryptography.Contexts.ecdsa-secp256r1-2019-v1.jsonld",
             [RevocationContextUrl] =
                 "ZcapLd.Core.Cryptography.Contexts.zcap-dotnet-revocation-v1.jsonld",
         };
