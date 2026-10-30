@@ -457,6 +457,17 @@ public class VerificationService : IVerificationService
                     "Resolved key type does not match the delegation proof's suite.");
             }
 
+            // The chain path's context-shape rule (R-CTX-2) applies on this path too (#159 review): the
+            // proof's terms are defined only by the signing suite's context, so the capability must list
+            // zcap/v1 first and that context. The triples are the same either way, so this precedes the
+            // signature check rather than relying on DataProofs' data-loss refusal.
+            var capabilityContext = AsArrayContext(capability.Context);
+            if (capabilityContext is null || capabilityContext.Count == 0 || capabilityContext[0] != ZcapV1Context ||
+                !capabilityContext.Contains(suite.ContextUrl))
+                return VerificationResult.Fail(VerificationOutcome.MalformedCapability,
+                    $"Delegated capability '{capability.Id}' @context MUST be an array beginning with \"{ZcapV1Context}\" " +
+                    $"and include the signing suite context '{suite.ContextUrl}'.");
+
             var capabilityWithoutProof = ProofSigningPayloadBuilder.CloneCapabilityWithoutProof(capability);
 
             if (!_legacyProofCrypto.Verify(capabilityWithoutProof, proof, resolvedKey))

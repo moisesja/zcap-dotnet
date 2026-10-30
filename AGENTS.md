@@ -22,7 +22,8 @@ Community Group draft; interoperability claims are limited to the tested cases.
 - **Native restrictions** use `expires`, `allowedAction` and target narrowing. Without a
   `CaveatTypeRegistry`, reject `caveat`, `https://w3id.org/security#caveat` and
   `sec:caveat`, including null/empty values, ancestors and extension JSON. In every profile,
-  capability/proof JSON may not use `:` keys or keywords other than `@context`: `@nest`,
+  capability/proof JSON may not use `:` keys or keywords other than `@context`, and a proof may not
+  carry `@context` at all (it is canonicalized under the document's, so its own is never signed): `@nest`,
   `@included` or a full-IRI key restates a signed term the model does not read, which let a holder
   drop its own `allowedAction`. Capability/proof contexts are limited to zcap/v1, supported suite
   contexts and registered caveat contexts; inline aliases and unrelated vocabularies are rejected.

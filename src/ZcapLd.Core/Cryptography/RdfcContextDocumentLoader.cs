@@ -36,8 +36,11 @@ internal sealed class RdfcContextDocumentLoader : IDocumentLoader
     /// </summary>
     internal const string RevocationContextUrl = "urn:zcap-dotnet:revocation-context:v1";
 
-    // Context URL → embedded resource name. Ordinal keying so URL matching is exact. The suite entries
-    // come from the catalog (#159), so a suite the catalog advertises is always one this loader serves.
+    // Context URL → embedded resource name, keyed ordinally on Uri.AbsoluteUri. System.Uri has already
+    // normalized the lookup key (scheme case, surrounding whitespace, percent-encoded unreserved
+    // characters), so a few spellings of a URL map to one resource; the bytes served are the same, and
+    // the profile admits only the exact spelling on a capability. The suite entries come from the
+    // catalog (#159), so a suite the catalog advertises is always one this loader serves.
     private static readonly IReadOnlyDictionary<string, string> ResourceByUrl = BuildResourceMap();
 
     private static Dictionary<string, string> BuildResourceMap()

@@ -86,10 +86,12 @@ internal sealed class CaveatTypeRegistration
     private static HashSet<string> LoadReservedTerms()
     {
         var terms = new HashSet<string>(StringComparer.Ordinal);
-        // Every context a capability may carry besides caveat contexts: zcap/v1 and each supported
-        // suite's (#159). The loader must serve all of them. A supported suite whose context it cannot
-        // serve is a build defect, so this throws rather than silently reserving nothing for it.
-        foreach (var url in new[] { ZcapSuiteCatalog.ZcapContextUrl }.Concat(ZcapSuiteCatalog.ContextUrls))
+        // Every context zcap canonicalizes under besides caveat contexts: zcap/v1, each supported suite's
+        // (#159) and the revocation context. The loader must serve all of them. A supported context it
+        // cannot serve is a build defect, so this throws rather than silently reserving nothing for it.
+        foreach (var url in new[] { ZcapSuiteCatalog.ZcapContextUrl }
+                     .Concat(ZcapSuiteCatalog.ContextUrls)
+                     .Append(RdfcContextDocumentLoader.RevocationContextUrl))
         {
             string content;
             try

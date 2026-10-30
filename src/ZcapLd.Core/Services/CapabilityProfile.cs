@@ -27,6 +27,9 @@ internal static class CapabilityProfile
         "domain, challenge or nonce that is not a string).";
     internal const string InspectionLimitMessage =
         "Capability/proof inspection exceeds the depth (64) or visited-value (65536) limit.";
+    internal const string ProofContextMessage =
+        "A proof may not carry its own @context: proofs are canonicalized under the document's context, so a " +
+        "proof-level @context is never signed.";
 
     // Expanded and prefixed forms of the zcap/v1 caveat term are never accepted: only the compact
     // key at capability level, checked against registered types, can carry a caveat.
@@ -142,13 +145,17 @@ internal static class CapabilityProfile
             return true;
         }
 
-        // Proof extensions. A revocation's metadata is a JSON literal under the revocation context:
-        // its member names are data, not JSON-LD keys.
+        // Proof extensions. A proof carries no @context of its own: it is canonicalized under the
+        // document's, so one on the wire is unsigned under RDFC (DataProofs replaces it) and unread, and
+        // is refused (#159 review). A revocation's metadata is a JSON literal under the revocation
+        // context: its member names are data, not JSON-LD keys.
         bool CheckProperties(Dictionary<string, JsonElement>? properties, int depth)
             => properties == null || properties.All(property =>
-                property.Key == Proof.RevocationMetadataField
-                    ? property.Value.ValueKind == JsonValueKind.Object
-                    : CheckProperty(property.Key, property.Value, depth));
+                property.Key == "@context"
+                    ? Fail(Malformed(ProofContextMessage))
+                    : property.Key == Proof.RevocationMetadataField
+                        ? property.Value.ValueKind == JsonValueKind.Object
+                        : CheckProperty(property.Key, property.Value, depth));
 
         bool CheckProperty(string name, JsonElement value, int depth)
         {

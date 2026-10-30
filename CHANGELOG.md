@@ -31,6 +31,13 @@ Planned as 6.0.0 (breaking: new interface/constructor parameters and in-stack si
 
 ### Security
 
+- A proof may no longer carry its own `@context` (#159 adversarial review). Proofs are canonicalized
+  under the document's context and DataProofs replaces a proof-level one before RDFC, so the member
+  was accepted on the wire but never signed or read. It is now refused on every path (delegation,
+  envelope and Data Integrity invocation, signed revocation), at signing as well as verification. The
+  standalone proof path (`VerifyCapabilityProofAsync`) now applies the chain path's context-shape rule:
+  a delegated capability must list zcap/v1 first and the signing suite's context. Caveat type and
+  parameter names also reserve the revocation context's terms.
 - Envelope invocations and signed revocation requests were canonicalized under `zcap/v1` only.
   That context does not define `created`, `proofPurpose` or `verificationMethod`, so RDFC
   dropped them from the signature: a captured request could be re-stamped to pass the #71
@@ -145,8 +152,9 @@ Planned as 6.0.0 (breaking: new interface/constructor parameters and in-stack si
   loudly when the loader cannot serve one (it silently skipped the P-256 context). The test
   `InMemoryDidProvider` holds P-256 keys.
 - **JCS-variant verification is pinned (#159).** DataProofs 1.5.0's legacy suites also verify a proof
-  made with their JCS variant (the variants share a proof type). zcap never produces one and the
-  fallback is not a forgery path, but it is wider than the RDFC-1.0 profile.
+  made with their JCS variant (the variants share a proof type), including one over a document carrying
+  members no context defines. zcap never produces one and the fallback is not a forgery path (JCS binds
+  every member verbatim), but it is wider than the RDFC-1.0 profile.
   `LegacyProofCryptoVariantTests` pins the current acceptance for both suites; the fallback is turned
   off once DataProofs ships `LegacyVariantVerification.ConstructedVariantOnly` (follow-up to #159).
 - A proof member DataProofs models with a fixed JSON type, given another type (`"domain": 123`,

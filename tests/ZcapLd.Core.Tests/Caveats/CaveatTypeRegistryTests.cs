@@ -102,6 +102,8 @@ public class CaveatTypeRegistryTests
     [InlineData("Ed25519Signature2020")]
     [InlineData("EcdsaSecp256r1Signature2019")]
     [InlineData("EcdsaSecp256r1VerificationKey2019")]
+    [InlineData("capabilityRevocation")]
+    [InlineData("revocationReason")]
     public void Register_ReservedTypeName_Throws(string type)
     {
         var act = () => new CaveatTypeRegistry().Register<EpsilonBudgetCaveat>(type);
