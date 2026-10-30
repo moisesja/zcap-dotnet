@@ -6,26 +6,36 @@ namespace ZcapLd.Core.Services;
 /// Pluggable persistence abstraction for capability revocation records.
 /// </summary>
 /// <remarks>
-/// Capability ids are keys compared <b>ordinally</b>: exact, case-sensitive, with no Unicode or
-/// percent-encoding normalization, as everywhere else in the verifier. A backend whose keys compare
-/// case-insensitively or normalize (for example SQL Server's or MySQL's default collations) maps
-/// distinct ids onto one record, so a revocation recorded for one id would apply to another. Use a
-/// binary or case-sensitive collation, as the in-memory store and the SQLite demo do.
+/// Records are keyed by <see cref="RevocationRecord.Key"/> <b>only</b>: an opaque lowercase hex digest
+/// of the capability id and its <see cref="RevocationScope"/> (#158). A store must never key, merge or
+/// look records up by the bare capability id: two records for one id in different scopes are
+/// distinct, and a backend whose primary key is the capability id would let a record written under an
+/// attacker's scope overwrite a legitimate one. Store every field of the record and return it
+/// unchanged; <see cref="RevocationService"/> refuses a returned record whose key it did not request
+/// or whose stored id and scope disagree with its key, and reads each record back after writing it,
+/// so a store that drops or rewrites the scope fails verification closed instead of widening a
+/// revocation. Keys are fixed-width hex, so collation does not matter, but compare them exactly. A
+/// lookup asks for a few dozen keys at most (two per chain link). The store must be read-your-writes
+/// for the writer: the service reads a record back immediately after <see cref="UpsertAsync"/>, so an
+/// eventually consistent backend fails that revocation (the request can be retried; its nonce is not
+/// consumed). <see cref="DeleteAsync"/> is called during verification to evict an expired record, so a
+/// read-only replica fails such a verification closed (<c>CouldNotVerify</c>).
 /// </remarks>
 public interface IRevocationStore
 {
     /// <summary>
-    /// Inserts or updates a revocation record.
+    /// Inserts or replaces the record stored under <see cref="RevocationRecord.Key"/>.
     /// </summary>
     Task UpsertAsync(RevocationRecord record, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Gets a revocation record by capability ID.
+    /// Gets the records stored under any of <paramref name="keys"/>, each at most once and in any
+    /// order. Unknown keys contribute nothing.
     /// </summary>
-    Task<RevocationRecord?> GetByCapabilityIdAsync(string capabilityId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<RevocationRecord>> GetAsync(IReadOnlyCollection<string> keys, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Deletes a revocation record by capability ID.
+    /// Deletes the record stored under <paramref name="key"/>, if any.
     /// </summary>
-    Task DeleteAsync(string capabilityId, CancellationToken cancellationToken = default);
+    Task DeleteAsync(string key, CancellationToken cancellationToken = default);
 }

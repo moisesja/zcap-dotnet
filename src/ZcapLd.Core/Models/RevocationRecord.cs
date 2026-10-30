@@ -1,17 +1,34 @@
+using System.Text.Json.Serialization;
+
 namespace ZcapLd.Core.Models;
 
 /// <summary>
-/// Persisted revocation record for a capability ID.
+/// Persisted revocation record for one capability id in one <see cref="RevocationScope"/> (#158).
 /// </summary>
 public sealed record RevocationRecord
 {
     /// <summary>
     /// Capability ID that has been revoked.
     /// </summary>
-    public string CapabilityId { get; init; } = string.Empty;
+    public required string CapabilityId { get; init; }
 
     /// <summary>
-    /// Optional root capability ID associated with the revoked capability.
+    /// The scope the record applies in. A chain link is revoked by a record for its id only in the
+    /// link's own scope or in <see cref="RevocationScope.Unscoped"/>.
+    /// </summary>
+    public required RevocationScope Scope { get; init; }
+
+    /// <summary>
+    /// The store key: <see cref="RevocationScope.KeyFor"/> over <see cref="CapabilityId"/>. Stores
+    /// insert, look up and delete records by this value alone. It is an opaque lowercase hex digest,
+    /// so no bare id is ever a key and a case-insensitive collation cannot merge two records.
+    /// </summary>
+    [JsonIgnore]
+    public string Key => Scope.KeyFor(CapabilityId);
+
+    /// <summary>
+    /// The root of the chain the revocation was authorized on, when known. Informational: it is not
+    /// part of the key and never an authorization input.
     /// </summary>
     public string? RootCapabilityId { get; init; }
 

@@ -49,10 +49,12 @@ share authoritative revocation state; there is no automatic polling of a URI
 supplied by a capability holder. `INonceStore` must likewise be shared when replay
 protection spans verifier instances.
 
-Revocation records are keyed by bare capability id. Only roots the revoking verifier
-resolves are anchored, so anyone with a valid chain under any trusted root can force-revoke
-other ids, including delegated ids under other roots and custom root ids trusted by another
-verifier sharing the store. See [Revocation scope](https://github.com/moisesja/zcap-dotnet/blob/main/architecture.md#revocation-scope-known-limitation).
+Revocation records are keyed by the capability id and a `RevocationScope`: the delegator that
+signed the capability (the DID of its delegation proof's verification method, as
+`bedrock-zcap-storage` keys them), the root, or, for migrated 5.x and operator records only,
+every chain. A forged copy of an id under another chain lands in the forger's scope, where no
+genuine chain looks. Custom `IRevocationStore`s key rows by `RevocationRecord.Key`, never by the
+id. See [Revocation scope](https://github.com/moisesja/zcap-dotnet/blob/main/architecture.md#revocation-scope).
 
 See [the repository](https://github.com/moisesja/zcap-dotnet) for the full guide,
 policy options, examples and live JavaScript interoperability tests.

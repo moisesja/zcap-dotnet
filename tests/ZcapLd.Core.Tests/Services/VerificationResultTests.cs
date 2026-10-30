@@ -97,7 +97,13 @@ public class VerificationResultTests
         var verifier = new VerificationService(
             _didProvider, revocationService);
         var (_, delegated) = await BuildValidDelegationAsync("did:key:z6MkRevRoot", "did:key:z6MkRevChild", new[] { "read" });
-        await revocationService.RevokeAsync(new RevocationRequest { CapabilityId = delegated.Id, RevokedBy = "did:key:z6MkRevRoot" });
+        // Recorded in the scope the chain path looks the link up under: its delegator (#158).
+        await revocationService.RevokeAsync(new RevocationRequest
+        {
+            CapabilityId = delegated.Id,
+            Scope = RevocationScope.Delegated("did:key:z6MkRevRoot"),
+            RevokedBy = "did:key:z6MkRevRoot"
+        });
 
         var result = await verifier.VerifyCapabilityChainDetailedAsync(delegated);
 

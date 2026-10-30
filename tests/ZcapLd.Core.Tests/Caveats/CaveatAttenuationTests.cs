@@ -158,6 +158,9 @@ public class CaveatAttenuationTests
         var chain = await _bed.BuildChainAsync();
         var holder = _bed.Keys.GenerateDidKey();
         // The orchestrator embeds a copy of its grant with the budget stripped and signs a caveat-free child.
+        // The stripped copy no longer matches its own proof, so both paths reject it on the parent's
+        // signature: the standalone path authenticates each embedded ancestor's proof before trusting it
+        // (#158), which is stronger than the CaveatEnforcementRequired it reported before.
         var stripped = CapabilityJson.Edit(chain.Orchestrator, json =>
         {
             json.Remove("caveat");
@@ -165,8 +168,7 @@ public class CaveatAttenuationTests
         });
         var child = await SignAsync(Child(stripped, holder), chain.OrchestratorDid, new object[] { chain.Root.Id, stripped });
 
-        (await _bed.Verifier.VerifyCapabilityProofDetailedAsync(child)).Outcome
-            .Should().Be(VerificationOutcome.CaveatEnforcementRequired);
+        (await _bed.Verifier.VerifyCapabilityProofDetailedAsync(child)).Outcome.Should().Be(VerificationOutcome.InvalidSignature);
         (await _bed.Verifier.VerifyCapabilityChainDetailedAsync(child)).Outcome.Should().Be(VerificationOutcome.InvalidSignature);
     }
 

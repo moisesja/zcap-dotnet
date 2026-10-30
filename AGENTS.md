@@ -64,9 +64,12 @@ Community Group draft; interoperability claims are limited to the tested cases.
   Revocation requests must prove possession of an authorized key. A root revocation is
   authorized against the trusted resolved root, never the request's copy; whether an id is a
   root is decided by the resolver/explicit root, not by the request's shape. An explicit root
-  admits only itself or chains ending at it. Records are keyed by bare id, so any trusted chain
-  can revoke non-root ids across roots and shared stores (architecture.md, "Revocation scope");
-  never describe that limitation as sibling-only. Distribution to
+  admits only itself or chains ending at it. Records are scoped (#158): `Delegated(delegator)`
+  for a delegated capability (the DID of the verification method that signed its delegation
+  proof, as `bedrock-zcap-storage` keys them), `Root` for a root, `Unscoped` only for migrated
+  5.x and operator records. Look a link up after its proof verifies, under that proof's
+  delegator; never key, memoize or delete revocation by bare id; never let the signed path
+  write `Unscoped` (architecture.md, "Revocation scope"). Distribution to
   independent verifiers is a deployment responsibility. HTTP-signature invocation
   transport (#119), gRPC hosting and WASM remain separate work.
 
@@ -185,10 +188,11 @@ bash interop/run-interop.sh
 - **ASP.NET**: `AddZcapServices` registers verification and the service graph;
   `AddZcapDidSigner<T>`, `AddZcapDidResolver<T>`, `AddZcapRootCapabilityResolver<T>`,
   `AddZcapRevocationSupport` and `AddZcapReplayProtection` provide integrations.
-  Revocation POST verifies a signed request and caps the body at 1 MB. Anonymous GET
-  returns only `capabilityId` and `isRevoked`. No capability-controlled HTTP fetch occurs.
-  Both endpoints take `encodeURIComponent(capabilityId)` and decode it exactly once from the
-  raw request target (the route value is already decoded except `%2F`; never decode it again).
+  Revocation POST verifies a signed request and caps the body at 1 MB. There is no status
+  GET: the spec and the JS stack define only the POST, and a scoped record has no bare-id
+  status. No capability-controlled HTTP fetch occurs. The endpoint takes
+  `encodeURIComponent(capabilityId)` and decodes it exactly once from the raw request target
+  (the route value is already decoded except `%2F`; never decode it again).
 
 ## Workflow Orchestration
 

@@ -285,15 +285,15 @@ public class VerificationService : IVerificationService
             return VerificationResult.Fail(VerificationOutcome.MalformedCapability,
                 $"Capability id {CanonicalIri.RequirementMessage}.");
 
-        if (await IsCapabilityRevokedAsync(capability.Id))
-        {
-            return VerificationResult.Fail(VerificationOutcome.Revoked,
-                $"Capability '{capability.Id}' has been revoked.");
-        }
-
         // Root capabilities have no proof
         if (string.IsNullOrEmpty(capability.ParentCapability))
         {
+            if (await IsCapabilityRevokedAsync(capability.Id, RevocationScope.Root))
+            {
+                return VerificationResult.Fail(VerificationOutcome.Revoked,
+                    $"Capability '{capability.Id}' has been revoked.");
+            }
+
             // Root capability should NOT have a proof
             return capability.Proof == null
                 ? VerificationResult.Valid
@@ -301,46 +301,94 @@ public class VerificationService : IVerificationService
                     "Root capability MUST NOT include a delegation proof.");
         }
 
-        // Honour ANCESTOR revocation on the standalone path (Issue #63). VerifyCapabilityChainAsync
-        // resolves and revocation-checks every link, but this single-proof path resolves only the
-        // immediate parent. The remaining ancestors (root + every intermediate) are present in the
-        // delegation proof's capabilityChain as id strings (the immediate parent as the embedded
-        // object), so sweep the WHOLE chain and reject if ANY ancestor has been revoked — so a
-        // revoked root/grandparent fails here too, matching the chain path (the earlier depth-1 fix).
-        // Any delegation proof in a set may be the one that verifies, so sweep every proof's chain:
-        // sweeping only the first let a junk first proof hide a revoked ancestor (#157).
-        foreach (var delegationProof in capability.Proof?.DelegationProofs() ?? Enumerable.Empty<Proof>())
-        {
-            if (delegationProof.CapabilityChain?.Any(entry => !CanonicalIri.IsCanonical(ExtractCapabilityId(entry))) == true)
-                return VerificationResult.Fail(VerificationOutcome.MalformedCapability,
-                    $"Every capabilityChain id {CanonicalIri.RequirementMessage}.");
-
-            if (await IsAnyAncestorRevokedAsync(delegationProof.CapabilityChain))
-            {
-                return VerificationResult.Fail(VerificationOutcome.Revoked,
-                    "An ancestor capability in the delegation chain has been revoked.");
-            }
-        }
-
         try
         {
-            // Standalone proof verification requires parent authorization context. For a first-level
-            // delegation the parent is the root (referenced by id only), obtained via explicitRoot or
-            // the configured resolver inside VerifySingleDelegationProofAsync.
-            var result = await VerifyDelegationProofAsync(
-                capability,
-                parentCapabilityOverride: null,
-                requireParentAuthorization: true,
-                explicitRoot: explicitRoot);
+            // Per ZCAP-LD v0.4.0 a delegated zcap's proof may be a set; the capability is valid if at least
+            // one delegation proof verifies. Each proof is a candidate evaluated on its own, as the chain
+            // walk evaluates each chain a proof set names: the link is verified first (signature, parent
+            // authorization, attenuation, expiry), then the ancestry that proof names is authenticated and
+            // swept for revocation (#63, #158), and the first candidate passing both wins. A proof that
+            // fails never vetoes another (PR #162 review); when every candidate fails the result is a
+            // revocation found on any verified route, else the last failure (Issue #70). Revocation is
+            // swept per candidate because the proof that verifies may be any of them, and a junk proof
+            // must neither hide nor force a revocation (#157).
+            VerificationResult? revokedResult = null;
+            var last = capability.Proof is null
+                ? VerificationResult.Fail(VerificationOutcome.MalformedCapability, "Delegated capability is missing a proof.")
+                : VerificationResult.Fail(VerificationOutcome.InvalidDelegation, "No capabilityDelegation proof could be verified.");
+            foreach (var delegationProof in capability.Proof?.DelegationProofs() ?? Enumerable.Empty<Proof>())
+            {
+                if (delegationProof.CapabilityChain?.Any(entry => !CanonicalIri.IsCanonical(ExtractCapabilityId(entry))) == true)
+                {
+                    last = VerificationResult.Fail(VerificationOutcome.MalformedCapability,
+                        $"Every capabilityChain id {CanonicalIri.RequirementMessage}.");
+                    continue;
+                }
 
-            // A single link never authorizes caveats: only invocation verification enforces them
-            // (#157). Below the first level the embedded parent's own proof is not verified here,
-            // so its caveats (and its parent's) cannot be trusted to be absent: with caveats
-            // enabled, such a link is never reported as valid on its own.
-            var mayCarryCaveats = capability.AdditionalProperties?.ContainsKey(CaveatCodec.Property) == true ||
-                (_caveats is { IsEmpty: false } &&
-                 capability.Proof?.DelegationProofs().Any(proof => proof.CapabilityChain is { Length: > 1 }) == true);
-            return result.IsValid && mayCarryCaveats ? CaveatEnforcementRequired(grants: null) : result;
+                // 1. The link itself. For a first-level delegation the parent is the root (referenced by
+                // id only), obtained via explicitRoot or the configured resolver inside
+                // VerifySingleDelegationProofAsync.
+                var link = await VerifySingleDelegationProofAsync(
+                    capability, delegationProof, parentCapabilityOverride: null,
+                    requireParentAuthorization: true, explicitRoot);
+                if (!link.IsValid)
+                {
+                    last = link;
+                    continue;
+                }
+
+                // 2. Revocation of the leaf and of every ancestor this proof names, each under the
+                // delegator of a proof that has verified (SweepStandaloneRouteAsync). A co-signed ancestor
+                // yields one route per co-signer; a route is rejected only when one of its own links is
+                // revoked, and the first unrevoked route is accepted, as the chain walk accepts the first
+                // unrevoked chain. Routes are checked in proof order, depth first.
+                var (sweepFailure, routes, truncated) = await SweepStandaloneRouteAsync(capability, delegationProof, explicitRoot);
+                if (sweepFailure is not null)
+                {
+                    last = sweepFailure;
+                    continue;
+                }
+
+                VerificationResult? routeRevoked = null;
+                foreach (var route in routes)
+                {
+                    if (await _revocationService.FindRevocationAsync(route) is { } revoked)
+                    {
+                        routeRevoked = VerificationResult.Fail(VerificationOutcome.Revoked,
+                            string.Equals(revoked.CapabilityId, capability.Id, StringComparison.Ordinal)
+                                ? $"Capability '{capability.Id}' has been revoked."
+                                : "An ancestor capability in the delegation chain has been revoked.");
+                        continue;
+                    }
+
+                    routeRevoked = null;
+                    break;
+                }
+
+                if (routeRevoked is not null)
+                {
+                    // Every enumerated route is revoked. When the enumeration was cut at the candidate bound
+                    // the status is not fully known, which fails closed as the chain walk does; otherwise a
+                    // revocation found on a verified route is reported over any other candidate's failure,
+                    // so a junk proof in the set cannot mask it in the outcome.
+                    if (truncated)
+                        last = VerificationResult.Fail(VerificationOutcome.InvalidDelegation,
+                            $"None of the first {MaxChainCandidates} routes named by the delegation proof's ancestry is unrevoked.");
+                    else
+                        last = revokedResult = routeRevoked;
+                    continue;
+                }
+
+                // A single link never authorizes caveats: only invocation verification enforces them
+                // (#157). Below the first level the ancestors' caveats are checked for integrity but not
+                // for policy here, so with caveats enabled such a link is never reported as valid on its own.
+                var mayCarryCaveats = capability.AdditionalProperties?.ContainsKey(CaveatCodec.Property) == true ||
+                    (_caveats is { IsEmpty: false } &&
+                     capability.Proof?.DelegationProofs().Any(proof => proof.CapabilityChain is { Length: > 1 }) == true);
+                return mayCarryCaveats ? CaveatEnforcementRequired(grants: null) : link;
+            }
+
+            return revokedResult ?? last;
         }
         catch (Exception ex)
         {
@@ -352,51 +400,6 @@ public class VerificationService : IVerificationService
                 "VerifyCapabilityProofAsync failed closed for capability {CapabilityId}", capability.Id);
             return VerificationResult.Fail(VerificationOutcome.CouldNotVerify, ex.Message);
         }
-    }
-
-    /// <summary>
-    /// Verifies a delegated capability proof, optionally using an already-resolved parent. Returns the
-    /// outcome of the first delegation proof that fully verifies, otherwise the most-recent failure
-    /// reason (Issue #70).
-    /// </summary>
-    private async Task<VerificationResult> VerifyDelegationProofAsync(
-        Capability capability,
-        Capability? parentCapabilityOverride,
-        bool requireParentAuthorization,
-        Capability? explicitRoot = null,
-        bool applyCreatedCheck = true,
-        bool applyCaveatPolicy = true)
-    {
-        if (capability.Proof == null)
-        {
-            return VerificationResult.Fail(VerificationOutcome.MalformedCapability,
-                "Delegated capability is missing a proof.");
-        }
-
-        // Per ZCAP-LD v0.4.0 a delegated zcap's proof may be an array; it is valid if AT LEAST
-        // ONE capabilityDelegation proof fully verifies (signature + parent authorization +
-        // chain). Try each delegation proof in turn — a single proof's failure (unsupported
-        // suite, unresolvable key, bad signature, unauthorized signer) must not reject the
-        // others, and non-delegation proofs in the set are simply ignored here. When every proof
-        // fails, surface the last specific reason (the common single-proof case is exact). Each
-        // proof resolves its own parent from its own capabilityChain. (The chain walk does not come
-        // here: it verifies each link with the proof whose chain it followed.)
-        var lastFailure = VerificationResult.Fail(VerificationOutcome.InvalidDelegation,
-            "No capabilityDelegation proof could be verified.");
-        foreach (var proof in capability.Proof.DelegationProofs())
-        {
-            var result = await VerifySingleDelegationProofAsync(
-                capability, proof, parentCapabilityOverride, requireParentAuthorization, explicitRoot,
-                applyCreatedCheck, applyCaveatPolicy);
-            if (result.IsValid)
-            {
-                return result;
-            }
-
-            lastFailure = result;
-        }
-
-        return lastFailure;
     }
 
     private async Task<VerificationResult> VerifySingleDelegationProofAsync(
@@ -461,9 +464,9 @@ public class VerificationService : IVerificationService
                     "Delegation proof signature did not verify.");
 
             // Signature is valid; now enforce parent authorization. Revocation is checked by the
-            // entry points, not here: VerifyBuiltChainAsync sweeps every link, and the standalone
-            // VerifyCapabilityProofAsync sweeps the full ancestry via IsAnyAncestorRevokedAsync
-            // (Issue #63), so a single delegation proof's check stays independent of chain state.
+            // entry points, not here: VerifyBuiltChainAsync sweeps every verified link, and the
+            // standalone VerifyCapabilityProofAsync sweeps each proof's chain (StandaloneRevocationLookups;
+            // Issue #63), so a single delegation proof's check stays independent of chain state.
             if (requireParentAuthorization &&
                 (parentCapability == null || parentCapability.Controller is null || parentCapability.Controller.IsEmpty))
             {
@@ -1167,7 +1170,7 @@ public class VerificationService : IVerificationService
     /// Verifies an already-built root→leaf capability chain: length bound, per-link revocation,
     /// per-link delegation proof / attenuation / expiry, and root shape.
     /// Fully fail-closed — any unexpected failure yields <c>false</c>. Callers that have already
-    /// built the chain (e.g. <see cref="IsRevokerAuthorizedAsync"/>, <see cref="VerifyInvocationAsync(Invocation, Capability)"/>)
+    /// built the chain (e.g. <see cref="AuthorizeRevocationAsync"/>, <see cref="VerifyInvocationAsync(Invocation, Capability)"/>)
     /// pass it here to avoid a redundant rebuild.
     /// <para>
     /// <paramref name="applyExpirationCeiling"/> gates the opt-in verifier-side 3-month delegated
@@ -1203,7 +1206,9 @@ public class VerificationService : IVerificationService
                     $"Delegation chain length {chain.Count} exceeds the maximum of {MaxChainLength}.");
             }
 
-            // 2. Revocation check for all capabilities in the chain.
+            // 2. Profile check for every capability in the chain. Revocation is step 5, after each link's
+            // proof has verified: a record is scoped to the delegator that signed the link, and only a
+            // verified proof says who that is (#158).
             foreach (var chainCapability in chain)
             {
                 if (!search.Validated.Contains(chainCapability))
@@ -1211,14 +1216,6 @@ public class VerificationService : IVerificationService
                     if (CapabilityProfile.Validate(chainCapability, caveats: _caveats) is { } profileFailure)
                         return profileFailure;
                     search.Validated.Add(chainCapability);
-                }
-
-                if (!search.Revoked.TryGetValue(chainCapability.Id, out var revoked))
-                    search.Revoked[chainCapability.Id] = revoked = await IsCapabilityRevokedAsync(chainCapability.Id);
-                if (revoked)
-                {
-                    return VerificationResult.Fail(VerificationOutcome.Revoked,
-                        $"Capability '{chainCapability.Id}' in the chain has been revoked.");
                 }
             }
 
@@ -1338,6 +1335,17 @@ public class VerificationService : IVerificationService
                 return VerificationResult.Fail(VerificationOutcome.MalformedCapability,
                     "Root capability MUST NOT include a delegation proof.");
 
+            // 5. Revocation for every link in one store read (#158): the root in the root scope and each
+            // delegated link under the delegator of the proof that just verified it, the scope the signed
+            // revocation path records in. An unscoped (legacy or operator) record for any id in the chain
+            // also revokes it. Deliberately not memoized across candidates by bare id: a record is per
+            // (id, scope), and a junk proof naming another delegator must not shadow the genuine answer.
+            if (await _revocationService.FindRevocationAsync(ChainRevocationLookups(chain, linkProofs)) is { } revoked)
+            {
+                return VerificationResult.Fail(VerificationOutcome.Revoked,
+                    $"Capability '{revoked.CapabilityId}' in the chain has been revoked.");
+            }
+
             return VerificationResult.Valid;
         }
         catch (Exception ex)
@@ -1376,8 +1384,8 @@ public class VerificationService : IVerificationService
     /// <summary>
     /// Work shared by the candidates of one chain search. Candidates usually share their links (the
     /// proofs of a set embed copies of the same ancestors), so each result is computed once per call:
-    /// a link's verification by the RFC 8785 content of child, proof and parent, revocation status and
-    /// roots by id, profile validation by reference, and the controllers already refused for a revoker.
+    /// a link's verification by the RFC 8785 content of child, proof and parent, roots by id, profile
+    /// validation by reference, and the controllers already refused for a revoker.
     /// Everything memoized depends only on that input and on verifier state that is fixed for the call.
     /// </summary>
     private sealed class ChainSearch
@@ -1385,7 +1393,6 @@ public class VerificationService : IVerificationService
         private readonly Dictionary<object, string> _contentKeys = new(ReferenceEqualityComparer.Instance);
 
         public Dictionary<string, VerificationResult> Links { get; } = new(StringComparer.Ordinal);
-        public Dictionary<string, bool> Revoked { get; } = new(StringComparer.Ordinal);
         public Dictionary<string, Capability> Roots { get; } = new(StringComparer.Ordinal);
         public HashSet<Capability> Validated { get; } = new(ReferenceEqualityComparer.Instance);
         public HashSet<string> RefusedControllers { get; } = new(StringComparer.Ordinal);
@@ -1414,7 +1421,7 @@ public class VerificationService : IVerificationService
     private async Task<(VerificationResult Result, List<Capability>? Chain)> BuildAndVerifyChainAsync(
         Capability capability, Capability? explicitRoot, bool applyExpirationCeiling = true,
         bool applyCreatedCheck = true, bool requireDelegatedExpires = true, bool applyCaveatPolicy = true,
-        Func<List<Capability>, ChainSearch, Task<bool>>? accept = null)
+        Func<List<Capability>, IReadOnlyList<Proof?>, ChainSearch, Task<bool>>? accept = null)
     {
         VerificationResult? lastResult = null;
         CapabilityValidationException? lastFailure = null;
@@ -1436,7 +1443,7 @@ public class VerificationService : IVerificationService
             var result = await VerifyBuiltChainAsync(
                 candidate.Chain, candidate.LinkProofs, search, applyExpirationCeiling, applyCreatedCheck,
                 requireDelegatedExpires, applyCaveatPolicy);
-            if (result.IsValid && (accept is null || await accept(candidate.Chain, search)))
+            if (result.IsValid && (accept is null || await accept(candidate.Chain, candidate.LinkProofs, search)))
                 return (result, candidate.Chain);
             (lastFailure, lastResult) = (null, result.IsValid
                 ? VerificationResult.Fail(VerificationOutcome.InvalidDelegation, "The verified chain was not accepted.")
@@ -1928,7 +1935,8 @@ public class VerificationService : IVerificationService
         foreach (var controller in capability.Controller.Values)
         {
             // Within one search the method and relationship are fixed, so a refusal holds for every chain.
-            if (refused is not null && !refused.Add(controller))
+            // Only refusals are remembered: a controller that authorized one chain stays usable on another.
+            if (refused is not null && refused.Contains(controller))
                 continue;
 
             var result = await _relationshipResolver.IsAuthorizedForRelationshipAsync(
@@ -1949,11 +1957,13 @@ public class VerificationService : IVerificationService
                         IsExpectedResolutionError(result.ResolutionError) ? LogLevel.Debug : LogLevel.Warning,
                         "Controller '{Controller}' could not be resolved during {Relationship} authorization: {Error} — {Message}",
                         controller, relationship, result.ResolutionError, result.Message);
+                    refused?.Add(controller);
                     break;
                 default: // NotAuthorized
                     _logger.LogDebug(
                         "Verification method not authorized by controller '{Controller}' for {Relationship}.",
                         controller, relationship);
+                    refused?.Add(controller);
                     break;
             }
         }
@@ -2188,34 +2198,187 @@ public class VerificationService : IVerificationService
     }
 
     /// <summary>
-    /// Returns true if ANY capability referenced by a delegation proof's <c>capabilityChain</c> has
-    /// been revoked. A spec-exact chain carries the root id and every intermediate ancestor as id
-    /// strings and the immediate parent as the embedded final object, so
-    /// <see cref="ExtractCapabilityId"/> reads every ancestor's id (string or embedded) and the sweep
-    /// covers the full ancestry without resolving each ancestor as a <see cref="Capability"/>. This
-    /// lets the standalone <see cref="VerifyCapabilityProofAsync(Capability)"/> path honour ancestor
-    /// revocation at every depth, matching the per-link sweep in <see cref="VerifyBuiltChainAsync"/>
-    /// (Issue #63). Ids are de-duplicated defensively so any repeated entry is queried only once.
+    /// The revocation lookups of a verified root→leaf chain (#158): the root in
+    /// <see cref="RevocationScope.Root"/> and each delegated link under the delegator of the proof that
+    /// verified it (<paramref name="linkProofs"/>, non-null for every delegated link once step 3 has run).
     /// </summary>
-    private async Task<bool> IsAnyAncestorRevokedAsync(object[]? capabilityChain)
+    private static List<RevocationLookup> ChainRevocationLookups(List<Capability> chain, IReadOnlyList<Proof?> linkProofs)
     {
-        if (capabilityChain == null)
+        var lookups = new List<RevocationLookup>(chain.Count) { new(chain[0].Id, RevocationScope.Root) };
+        for (var i = 1; i < chain.Count; i++)
+            lookups.Add(new RevocationLookup(chain[i].Id, RevocationScope.ForDelegationProof(linkProofs[i]!)));
+        return lookups;
+    }
+
+    /// <summary>How one delegation proof relates to the route the standalone sweep is walking.</summary>
+    private enum RouteStep
+    {
+        /// <summary>The proof names the required prefix, verifies, and its ancestry is usable; lookups were added.</summary>
+        Fits,
+
+        /// <summary>The proof does not belong to this route (wrong prefix or parent, non-canonical id,
+        /// unparsable or non-embedded parent) or does not verify; it is skipped, as the chain walk skips it.</summary>
+        DoesNotFit,
+
+        /// <summary>The route cannot be swept: an embedded parent has no proof that fits and verifies,
+        /// the budget is spent, or an infrastructure fault interrupted the walk.</summary>
+        Unusable,
+    }
+
+    /// <summary>
+    /// The result of walking one delegation proof: its step; when it fits, the alternative routes it
+    /// yields, one per combination of fitting ancestor proofs, each holding the lookups of its own links
+    /// only (never shared with a sibling route), depth first in proof order; whether that enumeration was
+    /// cut at <see cref="MaxChainCandidates"/>; and the failure to report when it does not fit.
+    /// </summary>
+    private sealed record RouteWalk(
+        RouteStep Step, IReadOnlyList<IReadOnlyList<RevocationLookup>> Routes, bool Truncated, VerificationResult? Failure)
+    {
+        public static readonly RouteWalk NoFit = new(RouteStep.DoesNotFit, [], false, null);
+
+        public static RouteWalk Unusable(VerificationResult failure) => new(RouteStep.Unusable, [], false, failure);
+
+        public static RouteWalk Fits(IReadOnlyList<IReadOnlyList<RevocationLookup>> routes, bool truncated)
+            => new(RouteStep.Fits, routes, truncated, null);
+    }
+
+    /// <summary>
+    /// The alternative routes of one <b>verified</b> delegation proof of the leaf on the standalone
+    /// <see cref="VerifyCapabilityProofAsync(Capability)"/> path (#158), each as the revocation lookups of
+    /// its own links, or the failure to report when the ancestry that proof names cannot be authenticated.
+    /// The leaf is looked up under the proof's delegator, authentic because the proof has verified.
+    /// <see cref="WalkRouteAsync"/> then descends the proof's <c>capabilityChain</c> as the chain walk does:
+    /// the first entry is the root (root scope); a deeper chain embeds the immediate parent as its last
+    /// entry, whose own delegation proofs must name the chain's prefix and embed <i>its</i> parent in turn.
+    /// Before an embedded parent's delegator is trusted, that parent's proof is verified as a chain link
+    /// against the next ancestor (signature, parent-controller authorization, attenuation, expiry), up to
+    /// the resolved or explicit root. The presented ancestry is otherwise unauthenticated: its controller
+    /// could re-sign a child around a copy of a revoked parent with its proof stripped or its
+    /// <c>verificationMethod</c> swapped, and the sweep would query the wrong scope (PR #162 review).
+    /// Candidate isolation applies at every level and through revocation: each nested proof is walked as
+    /// its own branch, a branch that does not fit, does not verify or has no usable ancestry is discarded
+    /// together with everything it collected, and the routes of a parent are the routes of each complete
+    /// branch extended by the parent under that branch's delegator. A co-signed ancestor therefore yields
+    /// one route per co-signer, and the caller accepts the first route none of whose links is revoked,
+    /// exactly as the chain walk accepts the first unrevoked chain: an ancestor revoked under one
+    /// co-signer's proof does not reject a route through the other's. Only a parent with no complete
+    /// branch fails this candidate, with a fault if any branch faulted, else the last branch's reason,
+    /// else <see cref="VerificationOutcome.MalformedCapability"/>.
+    /// </summary>
+    private async Task<(VerificationResult? Failure, IReadOnlyList<IReadOnlyList<RevocationLookup>> Routes, bool Truncated)>
+        SweepStandaloneRouteAsync(Capability leaf, Proof verifiedProof, Capability? explicitRoot)
+    {
+        var walk = await WalkRouteAsync(leaf, verifiedProof, requiredChainIds: null, depth: 1, explicitRoot);
+        if (walk.Step != RouteStep.Fits)
         {
-            return false;
+            return (walk.Failure ?? VerificationResult.Fail(VerificationOutcome.MalformedCapability,
+                "The delegation proof's capabilityChain embeds an ancestor without a delegation proof that names the " +
+                "chain's prefix, embeds its own parent and verifies."), [], false);
         }
 
-        var seen = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var element in capabilityChain)
+        var leafLookup = new RevocationLookup(leaf.Id, RevocationScope.ForDelegationProof(verifiedProof));
+        var routes = walk.Routes
+            .Select(route => (IReadOnlyList<RevocationLookup>)route.Prepend(leafLookup).Distinct().ToList())
+            .ToList();
+        return (null, routes, walk.Truncated);
+    }
+
+    /// <summary>
+    /// Walks one delegation <paramref name="proof"/> of <paramref name="current"/> and returns the routes
+    /// it yields, each as the lookups of its own links. <paramref name="requiredChainIds"/> is the prefix a
+    /// nested proof must name (null for the leaf's own, already verified proof). Unparsable embeddings do
+    /// not throw. At most <see cref="MaxChainCandidates"/> routes are kept per level, depth first in proof
+    /// order, as the chain walk bounds its candidates.
+    /// </summary>
+    private async Task<RouteWalk> WalkRouteAsync(
+        Capability current, Proof proof, string[]? requiredChainIds, int depth, Capability? explicitRoot)
+    {
+        if (depth > MaxChainLength || proof.CapabilityChain is not { Length: > 0 } chain)
+            return RouteWalk.NoFit;
+
+        var ids = ChainIds(chain);
+        if (ids.Any(id => !CanonicalIri.IsCanonical(id)) ||
+            (requiredChainIds is not null && !ids.SequenceEqual(requiredChainIds, StringComparer.Ordinal)))
+            return RouteWalk.NoFit;
+
+        // First-level delegation: the parent IS the root, referenced by id only. One route: the root.
+        if (chain.Length == 1)
         {
-            var id = ExtractCapabilityId(element);
-            if (!string.IsNullOrEmpty(id) && seen.Add(id) &&
-                await IsCapabilityRevokedAsync(id))
+            return string.Equals(current.ParentCapability, ids[0], StringComparison.Ordinal)
+                ? RouteWalk.Fits([[new RevocationLookup(ids[0], RevocationScope.Root)]], truncated: false)
+                : RouteWalk.NoFit;
+        }
+
+        // Deeper: [rootId, ...ancestorIds, {immediate parent}], ancestors as id strings only.
+        Capability? parent;
+        try
+        {
+            if (chain[..^1].Any(entry => TryExtractStringValue(entry) is null) ||
+                !TryDeserializeCapability(chain[^1], out parent) || parent is null)
+                return RouteWalk.NoFit;
+        }
+        catch (JsonException)
+        {
+            return RouteWalk.NoFit;
+        }
+
+        if (!string.Equals(parent.Id, current.ParentCapability, StringComparison.Ordinal))
+            return RouteWalk.NoFit;
+
+        // The embedded parent is trusted only through a proof of its own that names the prefix AND
+        // verifies as a chain link against the next ancestor AND whose own ancestry walks to the root; it
+        // is then looked up under that proof's delegator. Each proof is its own branch: a branch that
+        // fails is discarded with everything it collected, and a branch that completes contributes its
+        // routes, each extended by this parent under that proof's delegator, so sibling routes stay
+        // apart through the revocation check as well (PR #162 review). Intermediate ancestors are
+        // reached the same way through their own embeddings.
+        var prefix = ids[..^1];
+        var routes = new List<IReadOnlyList<RevocationLookup>>();
+        var truncated = false;
+        VerificationResult? fault = null;
+        VerificationResult? failure = null;
+        foreach (var parentProof in parent.Proof?.DelegationProofs() ?? Enumerable.Empty<Proof>())
+        {
+            if (parentProof.CapabilityChain is not { Length: > 0 } parentChain ||
+                !ChainIds(parentChain).SequenceEqual(prefix, StringComparer.Ordinal) ||
+                !RevocationScope.TryForDelegationProof(parentProof, out var parentScope))
+                continue;
+
+            var verified = await VerifySingleDelegationProofAsync(
+                parent, parentProof, parentCapabilityOverride: null, requireParentAuthorization: true,
+                explicitRoot, applyCreatedCheck: false, applyCaveatPolicy: false);
+            var branch = verified.IsValid
+                ? await WalkRouteAsync(parent, parentProof, prefix, depth + 1, explicitRoot)
+                : RouteWalk.Unusable(verified);
+            if (branch.Step != RouteStep.Fits)
             {
-                return true;
+                // An infrastructure fault is reported as such, never as a bad ancestor.
+                if (branch.Failure?.Outcome == VerificationOutcome.CouldNotVerify)
+                    fault = branch.Failure;
+                else if (branch.Failure is not null)
+                    failure = branch.Failure;
+                continue;
+            }
+
+            truncated |= branch.Truncated;
+            var parentLookup = new RevocationLookup(parent.Id, parentScope);
+            foreach (var route in branch.Routes)
+            {
+                if (routes.Count >= MaxChainCandidates)
+                {
+                    truncated = true;
+                    break;
+                }
+
+                routes.Add(route.Append(parentLookup).ToList());
             }
         }
 
-        return false;
+        if (routes.Count > 0)
+            return RouteWalk.Fits(routes, truncated);
+
+        return RouteWalk.Unusable(fault ?? failure ?? VerificationResult.Fail(VerificationOutcome.MalformedCapability,
+            $"Embedded capability '{parent.Id}' carries no delegation proof that names the chain's prefix, embeds its own parent and verifies."));
     }
 
     /// <summary>
@@ -2348,8 +2511,9 @@ public class VerificationService : IVerificationService
                 return false;
 
             // AUTHORIZE: the authenticated verificationMethod must control the capability or an
-            // ancestor. IsRevokerAuthorizedAsync verifies the chain first (fail-closed).
-            if (!await IsRevokerAuthorizedAsync(capability, proof.VerificationMethod, explicitRoot))
+            // ancestor. AuthorizeRevocationAsync verifies the chain first (fail-closed) and names the
+            // scopes the record is written in (#158).
+            if (await AuthorizeRevocationAsync(capability, proof.VerificationMethod, explicitRoot) is not { } grant)
                 return false;
 
             // Record the revocation durably BEFORE consuming the replay nonce. If the store write
@@ -2359,8 +2523,8 @@ public class VerificationService : IVerificationService
             // replayed-after-eviction request re-applying the same record before the nonce check
             // below rejects it — harmless. (INonceStore has no release primitive, so reordering is
             // the minimal robust fix.)
-            var revokerDid = proof.VerificationMethod.Split('#')[0];
-            if (!await RevokeCapabilityCoreAsync(capability.Id, revokerDid, reason, metadata))
+            var revokerDid = RevocationScope.DelegatorOf(proof.VerificationMethod);
+            if (!await RevokeCapabilityCoreAsync(capability.Id, grant, revokerDid, reason, metadata))
                 return false;
 
             // Replay protection (nonce = request id): consumed only after the durable write
@@ -2407,16 +2571,19 @@ public class VerificationService : IVerificationService
             : null;
     }
 
+    /// <summary>What a signed revocation records: the root of the authorizing chain and the scopes (#158).</summary>
+    private sealed record RevocationGrant(string RootCapabilityId, IReadOnlyList<RevocationScope> Scopes);
+
     /// <summary>
-    /// True when <paramref name="verificationMethod"/> may revoke <paramref name="capability"/> —
-    /// i.e. it controls the capability or any ancestor in its delegation chain. Cryptographically
-    /// verifies the chain before trusting any controller fields; a forged or invalid chain yields
-    /// false. A root is authorized against the trusted root (explicit or resolved), never the
+    /// The grant when <paramref name="verificationMethod"/> may revoke <paramref name="capability"/> —
+    /// i.e. it controls the capability or any ancestor in its delegation chain — otherwise null.
+    /// Cryptographically verifies the chain before trusting any controller fields; a forged or invalid
+    /// chain yields null. A root is authorized against the trusted root (explicit or resolved), never the
     /// caller's copy, and an explicit root admits only itself as a revocable root.
     /// <paramref name="verificationMethod"/> is the authenticated proof verification method (or a
     /// bare DID); authentication is performed by the caller.
     /// </summary>
-    private async Task<bool> IsRevokerAuthorizedAsync(
+    private async Task<RevocationGrant?> AuthorizeRevocationAsync(
         Capability capability, string verificationMethod, Capability? explicitRoot)
     {
         try
@@ -2430,10 +2597,12 @@ public class VerificationService : IVerificationService
             // let anyone who knows a root id revoke it (Issue #155). A root-shaped or urn:zcap:root:-
             // named capability the verifier cannot resolve has nothing trusted to authorize against.
             //
-            // With an explicit root the resolver is still consulted for the id being revoked: skipping
-            // it would let a forged delegation under the explicit root borrow the id of another root the
-            // resolver trusts. A resolver fault therefore fails the revocation closed; nothing is recorded
-            // and the nonce is not consumed, so the same request can be retried.
+            // With an explicit root the resolver is still consulted for any other id being revoked:
+            // skipping it would let a forged delegation under the explicit root borrow the id of another
+            // root the resolver trusts. The explicit root's own id is anchored to the explicit root itself,
+            // which the caller vouches for (never build it from request input). A resolver fault fails the
+            // revocation closed; nothing is recorded and the nonce is not consumed, so the request can be
+            // retried.
             var trustedRoot = await FindTrustedRootAsync(capability.Id, explicitRoot);
             if (trustedRoot is not null)
             {
@@ -2442,7 +2611,7 @@ public class VerificationService : IVerificationService
                 if (explicitRoot is not null &&
                     !string.Equals(trustedRoot.Id, explicitRoot.Id, StringComparison.Ordinal))
                 {
-                    return false;
+                    return null;
                 }
 
                 // Binds the trusted root to the id (and, for the standard form, to its encoded target).
@@ -2454,7 +2623,7 @@ public class VerificationService : IVerificationService
                 // The "urn" scheme and the "zcap" namespace are case-insensitive (RFC 8141), so
                 // URN:ZCAP:ROOT:… is the same reserved form. Refusing every casing keeps such a variant
                 // from reaching a store whose keys compare case-insensitively and landing on a root.
-                return false;
+                return null;
             }
 
             // Verify the chain cryptographically before trusting controller fields. Without that
@@ -2479,22 +2648,26 @@ public class VerificationService : IVerificationService
             // no longer revoke. Self-revoke (the leaf's own controller) and up-chain delegators are
             // both covered because every link is checked. When the proofs name several chains, each
             // verified chain is checked in turn.
+            RevocationGrant? grant = null;
             var (result, _) = await BuildAndVerifyChainAsync(
                 capability, explicitRoot, applyExpirationCeiling: false, applyCreatedCheck: false,
                 requireDelegatedExpires: false, applyCaveatPolicy: false,
-                accept: async (chain, search) =>
+                accept: async (chain, linkProofs, search) =>
                 {
                     foreach (var link in chain)
                     {
                         if (await IsControllerAuthorizedAsync(
                                 verificationMethod, link, VerificationRelationship.CapabilityDelegation,
                                 search.RefusedControllers))
+                        {
+                            grant = await GrantForAsync(chain, linkProofs);
                             return true;
+                        }
                     }
 
                     return false;
                 });
-            return result.IsValid;
+            return result.IsValid ? grant : null;
         }
         catch (Exception ex)
         {
@@ -2506,9 +2679,46 @@ public class VerificationService : IVerificationService
             // attributes the cause to THIS step rather than the broader revocation flow (PR #84 review;
             // Issue #64). Severity is chosen by LogFailedClosed.
             LogFailedClosed(ex,
-                "IsRevokerAuthorizedAsync failed closed for capability {CapabilityId}", capability.Id);
-            return false;
+                "AuthorizeRevocationAsync failed closed for capability {CapabilityId}", capability.Id);
+            return null;
         }
+    }
+
+    /// <summary>
+    /// The scopes a revocation of the accepted chain's leaf is recorded in (#158): the root scope for a
+    /// root; otherwise the delegator of the proof the walk verified the leaf with, plus the delegator of
+    /// every other delegation proof on the leaf that names the same chain and also verifies against the
+    /// same parent. Recording the co-signers keeps a proof set from failing open: with a single record,
+    /// a holder could drop the recorded signer's proof and present the leaf under a co-signer's.
+    /// </summary>
+    private async Task<RevocationGrant> GrantForAsync(List<Capability> chain, IReadOnlyList<Proof?> linkProofs)
+    {
+        var rootId = chain[0].Id;
+        if (chain.Count == 1)
+            return new RevocationGrant(rootId, [RevocationScope.Root]);
+
+        var leaf = chain[^1];
+        var parent = chain[^2];
+        var accepted = linkProofs[^1]!;
+        var scopes = new List<RevocationScope> { RevocationScope.ForDelegationProof(accepted) };
+        var acceptedChainIds = ChainIds(accepted.CapabilityChain!);
+        foreach (var proof in leaf.Proof?.DelegationProofs() ?? Enumerable.Empty<Proof>())
+        {
+            if (ReferenceEquals(proof, accepted) ||
+                proof.CapabilityChain is not { Length: > 0 } rawChain ||
+                !ChainIds(rawChain).SequenceEqual(acceptedChainIds, StringComparer.Ordinal) ||
+                !RevocationScope.TryForDelegationProof(proof, out var scope) ||
+                scopes.Contains(scope))
+                continue;
+
+            var verified = await VerifySingleDelegationProofAsync(
+                leaf, proof, parent, requireParentAuthorization: true,
+                applyCreatedCheck: false, applyCaveatPolicy: false);
+            if (verified.IsValid)
+                scopes.Add(scope);
+        }
+
+        return new RevocationGrant(rootId, scopes);
     }
 
     /// <summary>
@@ -2543,30 +2753,39 @@ public class VerificationService : IVerificationService
     }
 
     /// <summary>
-    /// Checks if a capability has been revoked
+    /// Checks whether a capability id is revoked in <paramref name="scope"/> (#158): by a record in that
+    /// scope or by an unscoped one.
     /// COMPLIANCE FIX: MUST-21 - Check revocation status
     /// </summary>
-    public Task<bool> IsCapabilityRevokedAsync(string capabilityId)
+    public Task<bool> IsCapabilityRevokedAsync(string capabilityId, RevocationScope scope)
     {
+        ArgumentNullException.ThrowIfNull(scope);
         if (string.IsNullOrEmpty(capabilityId))
             return Task.FromResult(false);
 
-        return _revocationService.IsRevokedAsync(capabilityId);
+        return _revocationService.IsRevokedAsync(capabilityId, scope);
     }
 
+    /// <summary>One record per granted scope, all naming the authorizing chain's root (informational).</summary>
     private async Task<bool> RevokeCapabilityCoreAsync(
         string capabilityId,
+        RevocationGrant grant,
         string revokerDid,
         string? reason = null,
         IDictionary<string, string>? metadata = null)
     {
-        await _revocationService.RevokeAsync(new RevocationRequest
+        foreach (var scope in grant.Scopes)
         {
-            CapabilityId = capabilityId,
-            RevokedBy = revokerDid,
-            Reason = reason,
-            Metadata = metadata
-        });
+            await _revocationService.RevokeAsync(new RevocationRequest
+            {
+                CapabilityId = capabilityId,
+                Scope = scope,
+                RootCapabilityId = grant.RootCapabilityId,
+                RevokedBy = revokerDid,
+                Reason = reason,
+                Metadata = metadata
+            });
+        }
 
         return true;
     }

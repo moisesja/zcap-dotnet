@@ -240,6 +240,6 @@ public class VerificationServiceDelegationFreshnessTests
 
         revoked.Should().BeTrue(
             "a delegation with a malformed created must remain revocable (created check is off on revoke)");
-        (await verifier.IsCapabilityRevokedAsync(delegated.Id)).Should().BeTrue();
+        (await verifier.IsCapabilityRevokedAsync(delegated.Id, RevocationScope.ForDelegationProof(delegated.Proof!.Primary))).Should().BeTrue();
     }
 }

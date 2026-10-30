@@ -1,5 +1,70 @@
 # Lessons Learned
 
+## 2026-10-29 — Issue #158: ground a protocol design choice in the spec and the reference stack first
+
+- I presented three revocation-scope designs (my own route scoping, a prefix variant, and the JS
+  stack's delegator key) as a preference question. The owner answered "what does the spec say? what
+  does the JavaScript implementation do?" For a protocol this library implements, read the spec text
+  and the reference implementation BEFORE designing, quote what each says (and where it is silent),
+  and lead the question with that; present a departure from the reference only with a concrete reason
+  the reference's behaviour is unsafe here.
+- "Prior art … needs confirming" in an issue is a research task, not a footnote: resolve it with the
+  actual source (`gh api repos/<owner>/<repo>/contents/<path>`), not from memory.
+- The same applies to removing a feature: the status GET had no basis in the spec or the JS stack, and
+  the owner removed it once that was stated plainly.
+
+## 2026-10-29 — Issue #158: check the signed wire shape before accepting a coverage narrowing
+
+- The plan accepted that the standalone proof path could no longer see revocations of intermediate
+  ancestors ("only their ids are present"), and a design reviewer agreed. A pre-existing test went red
+  and showed the premise was wrong: in the spec-exact `capabilityChain` each embedded parent carries
+  its own proof, which embeds *its* parent, so every ancestor's delegator is recoverable by descending
+  the nested objects. Before writing "X is not available on this path" into a plan, open a real
+  instance of the signed structure and look; and treat a newly red pre-existing test as a claim
+  about the design, not just a fixture to update.
+- A multi-level test fixture that gives every link `UtcNow + 1 day` fails attenuation for a grandchild
+  minted milliseconds later. Bound a child's expiry by its parent's in any helper that builds chains.
+- A long tool batch can fail the harness permission check as a whole (transient "no verdict");
+  retry once, then split into smaller batches. Large agent prompts failed the same way; writing the
+  brief to a scratch file and spawning the agent with a two-line prompt worked.
+- The red team found what my own tests missed because my tests only exercised honest structures:
+  a pre-check that reads an *unverified* structure (here the standalone sweep over the presented
+  ancestry) must apply the same acceptance rules as the verified path and fail closed when the
+  structure cannot be fitted, or an actor who controls that structure chooses what gets looked up.
+  When adding a pre-check over attacker-shaped input, write the "attacker reshapes the input" test
+  first, and keep the pre-check inside the fail-closed `try`.
+
+## 2026-10-29 — PR #162 review: shape validation is not authentication; a global early return is a veto
+
+- My red-team fix made the standalone sweep check the *shape* of the presented ancestry (prefix,
+  parent id, embedding) and then trusted the `verificationMethod` it found there. The owner swapped
+  that method on a copy of a revoked parent and the sweep queried the wrong scope. Whenever a
+  decision depends on *who signed* something, the only evidence is a verified signature plus the
+  parent-controller authorization that binds the key to the chain, up to a trusted root; structure
+  tells you nothing about authorship. Ask "who could have produced this bytes-for-bytes?" of every
+  field a scope or key is derived from.
+- Returning `MalformedCapability` for the whole capability when one leaf proof's ancestry was
+  unusable recreated exactly the veto the chain walk is designed to avoid ("never let an unverified
+  proof hide a valid chain"). A per-candidate rule (verify the link, then its ancestry, first to pass
+  wins) must be applied all the way through; any early `return` outside the candidate loop is a veto.
+  Test proof sets with the junk proof in both positions.
+- When fixing a reviewer's or red team's finding, re-run the original attack *and* its natural
+  variants (strip, swap, reorder, duplicate) before declaring it closed; the first fix closed only the
+  variant that had been demonstrated.
+- Round 2 of the same review: I fixed the veto at the leaf and left it one level down (`case
+  Unusable: return Unusable` inside the recursion, plus one shared lookup list across sibling
+  branches). An invariant stated as "a failing proof never vetoes another" is recursive by nature;
+  when a fix introduces a rule, walk every recursion level and every shared mutable state and ask
+  whether the rule holds there too. The owner's test shape is the one to copy: the variant at depth
+  N+1, in both orders, plus an all-unusable control that must still fail.
+- Round 3: isolation held through authentication but I unioned the surviving routes into one
+  deny-on-any revocation read, so an ancestor revoked under one co-signer rejected a route through the
+  other. A candidate is the whole pipeline a decision runs through (parse, authenticate, revoke,
+  policy); "alternatives are independent" must be carried through every stage, and any step that
+  merges alternatives before deciding (a union, a shared set, a single batched read over all of them)
+  reintroduces the veto. When the chain path already has the right per-candidate shape, mirror it
+  stage for stage instead of re-deriving it; the three rounds here were each one stage short.
+
 ## 2026-10-27 — Issue #157 red team: RDFC drops malformed IRIs, not only undefined terms
 
 - I measured how dotNetRDF normalizes ids but only probed well-formed variants, so the id rule

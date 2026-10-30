@@ -16,12 +16,24 @@ public interface IVerificationService
     /// is sound — not future-dated beyond the clock skew, nor present-but-unparseable (Issue #99). A
     /// root capability is valid iff it carries no proof.
     /// <para>
-    /// This is <b>not</b> a full authorization gate: it does not walk the whole chain back to the root
-    /// or independently verify every ancestor's own proof (signature, attenuation, <c>created</c>). In
-    /// particular, on a deep delegation only the <i>leaf</i> link's <c>created</c> is checked here; an
-    /// intermediate ancestor's <c>created</c> — like its signature — is gated only by the full-chain
-    /// path. For an authorization decision, use <see cref="VerifyCapabilityChainAsync(Capability)"/> (full chain)
-    /// or <see cref="VerifyInvocationAsync(Invocation, Capability)"/>. With a caveat registry (#157), a
+    /// This is <b>not</b> a full authorization gate. Revocation records are scoped to the delegator that
+    /// signed each capability (#158), so to check the ancestry's revocation this path verifies each
+    /// embedded ancestor's delegation proof as a chain link (signature, parent-controller authorization,
+    /// attenuation, expiry) up to the resolved or explicit root before trusting its delegator, and a
+    /// candidate whose ancestry cannot be authenticated fails closed; below the first level a root
+    /// resolver or explicit root is therefore required. It does not apply the delegation-time
+    /// (<c>created</c>, Issue #99), expiration-ceiling, required-<c>expires</c> or caveat-policy checks
+    /// to ancestors; those are gated only by the full-chain path. Each delegation proof in a set is
+    /// evaluated on its own (link first, then its ancestry), the first to pass wins, and a failing proof
+    /// never vetoes another, at the leaf or at any embedded ancestor: an ancestor's proof whose own
+    /// ancestry cannot be authenticated is discarded, and the ancestor fits through any of its proofs
+    /// that reaches the root. Revocation is likewise judged per route: a co-signed ancestor yields one
+    /// route per co-signer, a route is rejected only when one of its own links is revoked, and the first
+    /// unrevoked route is accepted, as the chain path accepts the first unrevoked chain. When all fail, a
+    /// revocation found on a verified route is reported, else the last proof's failure. For an
+    /// authorization decision, use
+    /// <see cref="VerifyCapabilityChainAsync(Capability)"/> (full chain) or
+    /// <see cref="VerifyInvocationAsync(Invocation, Capability)"/>. With a caveat registry (#157), a
     /// link that carries caveats or sits below the first delegation level is reported as
     /// <see cref="VerificationOutcome.CaveatEnforcementRequired"/> rather than valid.
     /// </para>
@@ -190,9 +202,21 @@ public interface IVerificationService
     /// not resolve returns false (Issue #155).
     /// </para>
     /// <para>
-    /// Known limitation: records are keyed by bare capability id, so anyone with a valid chain under
-    /// any trusted root can revoke a non-root id, including one under another root or one trusted only
-    /// by another verifier sharing the store. See "Revocation scope" in <c>architecture.md</c>.
+    /// The record is scoped (#158). A root is recorded in <see cref="RevocationScope.Root"/>. A delegated
+    /// capability is recorded in <see cref="RevocationScope.Delegated(string)"/> for the delegator that
+    /// signed the delegation proof its verified chain followed, and for each co-signer of the same
+    /// chain; that is the scope every verifier looks a link up under. A forged copy of the id under
+    /// another chain is signed by someone else and lands in that signer's scope, where no genuine chain
+    /// looks. Only the chain the request presents is revoked; a capability that also verifies on another
+    /// chain is revoked there by presenting that chain.
+    /// </para>
+    /// <para>
+    /// Consequences of scoping: a capability co-signed by several co-controllers of its parent, presented
+    /// with only one of those proofs, is recorded for that signer alone, and a copy carrying another
+    /// signer's proof verifies until a request presenting that proof, or that co-controller, revokes it;
+    /// present the fullest copy you hold. A revoked delegated id re-presented as a self-asserted root is
+    /// not matched by its record, so, as everywhere, never pass a holder-supplied root object to the
+    /// chain or envelope verification APIs.
     /// </para>
     /// </remarks>
     /// <param name="capability">The capability to revoke, with its full delegation chain.</param>
@@ -214,6 +238,11 @@ public interface IVerificationService
     /// retried because its nonce is not consumed. Without a configured resolver nothing else is
     /// consulted.
     /// </para>
+    /// <para>
+    /// <paramref name="rootCapability"/> is a trust anchor the caller vouches for: a request to revoke
+    /// that root's own id is authorized against this object, not against the resolver. Never build it
+    /// from request input, or a root-shaped request naming the caller as controller revokes the root (#155).
+    /// </para>
     /// All authentication, authorization, replay and audit semantics of
     /// <see cref="RevokeCapabilityAsync(Capability, Invocation)"/> apply.
     /// </summary>
@@ -225,12 +254,18 @@ public interface IVerificationService
     Task<bool> RevokeCapabilityAsync(Capability capability, Invocation signedRevocation, Capability rootCapability);
 
     /// <summary>
-    /// Checks if a capability has been revoked
+    /// Checks whether a capability id is revoked in <paramref name="scope"/> (#158): by a record in that
+    /// scope, or by an unscoped one. Use <see cref="RevocationScope.Root"/> for a root and
+    /// <see cref="RevocationScope.ForDelegationProof"/> with the delegation proof a verifier accepted for
+    /// a delegated capability. Chain and invocation verification perform this check for every link.
+    /// Passing <see cref="RevocationScope.Unscoped"/> consults only unscoped (migrated or operator)
+    /// records and is false for every revocation the signed path recorded; it is not the 5.x bare-id check.
     /// COMPLIANCE FIX: MUST-21 - Check revocation status
     /// </summary>
     /// <param name="capabilityId">The ID of the capability to check</param>
-    /// <returns>True if the capability has been revoked</returns>
-    Task<bool> IsCapabilityRevokedAsync(string capabilityId);
+    /// <param name="scope">The scope the capability is verified under.</param>
+    /// <returns>True if the capability has been revoked in that scope</returns>
+    Task<bool> IsCapabilityRevokedAsync(string capabilityId, RevocationScope scope);
 
     /// <summary>
     /// Verifies a <c>@digitalbazaar/zcap</c>-compatible ("Path A") Data Integrity invocation — an

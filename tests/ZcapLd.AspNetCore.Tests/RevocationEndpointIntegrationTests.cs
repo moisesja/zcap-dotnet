@@ -19,6 +19,9 @@ namespace ZcapLd.AspNetCore.Tests;
 /// End-to-end HTTP coverage for the signed revocation endpoint, run against the demo host via
 /// <see cref="WebApplicationFactory{TEntryPoint}"/>. Proves authentication (proof-of-possession),
 /// authorization, route/body binding, and rejection of unsupported caveats after HTTP deserialization.
+/// Revocation state is read through the host's <see cref="IRevocationService"/> in the scope the
+/// capability was authorized under (#158); there is no anonymous status GET, as in the ZCAP
+/// specification and the Digital Bazaar reference stack.
 /// Capability-id cases (Issue #155) run on both the in-memory TestServer and real Kestrel: only Kestrel
 /// populates <c>IHttpRequestFeature.RawTarget</c>, so the two hosts exercise different id-recovery paths.
 /// </summary>
@@ -90,7 +93,7 @@ public sealed class RevocationEndpointIntegrationTests
     }
 
     [Fact]
-    public async Task Post_ValidSignedRevocation_Returns200AndRevokes()
+    public async Task Post_ValidSignedRevocation_Returns200AndRevokesInTheDelegatorsScope()
     {
         var http = _factory.CreateClient();
         var client = new Client();
@@ -110,11 +113,15 @@ public sealed class RevocationEndpointIntegrationTests
         var response = await PostRevocationAsync(http, delegated.Id, delegated, signed);
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
-        var status = await GetStatusAsync(http, delegated.Id);
+        var status = await ReadStatusAsync(response);
+        status.CapabilityId.Should().Be(delegated.Id);
         status.IsRevoked.Should().BeTrue();
-        // The anonymous status endpoint intentionally returns only {capabilityId, isRevoked}; it no
-        // longer leaks operational metadata (RevokedBy/Reason/RootCapabilityId) to unauthenticated callers.
+        // The response carries only {capabilityId, isRevoked}; no operational metadata is disclosed.
         status.RevokedBy.Should().BeNull();
+
+        // Recorded under the delegator that signed the delegation (the root controller), never unscoped (#158).
+        (await IsRevokedAsync(Host.TestServer, delegated.Id, RevocationScope.Delegated(rootDid))).Should().BeTrue();
+        (await IsRevokedAsync(Host.TestServer, delegated.Id, RevocationScope.Unscoped)).Should().BeFalse();
     }
 
     [Fact]
@@ -136,7 +143,7 @@ public sealed class RevocationEndpointIntegrationTests
         var response = await PostRevocationAsync(http, delegated.Id, delegated, signed);
 
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
-        (await GetStatusAsync(http, delegated.Id)).IsRevoked.Should().BeFalse();
+        (await IsRevokedAsync(Host.TestServer, delegated.Id, RevocationScope.Delegated(rootDid))).Should().BeFalse();
     }
 
     [Fact]
@@ -160,7 +167,7 @@ public sealed class RevocationEndpointIntegrationTests
         var response = await PostRevocationAsync(http, delegated.Id, delegated, forged);
 
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
-        (await GetStatusAsync(http, delegated.Id)).IsRevoked.Should().BeFalse();
+        (await IsRevokedAsync(Host.TestServer, delegated.Id, RevocationScope.Delegated(rootDid))).Should().BeFalse();
     }
 
     [Fact]
@@ -201,45 +208,38 @@ public sealed class RevocationEndpointIntegrationTests
         leaf.AdditionalProperties = new() { ["caveat"] = doc.RootElement.Clone() };
 
         (await PostRevocationAsync(http, leaf.Id, leaf, signed)).StatusCode.Should().Be(HttpStatusCode.Forbidden);
-        (await GetStatusAsync(http, leaf.Id)).IsRevoked.Should().BeFalse();
+        (await IsRevokedAsync(Host.TestServer, leaf.Id, RevocationScope.Delegated(owner))).Should().BeFalse();
 
         leaf.AdditionalProperties.Remove("caveat");
         (await PostRevocationAsync(http, leaf.Id, leaf, signed)).StatusCode.Should().Be(HttpStatusCode.OK);
+        (await IsRevokedAsync(Host.TestServer, leaf.Id, RevocationScope.Delegated(owner))).Should().BeTrue();
     }
 
-    [Fact]
-    public async Task Get_Status_ReflectsRevocation()
+    [Theory]
+    [InlineData(Host.TestServer)]
+    [InlineData(Host.Kestrel)]
+    public async Task Get_IsNotMapped_Returns405(Host host)
     {
-        var http = _factory.CreateClient();
-        var client = new Client();
-        var rootDid = client.Did.GenerateDidKey();
-        var childDid = client.Did.GenerateDidKey();
+        // The spec and the reference stack define only the POST; a scoped record has no bare-id status.
+        var http = Factory(host).CreateClient();
 
-        var root = await client.Capabilities.CreateRootCapabilityAsync(
-            rootDid, "https://example.com/resource", new[] { "read", "write" });
-        _factory.RootResolver.Register(root); // server resolves the root a spec-exact chain references by id
-        var delegated = await client.Capabilities.DelegateCapabilityAsync(
-            root, childDid, new[] { "read" }, DateTime.UtcNow.AddDays(5));
+        var response = await http.GetAsync("/zcaps/revocations/" + Uri.EscapeDataString("urn:uuid:" + Guid.NewGuid()));
 
-        // Unknown capability → not revoked.
-        (await GetStatusAsync(http, delegated.Id)).IsRevoked.Should().BeFalse();
-
-        var signed = await client.Signing.SignRevocationAsync(delegated.Id, childDid, delegated.InvocationTarget);
-        (await PostRevocationAsync(http, delegated.Id, delegated, signed)).StatusCode.Should().Be(HttpStatusCode.OK);
-
-        (await GetStatusAsync(http, delegated.Id)).IsRevoked.Should().BeTrue();
+        response.StatusCode.Should().Be(HttpStatusCode.MethodNotAllowed);
     }
 
     // ----- Issue #155: the capability id must be decoded exactly once -----
     //
     // A root id is urn:zcap:root: + encodeURIComponent(target), so it already carries percent-escapes
     // and reaches the server encoded twice. ASP.NET Core decodes the path once (keeping %2F) before
-    // routing; decoding the route value again turned every root id into a different id.
+    // routing; decoding the route value again turned every root id into a different id. The route/body
+    // id check runs before verification, so an unsigned body whose id matches the decoded route yields
+    // 403 (verification fails), while a mismatch yields 400.
 
     [Theory]
     [InlineData(Host.TestServer)]
     [InlineData(Host.Kestrel)]
-    public async Task Post_RootControllerRevokesRoot_Returns200AndStatusReflectsIt(Host host)
+    public async Task Post_RootControllerRevokesRoot_Returns200AndRecordsTheRootScope(Host host)
     {
         var http = Factory(host).CreateClient();
         var client = new Client();
@@ -252,84 +252,37 @@ public sealed class RevocationEndpointIntegrationTests
         var response = await PostRevocationAsync(http, root.Id, root, signed);
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
-        var status = await GetStatusAsync(http, root.Id);
-        status.IsRevoked.Should().BeTrue();
-        status.CapabilityId.Should().Be(root.Id);
+        (await ReadStatusAsync(response)).CapabilityId.Should().Be(root.Id);
+        (await IsRevokedAsync(host, root.Id, RevocationScope.Root)).Should().BeTrue();
+        (await IsRevokedAsync(host, root.Id, RevocationScope.Unscoped)).Should().BeFalse();
     }
 
     [Theory]
     [InlineData(Host.TestServer)]
     [InlineData(Host.Kestrel)]
-    public async Task Get_UnrevokedRoot_EchoesExactIdAndIsNotRevoked(Host host)
-    {
-        var http = Factory(host).CreateClient();
-        var client = new Client();
-        var root = await client.Capabilities.CreateRootCapabilityAsync(
-            client.Did.GenerateDidKey(), $"https://example.com/root-unrevoked/{host}");
-
-        var status = await GetStatusAsync(http, root.Id);
-
-        status.IsRevoked.Should().BeFalse();
-        status.CapabilityId.Should().Be(root.Id);
-    }
-
-    [Theory]
-    [InlineData(Host.TestServer)]
-    [InlineData(Host.Kestrel)]
-    public async Task Get_RootRevokedInProcess_ReportsRevoked(Host host)
-    {
-        // The fail-open case from the issue: the record is stored under the true id by any path other
-        // than this endpoint (in process, another node sharing the store), and GET must find it.
-        var http = Factory(host).CreateClient();
-        var client = new Client();
-        var rootDid = client.Did.GenerateDidKey();
-        var root = await client.Capabilities.CreateRootCapabilityAsync(rootDid, $"https://example.com/root-in-process/{host}");
-        Factory(host).RootResolver.Register(root);
-
-        var verifier = Factory(host).Services.GetRequiredService<IVerificationService>();
-        var signed = await client.Signing.SignRevocationAsync(root.Id, rootDid, root.InvocationTarget);
-        (await verifier.RevokeCapabilityAsync(root, signed)).Should().BeTrue();
-
-        var status = await GetStatusAsync(http, root.Id);
-        status.IsRevoked.Should().BeTrue();
-        status.CapabilityId.Should().Be(root.Id);
-    }
-
-    [Theory]
-    [InlineData(Host.TestServer)]
-    [InlineData(Host.Kestrel)]
-    public async Task Get_IdWithLiteralPercentEscape_EchoesExactlyAndDoesNotCollide(Host host)
+    public async Task Post_IdWithLiteralPercentEscape_IsDecodedOnce(Host host)
     {
         var http = Factory(host).CreateClient();
         var id = $"urn:example:{host}:a%41b";
-        await RevokeDirectlyInStoreAsync(host, id);
 
-        var status = await GetStatusAsync(http, id);
-        status.IsRevoked.Should().BeTrue();
-        status.CapabilityId.Should().Be(id);
-
-        // The double-decoded form is a different id and must not share the record.
-        var other = await GetStatusAsync(http, $"urn:example:{host}:aAb");
-        other.IsRevoked.Should().BeFalse();
-        other.CapabilityId.Should().Be($"urn:example:{host}:aAb");
+        (await PostUnsignedAsync(http, id, id)).StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        // The double-decoded form is a different id and must not match the route.
+        (await PostUnsignedAsync(http, id, $"urn:example:{host}:aAb")).StatusCode.Should().Be(HttpStatusCode.BadRequest);
     }
 
     [Theory]
     [InlineData(Host.TestServer)]
     [InlineData(Host.Kestrel)]
-    public async Task Get_RootFormId_UnaffectedByRevocationOfItsDecodedTwin(Host host)
+    public async Task Post_RootFormId_IsDistinctFromItsDecodedTwin(Host host)
     {
         // urn:zcap:root:https%3A%2F%2F… and urn:zcap:root:https://… are distinct ids. Before the fix both
-        // were looked up under the second.
+        // were read as the second.
         var http = Factory(host).CreateClient();
-        var decodedTwin = $"urn:zcap:root:https://collide-{host}.example";
         var rootForm = $"urn:zcap:root:https%3A%2F%2Fcollide-{host}.example";
-        await RevokeDirectlyInStoreAsync(host, decodedTwin);
+        var decodedTwin = $"urn:zcap:root:https://collide-{host}.example";
 
-        var status = await GetStatusAsync(http, rootForm);
-
-        status.IsRevoked.Should().BeFalse();
-        status.CapabilityId.Should().Be(rootForm);
+        (await PostUnsignedAsync(http, rootForm, rootForm)).StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await PostUnsignedAsync(http, rootForm, decodedTwin)).StatusCode.Should().Be(HttpStatusCode.BadRequest);
     }
 
     [Theory]
@@ -377,7 +330,7 @@ public sealed class RevocationEndpointIntegrationTests
         var response = await PostRevocationAsync(http, root.Id, impostor, signed);
 
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
-        (await GetStatusAsync(http, root.Id)).IsRevoked.Should().BeFalse();
+        (await IsRevokedAsync(host, root.Id, RevocationScope.Root)).Should().BeFalse();
     }
 
     [Theory]
@@ -413,15 +366,16 @@ public sealed class RevocationEndpointIntegrationTests
         var response = await PostRevocationAsync(http, victimRoot.Id, forged, signed);
 
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
-        (await GetStatusAsync(http, victimRoot.Id)).IsRevoked.Should().BeFalse();
+        (await IsRevokedAsync(host, victimRoot.Id, RevocationScope.Root)).Should().BeFalse();
+        (await IsRevokedAsync(host, victimRoot.Id, RevocationScope.Delegated(attackerDid))).Should().BeFalse(
+            "a known root id is refused outright; nothing is recorded in any scope");
     }
 
     [Fact]
-    public async Task Get_IdContainingSlash_OnKestrel_EchoesExactlyWhateverTheClientEncoding()
+    public async Task Post_IdContainingSlash_OnKestrel_IsDecodedOnceWhateverTheClientEncoding()
     {
         var http = _kestrel.CreateClient();
         const string id = "https://issuer.example/zcaps/42";
-        await RevokeDirectlyInStoreAsync(Host.Kestrel, id);
 
         // encodeURIComponent form, raw slashes, and lowercase escapes all name the same id.
         foreach (var path in new[]
@@ -431,27 +385,10 @@ public sealed class RevocationEndpointIntegrationTests
                      "/zcaps/revocations/https%3a%2f%2fissuer.example%2fzcaps%2f42",
                  })
         {
-            var status = await GetStatusByPathAsync(http, path);
-            status.IsRevoked.Should().BeTrue(path);
-            status.CapabilityId.Should().Be(id, path);
+            (await PostUnsignedByPathAsync(http, path, id)).StatusCode.Should().Be(HttpStatusCode.Forbidden, path);
         }
-    }
 
-    [Fact]
-    public async Task Get_RootFormAndDecodedTwin_OnKestrel_KeepDistinctStatus()
-    {
-        var http = _kestrel.CreateClient();
-        const string rootForm = "urn:zcap:root:https%3A%2F%2Fcollide-both.example";
-        const string decodedTwin = "urn:zcap:root:https://collide-both.example";
-        await RevokeDirectlyInStoreAsync(Host.Kestrel, rootForm);
-
-        var twin = await GetStatusAsync(http, decodedTwin);
-        twin.IsRevoked.Should().BeFalse();
-        twin.CapabilityId.Should().Be(decodedTwin);
-
-        var root = await GetStatusAsync(http, rootForm);
-        root.IsRevoked.Should().BeTrue();
-        root.CapabilityId.Should().Be(rootForm);
+        (await PostUnsignedAsync(http, id, "https://issuer.example/zcaps/43")).StatusCode.Should().Be(HttpStatusCode.BadRequest);
     }
 
     [Fact]
@@ -459,75 +396,75 @@ public sealed class RevocationEndpointIntegrationTests
     {
         var http = _kestrel.CreateClient();
         const string id = "https://issuer.example/zcaps/77";
-        var capability = new Capability
-        {
-            Id = id,
-            Controller = "did:example:owner",
-            InvocationTarget = "https://issuer.example/resource"
-        };
 
         // Unsigned request: the route/body id check runs before verification, so passing it yields 403
         // (verification fails), not 400.
-        var response = await PostRevocationAsync(http, id, capability, new Invocation());
+        var response = await PostUnsignedAsync(http, id, id);
 
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
     }
 
     [Fact]
-    public async Task Get_WithQueryString_OnKestrel_IgnoresTheQuery()
+    public async Task Post_WithQueryString_OnKestrel_IgnoresTheQuery()
     {
         var http = _kestrel.CreateClient();
         var client = new Client();
         var root = await client.Capabilities.CreateRootCapabilityAsync(
             client.Did.GenerateDidKey(), "https://example.com/root-query");
-        await RevokeDirectlyInStoreAsync(Host.Kestrel, root.Id);
 
-        var status = await GetStatusByPathAsync(http, "/zcaps/revocations/" + Uri.EscapeDataString(root.Id) + "?trace=1");
+        var response = await PostUnsignedByPathAsync(
+            http, "/zcaps/revocations/" + Uri.EscapeDataString(root.Id) + "?trace=1", root.Id);
 
-        status.IsRevoked.Should().BeTrue();
-        status.CapabilityId.Should().Be(root.Id);
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden, "the query is cut off the raw target before the id is recovered");
     }
 
     [Fact]
-    public async Task Get_IdContainingSlash_OnTestServer_WorksWithRawSlashes()
+    public async Task Post_IdContainingSlash_OnTestServer_WorksWithRawSlashes()
     {
         // Without a raw target the endpoint uses the route value, in which an encoded '/' stays %2F; raw
         // slashes pass through unchanged, so such ids remain addressable on that host.
         var http = _factory.CreateClient();
         const string id = "https://issuer.example/zcaps/43";
-        await RevokeDirectlyInStoreAsync(Host.TestServer, id);
 
-        var status = await GetStatusByPathAsync(http, "/zcaps/revocations/https://issuer.example/zcaps/43");
+        var response = await PostUnsignedByPathAsync(http, "/zcaps/revocations/https://issuer.example/zcaps/43", id);
 
-        status.IsRevoked.Should().BeTrue();
-        status.CapabilityId.Should().Be(id);
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
     }
 
-    /// <summary>Records a revocation under the true id, as any in-process or shared-store path would.</summary>
-    private Task RevokeDirectlyInStoreAsync(Host host, string capabilityId)
-        => Factory(host).Services.GetRequiredService<IRevocationStore>().UpsertAsync(new RevocationRecord
-        {
-            CapabilityId = capabilityId,
-            RevokedBy = "did:example:owner",
-            RevokedAt = DateTime.UtcNow
-        });
+    /// <summary>Reads the host's revocation state in the scope the capability is verified under (#158).</summary>
+    private Task<bool> IsRevokedAsync(Host host, string capabilityId, RevocationScope scope)
+        => Factory(host).Services.GetRequiredService<IRevocationService>().IsRevokedAsync(capabilityId, scope);
 
-    private static async Task<HttpResponseMessage> PostRevocationAsync(
+    private static Task<HttpResponseMessage> PostRevocationAsync(
         HttpClient client, string routeCapabilityId, Capability capability, Invocation signedRevocation)
+        => PostByPathAsync(client, $"/zcaps/revocations/{Uri.EscapeDataString(routeCapabilityId)}", capability, signedRevocation);
+
+    /// <summary>
+    /// Posts an unsigned request whose body names <paramref name="bodyCapabilityId"/>: 403 when the
+    /// decoded route id matches it (the route check passed; verification then fails), 400 otherwise.
+    /// </summary>
+    private static Task<HttpResponseMessage> PostUnsignedAsync(HttpClient client, string routeCapabilityId, string bodyCapabilityId)
+        => PostUnsignedByPathAsync(client, $"/zcaps/revocations/{Uri.EscapeDataString(routeCapabilityId)}", bodyCapabilityId);
+
+    private static Task<HttpResponseMessage> PostUnsignedByPathAsync(HttpClient client, string path, string bodyCapabilityId)
+        => PostByPathAsync(client, path, new Capability
+        {
+            Id = bodyCapabilityId,
+            Controller = "did:example:owner",
+            InvocationTarget = "https://issuer.example/resource"
+        }, new Invocation());
+
+    private static async Task<HttpResponseMessage> PostByPathAsync(
+        HttpClient client, string path, Capability capability, Invocation signedRevocation)
     {
         var payload = new SignedRevocationHttpRequest { Capability = capability, SignedRevocation = signedRevocation };
         var json = JsonSerializer.Serialize(payload, ZcapJsonOptions.Default);
         using var content = new StringContent(json, Encoding.UTF8, "application/json");
-        return await client.PostAsync($"/zcaps/revocations/{Uri.EscapeDataString(routeCapabilityId)}", content);
+        return await client.PostAsync(path, content);
     }
 
-    private static Task<RevocationStatusHttpResponse> GetStatusAsync(HttpClient client, string capabilityId)
-        => GetStatusByPathAsync(client, $"/zcaps/revocations/{Uri.EscapeDataString(capabilityId)}");
-
-    private static async Task<RevocationStatusHttpResponse> GetStatusByPathAsync(HttpClient client, string path)
+    private static async Task<RevocationStatusHttpResponse> ReadStatusAsync(HttpResponseMessage response)
     {
-        var response = await client.GetAsync(path);
-        response.EnsureSuccessStatusCode();
         var json = await response.Content.ReadAsStringAsync();
         return JsonSerializer.Deserialize<RevocationStatusHttpResponse>(
             json, new JsonSerializerOptions(JsonSerializerDefaults.Web))!;

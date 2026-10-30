@@ -144,14 +144,15 @@ by the verifier's trust store, not by the request's shape, and an unresolvable r
 or `urn:zcap:root:`-named id fails closed. An explicit root scopes the call: only that root,
 or a chain ending at it, can be revoked through it. A configured resolver is still asked
 whether the revoked id names a root, so a resolver fault fails the revocation closed; the
-request can be retried because its nonce is not consumed. Every other id is exposed to
-forced revocation; see [Revocation scope](#revocation-scope-known-limitation).
+request can be retried because its nonce is not consumed. Records are scoped to the
+delegator that signed the capability; see [Revocation scope](#revocation-scope).
 
 ASP.NET registers `AddZcapServices`, custom signer/resolver/root/nonce/revocation
 implementations, and `MapZcapRevocationEndpoints`. The revoke POST authenticates a
-signed request and caps its body. Anonymous status GET returns only ID and revoked
-state. Both endpoints address a capability as `{prefix}/{encodeURIComponent(id)}` and
-recover the id from the raw request target, decoded exactly once; ASP.NET Core's route
+signed request and caps its body. There is no status GET: the specification and the
+reference stack define only the POST, and a scoped record has no bare-id status. The
+endpoint addresses a capability as `{prefix}/{encodeURIComponent(id)}` and
+recovers the id from the raw request target, decoded exactly once; ASP.NET Core's route
 value is already decoded except for `%2F`, so decoding it again corrupted every root
 id (#155). A host without a raw target (TestServer) falls back to the route value, and
 an intermediary that decodes and re-encodes the path reintroduces the double decode.
@@ -163,36 +164,71 @@ library does not discover unknown verifiers, distribute revocations between
 independent operators, or poll a capability-supplied URI. See the
 [revocation guide](docs/REVOCATION-INTEGRATION.md).
 
-### Revocation scope (known limitation)
+### Revocation scope
 
-Revocation records are keyed by the bare capability id, not by the root or delegator
-that authorized them, and every verifier checks each chain link by that id. Only roots
-the revoking verifier trusts have anchored ids. Every other id is chosen by whoever signs
-the delegation. Anyone with a valid chain under any root a verifier trusts, whether a
-root controller or any delegate, can mint a delegated capability that carries another
-capability's id and revoke it. The demonstrated reach is:
+<a name="revocation-scope-known-limitation"></a>
 
-- delegated ids under the same root;
-- delegated ids under any other root the same verifier trusts, with no shared store involved;
-- custom root ids (not `urn:zcap:root:`) that another verifier sharing the store trusts
-  but the revoking verifier does not know.
+A capability id does not identify a capability on its own: a delegated id is chosen by
+whoever signs the delegation. Records keyed by the bare id (through 5.x) therefore let
+anyone with a valid chain under any root a verifier trusts mint a copy of another
+capability's id under their own chain, revoke it, and revoke the victim's capability with
+it: siblings under one root, delegations under any other root the verifier trusts, and
+custom root ids trusted only by another verifier sharing the store (#158).
 
-The effect is forced revocation, not an authority grant. It crosses tenants whenever one
-verifier or one revocation store serves several root owners, and capability ids are not
-secret. Fixing it means scoping records to their authorizing root and delegator, which
-changes the store interface; it is tracked in #158. Until then:
+Since 6.0.0 a record is keyed by the id and a `RevocationScope`, following
+`bedrock-zcap-storage`, which indexes `(delegator, capability.id)`, and
+`@digitalbazaar/zcap`, which reports each verified link's `delegator` to its revocation
+hook. The ZCAP specification defines no record key; it says only that a revocation is
+submitted to the verifier for the invocation target and stored until the capability expires.
 
-- use `urn:zcap:root:` ids for roots, because an unresolvable id in that form is refused;
-- co-host roots on one verifier, or share one revocation store, only among parties
-  trusted not to revoke each other's capabilities;
-- give every verifier that shares a store the same root resolver contents, so custom
-  root ids are anchored everywhere.
+- `Delegated(delegator)`: a delegated capability, where the delegator is the controller
+  identifier of the verification method that signed the link's delegation proof (the DID
+  before `#`). A verifier looks each link up under the delegator of the proof it has just
+  verified. The signed revocation path records the delegator of the proof the accepted
+  chain followed, plus every co-signer whose proof names the same chain and verifies, so a
+  proof set cannot be revived by dropping the recorded signer's proof.
+- `Root`: a root capability, authorized through the trust boundary (#155).
+- `Unscoped`: applies to the id on every link. Only migrated 5.x records and operator
+  writes through `IRevocationService.RevokeAsync` are unscoped; the signed path never
+  writes one.
 
-Two contracts keep the anchoring sound. Stores compare ids ordinally; a case-insensitive
-key would let `URN:ZCAP:ROOT:…` or a re-cased custom id land on a root's record, and the
-reserved prefix is therefore refused in every casing unless it resolves. Root resolvers
-return null for unknown ids rather than throwing, because revocation looks up the revoked
-id and a fault fails the revocation closed.
+A forged copy of an id under another chain is signed by the forger, so its record lands in
+the forger's scope, where no genuine chain looks. Writing a record in delegator D's scope
+needs a chain link signed by D's key, and D may already revoke what it delegated. The
+residual cases match the reference stack: a delegator that issues two children with one id
+(the library mints `urn:uuid` ids); a holder who re-routes a revoked capability under
+another chain they already hold, which grants nothing they lacked; a proof set naming
+several chains, which is revoked on the chain the request presents; and verifiers that
+share a store but disagree on what a root id means. Two further consequences are
+documented on `RevokeCapabilityAsync`: a capability co-signed by several co-controllers
+and revoked from a one-proof copy stays alive under the other signer's proof until that
+proof or co-controller revokes it, and a revoked delegated id re-presented as a
+self-asserted root is not matched, which matters only to an application that accepts a
+holder-supplied root object.
+
+The store key is `RevocationScope.KeyFor(id)`, a SHA-256 over the RFC 8785 form of the id
+and the scope's text, so no bare id is ever a key and collation cannot merge records.
+Stores implement `UpsertAsync`, a batched `GetAsync(keys)` and `DeleteAsync(key)`.
+`RevocationService` refuses a returned record whose key it did not request or whose stored
+id and scope disagree with its key, reads each record back after writing it, and evicts
+expired records by exact key, so a store that drops or rewrites the scope fails
+verification closed instead of widening a revocation. Revocation is looked up after a
+link's proof verifies, once per chain, where the JS stack runs `inspectCapabilityChain`;
+the standalone proof path evaluates each leaf proof as its own candidate (link first, then
+its ancestry), reaches every ancestor through the nested embedded parents, and verifies
+each ancestor's delegation proof as a chain link before trusting its delegator, failing
+that candidate closed when an embedded parent has no proof that fits its route and
+verifies: the presented ancestry is otherwise unauthenticated, and a revoked delegator
+could re-sign a child around a copy of its capability with the proof stripped or its
+verification method swapped. Candidate isolation is recursive: each ancestor proof is
+walked as its own route with its own lookups, a route that fails is discarded with
+everything it collected, and an ancestor fits through any of its proofs that reaches the
+root, so a failing candidate never vetoes a valid one at any level. The same holds
+through revocation: a co-signed ancestor yields one route per co-signer, each route is
+checked against its own links only, and the first unrevoked route is accepted, as the
+chain walk accepts the first unrevoked chain. Root resolvers
+return null for unknown ids rather than throwing, because
+revocation looks up the revoked id and a fault fails the revocation closed.
 
 ## Concurrency and limits
 

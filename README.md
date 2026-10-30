@@ -198,6 +198,8 @@ Use `ZcapLd.AspNetCore` when your runtime is ASP.NET and you want ready-made min
   exactly once, so a root id (`urn:zcap:root:https%3A%2F%2F…`) is encoded twice in the URL
 - Revoking a root over `POST` authorizes against the root the server's `IRootCapabilityResolver` returns,
   never the body's copy
+- There is no status GET (the spec and the JS stack define only the POST). Records are scoped to the
+  delegator that signed the capability (#158); holders learn of revocation from a `Revoked` outcome
 
 ### Expose Revocation in Other Ways
 

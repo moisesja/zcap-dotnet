@@ -194,8 +194,9 @@ public class RestatedTermTests
         var tampered = wire.Deserialize<Invocation>(ZcapJsonOptions.Default)!;
 
         (await Verifier(store).RevokeCapabilityAsync(readOnly, tampered)).Should().BeFalse();
-        (await store.GetByCapabilityIdAsync(readOnly.Id)).Should().BeNull();
+        var key = RevocationScope.ForDelegationProof(readOnly.Proof!.Primary).KeyFor(readOnly.Id);
+        (await store.GetAsync([key])).Should().BeEmpty();
         (await Verifier(store).RevokeCapabilityAsync(readOnly, signed)).Should().BeTrue();
-        (await store.GetByCapabilityIdAsync(readOnly.Id))!.Reason.Should().Be("key compromised");
+        (await store.GetAsync([key])).Single().Reason.Should().Be("key compromised");
     }
 }

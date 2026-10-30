@@ -222,13 +222,13 @@ public class CapabilityProfileTests
             ProofSigningPayloadBuilder.CloneInvocationWithoutProof(request), request.Proof!, LenientRdfcCanonicalizer.Instance);
         request.Proof!.ProofValue = MultibaseCodec.Encode((await _dids.SignAsync(_owner, bytes)).Signature);
         (await verifier.RevokeCapabilityAsync(leaf, request, root)).Should().BeFalse();
-        (await store.GetByCapabilityIdAsync(leaf.Id)).Should().BeNull();
+        (await store.GetAsync([RevocationScope.ForDelegationProof(leaf.Proof!.Primary).KeyFor(leaf.Id)])).Should().BeEmpty();
 
         leaf.AdditionalProperties?.Remove(key);
         root.AdditionalProperties?.Remove(key);
         var clean = await _signing.SignRevocationAsync(leaf.Id, _owner, leaf.InvocationTarget);
         (await verifier.RevokeCapabilityAsync(leaf, clean, root)).Should().BeTrue();
-        (await store.GetByCapabilityIdAsync(leaf.Id)).Should().NotBeNull();
+        (await store.GetAsync([RevocationScope.ForDelegationProof(leaf.Proof!.Primary).KeyFor(leaf.Id)])).Should().ContainSingle();
     }
 
     [Theory]
@@ -374,7 +374,8 @@ public class CapabilityProfileTests
             leaf.Id, _owner, leaf.InvocationTarget, metadata: new Dictionary<string, string> { [key] = "data" });
 
         (await verifier.RevokeCapabilityAsync(leaf, request, root)).Should().BeTrue();
-        (await store.GetByCapabilityIdAsync(leaf.Id))!.Metadata.Should().ContainKey(key).WhoseValue.Should().Be("data");
+        (await store.GetAsync([RevocationScope.ForDelegationProof(leaf.Proof!.Primary).KeyFor(leaf.Id)]))
+            .Single().Metadata.Should().ContainKey(key).WhoseValue.Should().Be("data");
     }
 
     [Fact]
@@ -507,6 +508,6 @@ public class CapabilityProfileTests
         revocation.Proof!.AdditionalProperties = new() { [member] = value };
         (await new VerificationService(_dids, new RevocationService(store), new InMemoryNonceStore())
             .RevokeCapabilityAsync(leaf, revocation, root)).Should().BeFalse();
-        (await store.GetByCapabilityIdAsync(leaf.Id)).Should().BeNull();
+        (await store.GetAsync([RevocationScope.ForDelegationProof(leaf.Proof!.Primary).KeyFor(leaf.Id)])).Should().BeEmpty();
     }
 }
