@@ -57,12 +57,18 @@ public class RdfcContextDocumentLoaderTests
     [Fact(DisplayName = "The P-256 context is the ed25519-2020/v1 context with the suite and key type names swapped")]
     public void P256Context_MirrorsTheEd25519Context()
     {
+        // Compared as RFC 8785 canonical JSON, so formatting and key order are irrelevant: only the
+        // term definitions matter.
+        static byte[] Canonical(string json) =>
+            NetCid.JcsCanonicalizer.Canonicalize(JsonDocument.Parse(json).RootElement);
         var ed25519 = RdfcContextDocumentLoader.Instance.Load(new Uri(Ed25519Context)).Content;
         var p256 = RdfcContextDocumentLoader.Instance.Load(new Uri(ZcapSuiteCatalog.P256ContextUrl)).Content;
 
-        p256.Replace("EcdsaSecp256r1Signature2019", "Ed25519Signature2020")
-            .Replace("EcdsaSecp256r1VerificationKey2019", "Ed25519VerificationKey2020")
-            .Should().Be(ed25519, "the local context must define exactly the terms the published suite context shape defines");
+        var renamed = p256.Replace("EcdsaSecp256r1Signature2019", "Ed25519Signature2020")
+            .Replace("EcdsaSecp256r1VerificationKey2019", "Ed25519VerificationKey2020");
+
+        Canonical(renamed).Should().Equal(Canonical(ed25519),
+            "the local context must define exactly the terms the published suite context shape defines");
     }
 
     [Fact(DisplayName = "The unpublished ecdsa-2019/v1 URL is neither a supported context nor served")]

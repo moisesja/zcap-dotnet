@@ -185,7 +185,7 @@ internal static class CapabilityProfile
 
         bool CheckContext(object? context)
         {
-            bool Known(string? url) => url == "https://w3id.org/zcap/v1" || ZcapSuiteCatalog.IsSupportedContext(url) ||
+            bool Known(string? url) => url == ZcapSuiteCatalog.ZcapContextUrl || ZcapSuiteCatalog.IsSupportedContext(url) ||
                                        (registry is not null && url is not null && registry.TryGetByContextUrl(url, out _));
             if (context is string url) return Known(url);
             var json = context is JsonElement element ? element : JsonSerializer.SerializeToElement(context);

@@ -136,9 +136,9 @@ Planned as 6.0.0 (breaking: new interface/constructor parameters and in-stack si
   invocation and revocation failed with `ProofGenerationException`. A P-256 capability now carries
   zcap-dotnet's own suite context, `urn:zcap-dotnet:ecdsa-secp256r1-2019-context:v1` (the
   `ed25519-2020/v1` shape with the P-256 suite and key type names, embedded and never fetched). It
-  defines the same terms as the published definitions of the type (`security/v2`, `credentials/v1`),
-  so the signed N-Quads do not depend on the choice; the unpublished URL is no longer a supported
-  context. P-256 remains a zcap-dotnet-only profile. New tests sign and verify P-256 delegation, chain
+  defines the same terms as the `ed25519-2020/v1` shape, and a probe against the published definitions
+  of the type (`security/v2`, `credentials/v1`) produced identical N-Quads, so the choice does not
+  affect signed bytes; the unpublished URL is no longer a supported context. P-256 remains a zcap-dotnet-only profile. New tests sign and verify P-256 delegation, chain
   verification, envelope and Data Integrity invocation, revocation, a mixed Ed25519/P-256 chain and the
   suite-context binding; golden vectors pin the fixed-key did:key, the RDFC-1.0 signing payload and a
   frozen proof. Caveat registration now reserves the terms of every catalog suite context and fails

@@ -83,6 +83,12 @@ public class LegacyProofCryptoVariantTests
             : crypto.Verify(KeyType.P256, resolved.PublicKeyBytes, rdfcPayload, signature, EcdsaSignatureFormat.IeeeP1363);
         validOverRdfc.Should().BeFalse("the JCS variant signs different bytes");
 
+        // Turns this pin red the moment the DataProofs pin gains the option that turns the fallback off,
+        // so the flip cannot be forgotten on a dependency bump.
+        typeof(LegacyCanonicalization).Assembly.GetType("DataProofsDotnet.Legacy.DataIntegrity.LegacyVariantVerification")
+            .Should().BeNull("DataProofs now ships LegacyVariantVerification: construct both suites in LegacyProofCrypto " +
+                             "with ConstructedVariantOnly and assert InvalidSignature below");
+
         delegated.Proof = forged;
         var result = await verifier.VerifyCapabilityProofDetailedAsync(delegated);
 

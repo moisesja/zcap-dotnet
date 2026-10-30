@@ -1,3 +1,4 @@
+using NetCrypto;
 using ZcapLd.Core.Models;
 using ZcapLd.Core.Services;
 using ZcapLd.Examples;
@@ -8,7 +9,11 @@ var dids = new InMemoryDidProvider();
 const string owner = "did:key:z6MkOwner";
 const string agent = "did:key:z6MkAgent";
 const string assistant = "did:key:z6MkAssistant";
-foreach (var did in new[] { owner, agent, assistant }) dids.GenerateAndRegisterKeyPair(did);
+// The agent signs with P-256 (EcdsaSecp256r1Signature2019), the others with Ed25519Signature2020:
+// each link carries its signer's suite context, and a chain can mix suites (#159).
+dids.GenerateAndRegisterKeyPair(owner);
+dids.GenerateAndRegisterKeyPair(agent, KeyType.P256);
+dids.GenerateAndRegisterKeyPair(assistant);
 var signing = new SigningService(dids, dids);
 var capabilities = new CapabilityService(signing);
 var revocations = new RevocationService(new InMemoryRevocationStore());

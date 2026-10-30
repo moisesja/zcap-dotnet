@@ -47,7 +47,7 @@ public class VerificationService : IVerificationService
     /// </summary>
     internal const int MaxChainCandidates = 16;
     private const string RootIdPrefix = "urn:zcap:root:";
-    private const string ZcapV1Context = "https://w3id.org/zcap/v1";
+    private const string ZcapV1Context = ZcapSuiteCatalog.ZcapContextUrl;
 
     /// <summary>
     /// Default window during which invocation nonces are tracked for replay protection. Also serves as

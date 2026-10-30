@@ -10,7 +10,7 @@ namespace ZcapLd.Examples;
 
 /// <summary>
 /// Example IDidSigner + IDidResolver (+ IVerificationRelationshipResolver) for demonstration
-/// purposes. Stores Ed25519 private keys in plaintext memory — NOT for production use.
+/// purposes. Stores Ed25519 or P-256 private keys in plaintext memory — NOT for production use.
 ///
 /// In production, implement IDidSigner backed by your secure key management system
 /// (HSM, Azure Key Vault, AWS KMS, etc.) and IDidResolver backed by a
@@ -22,26 +22,32 @@ public class InMemoryDidProvider : IDidSigner, IDidResolver, IVerificationRelati
 {
     private static readonly DefaultCryptoProvider Crypto = new();
     private static readonly DefaultKeyGenerator KeyGen = new();
-    private readonly ConcurrentDictionary<string, byte[]> _keyStore = new();
+    private readonly ConcurrentDictionary<string, (KeyType KeyType, byte[] PrivateKey)> _keyStore = new();
     private readonly ConcurrentDictionary<string, Capability> _rootStore = new(StringComparer.Ordinal);
     private readonly DidKeyResolver _didKeyResolver = new();
 
     public Task<SignatureResult> SignAsync(string did, byte[] data)
     {
-        if (!_keyStore.TryGetValue(did, out var privateKey))
+        if (!_keyStore.TryGetValue(did, out var key))
             throw new InvalidOperationException($"No private key registered for DID: {did}");
 
-        var signatureBytes = Crypto.Sign(KeyType.Ed25519, privateKey, data);
-        return Task.FromResult(new SignatureResult(signatureBytes, "Ed25519Signature2020"));
+        // The suite is chosen by the key: Ed25519Signature2020 signs the message; the P-256 suite
+        // (EcdsaSecp256r1Signature2019) signs the IEEE P1363 r||s wire form the W3C suite defines.
+        return Task.FromResult(key.KeyType == KeyType.Ed25519
+            ? new SignatureResult(Crypto.Sign(KeyType.Ed25519, key.PrivateKey, data), "Ed25519Signature2020")
+            : new SignatureResult(
+                Crypto.Sign(KeyType.P256, key.PrivateKey, data, EcdsaSignatureFormat.IeeeP1363),
+                "EcdsaSecp256r1Signature2019"));
     }
 
     public Task<ResolvedKey> ResolvePublicKeyAsync(string didOrVerificationMethod)
     {
         var baseDid = didOrVerificationMethod.Split('#')[0];
-        if (_keyStore.TryGetValue(baseDid, out var privateKey))
+        if (_keyStore.TryGetValue(baseDid, out var key))
         {
-            var publicKey = KeyGen.FromPrivateKey(KeyType.Ed25519, privateKey).PublicKey;
-            return Task.FromResult(new ResolvedKey(publicKey, "Ed25519VerificationKey2020"));
+            var publicKey = KeyGen.FromPrivateKey(key.KeyType, key.PrivateKey).PublicKey;
+            var keyType = key.KeyType == KeyType.Ed25519 ? "Ed25519VerificationKey2020" : "EcdsaSecp256r1VerificationKey2019";
+            return Task.FromResult(new ResolvedKey(publicKey, keyType));
         }
 
         return _didKeyResolver.ResolvePublicKeyAsync(didOrVerificationMethod);
@@ -71,11 +77,15 @@ public class InMemoryDidProvider : IDidSigner, IDidResolver, IVerificationRelati
             : VerificationRelationshipAuthorizationResult.NotAuthorized());
     }
 
-    public void GenerateAndRegisterKeyPair(string did)
+    /// <summary>Generates and stores an Ed25519 (default) or P-256 key for <paramref name="did"/>.</summary>
+    public void GenerateAndRegisterKeyPair(string did, KeyType keyType = KeyType.Ed25519)
     {
+        if (keyType is not (KeyType.Ed25519 or KeyType.P256))
+            throw new ArgumentException("Only Ed25519 and P-256 keys sign ZCAP proofs.", nameof(keyType));
+
         // Notice that this is unsecured. Make sure to use a secure key management solution in production.
-        var kp = KeyGen.Generate(KeyType.Ed25519);
-        _keyStore[did] = kp.PrivateKey;
+        var kp = KeyGen.Generate(keyType);
+        _keyStore[did] = (keyType, kp.PrivateKey);
     }
 
     /// <summary>

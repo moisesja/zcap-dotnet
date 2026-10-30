@@ -89,9 +89,21 @@ internal sealed class CaveatTypeRegistration
         // Every context a capability may carry besides caveat contexts: zcap/v1 and each supported
         // suite's (#159). The loader must serve all of them. A supported suite whose context it cannot
         // serve is a build defect, so this throws rather than silently reserving nothing for it.
-        foreach (var url in new[] { "https://w3id.org/zcap/v1" }.Concat(ZcapSuiteCatalog.ContextUrls))
+        foreach (var url in new[] { ZcapSuiteCatalog.ZcapContextUrl }.Concat(ZcapSuiteCatalog.ContextUrls))
         {
-            using var document = JsonDocument.Parse(RdfcContextDocumentLoader.Instance.Load(new Uri(url)).Content);
+            string content;
+            try
+            {
+                content = RdfcContextDocumentLoader.Instance.Load(new Uri(url)).Content;
+            }
+            catch (Exception ex) when (ex is DataProofsDotnet.Rdfc.RdfCanonicalizationException or JsonException)
+            {
+                throw new InvalidOperationException(
+                    $"The supported context '{url}' could not be loaded: the ZcapLd.Core build is missing or " +
+                    "corrupting an embedded context resource, so no caveat type can be registered.", ex);
+            }
+
+            using var document = JsonDocument.Parse(content);
             Collect(document.RootElement);
         }
 

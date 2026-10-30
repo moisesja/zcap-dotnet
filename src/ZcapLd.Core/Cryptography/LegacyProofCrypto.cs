@@ -24,7 +24,7 @@ namespace ZcapLd.Core.Cryptography;
 /// </summary>
 internal sealed class LegacyProofCrypto
 {
-    private const string ZcapContext = "https://w3id.org/zcap/v1";
+    private const string ZcapContext = ZcapSuiteCatalog.ZcapContextUrl;
 
     // RDFC canonicalizer wired with zcap's offline context loader (serves zcap/v1, the suite contexts,
     // the revocation context and the generated context of each registered caveat type). RDFC-1.0 (W3C RDF Dataset

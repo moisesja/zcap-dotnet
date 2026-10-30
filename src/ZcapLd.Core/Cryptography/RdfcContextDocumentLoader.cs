@@ -36,19 +36,21 @@ internal sealed class RdfcContextDocumentLoader : IDocumentLoader
     /// </summary>
     internal const string RevocationContextUrl = "urn:zcap-dotnet:revocation-context:v1";
 
-    // Context URL → embedded resource name. Ordinal keying so URL matching is exact.
-    private static readonly IReadOnlyDictionary<string, string> ResourceByUrl =
-        new Dictionary<string, string>(StringComparer.Ordinal)
+    // Context URL → embedded resource name. Ordinal keying so URL matching is exact. The suite entries
+    // come from the catalog (#159), so a suite the catalog advertises is always one this loader serves.
+    private static readonly IReadOnlyDictionary<string, string> ResourceByUrl = BuildResourceMap();
+
+    private static Dictionary<string, string> BuildResourceMap()
+    {
+        var map = new Dictionary<string, string>(StringComparer.Ordinal)
         {
-            ["https://w3id.org/zcap/v1"] =
-                "ZcapLd.Core.Cryptography.Contexts.zcap-v1.jsonld",
-            ["https://w3id.org/security/suites/ed25519-2020/v1"] =
-                "ZcapLd.Core.Cryptography.Contexts.ed25519-2020-v1.jsonld",
-            [ZcapSuiteCatalog.P256ContextUrl] =
-                "ZcapLd.Core.Cryptography.Contexts.ecdsa-secp256r1-2019-v1.jsonld",
-            [RevocationContextUrl] =
-                "ZcapLd.Core.Cryptography.Contexts.zcap-dotnet-revocation-v1.jsonld",
+            [ZcapSuiteCatalog.ZcapContextUrl] = "ZcapLd.Core.Cryptography.Contexts.zcap-v1.jsonld",
+            [RevocationContextUrl] = "ZcapLd.Core.Cryptography.Contexts.zcap-dotnet-revocation-v1.jsonld",
         };
+        foreach (var suite in ZcapSuiteCatalog.Suites)
+            map.Add(suite.ContextUrl, suite.ContextResource);
+        return map;
+    }
 
     private static readonly Assembly ResourceAssembly = typeof(RdfcContextDocumentLoader).Assembly;
 
