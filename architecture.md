@@ -127,8 +127,8 @@ is published for `EcdsaSecp256r1Signature2019` (#159). It defines the same terms
 suite context, so the signed N-Quads do not depend on it. The loader derives its suite entries
 from `ZcapSuiteCatalog`, which also drives the caveat reserved terms, and a test loads every
 catalog context. The
-DataProofs legacy suites also accept a JCS-variant proof of the same type; zcap never produces
-one, and the acceptance is pinned until DataProofs lets a verifier refuse it.
+DataProofs legacy suites are constructed with `LegacyVariantVerification.ConstructedVariantOnly`, so a
+JCS-variant proof of the same type does not verify; a test pins the refusal.
 
 The DI verifier requires expected action/targets and can pin root IDs. It validates
 the application context before trusting the proof so invocation fields cannot be

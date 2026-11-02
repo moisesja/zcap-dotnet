@@ -106,16 +106,16 @@ internal sealed class LegacyProofCrypto
         };
     }
 
-    // zcap signs RDFC-1.0 only. DataProofs 1.5.0's legacy suites verify the construction-time variant
-    // first and then fall back to the other, because the JCS and RDFC variants share the proof type:
-    // a proof made with DataProofs' JCS variant therefore still verifies here (#159). That is not a
-    // forgery path (JCS binds every member verbatim) and LegacyProofCryptoVariantTests pins it. Once
-    // DataProofs ships LegacyVariantVerification.ConstructedVariantOnly, construct both suites with
-    // it and flip that test (tracked follow-up to #159).
+    // RDFC-1.0 only (#159). DataProofs' legacy suites verify the construction-time variant and, by
+    // default, fall back to the other, because the JCS and RDFC variants share the proof type. zcap has
+    // no JCS profile (removed in 4.0.0), so a JCS-signed proof must not verify here, and an invalid proof
+    // is canonicalized once, not twice. LegacyProofCryptoVariantTests pins the refusal.
     private ICryptosuite Create(string proofType)
         => proofType == Ed25519Signature2020Cryptosuite.ProofType
-            ? new Ed25519Signature2020Cryptosuite(LegacyCanonicalization.Rdfc, _rdfCanonicalizer)
-            : new EcdsaSecp256r1Signature2019Cryptosuite(LegacyCanonicalization.Rdfc, _rdfCanonicalizer);
+            ? new Ed25519Signature2020Cryptosuite(
+                LegacyCanonicalization.Rdfc, _rdfCanonicalizer, LegacyVariantVerification.ConstructedVariantOnly)
+            : new EcdsaSecp256r1Signature2019Cryptosuite(
+                LegacyCanonicalization.Rdfc, _rdfCanonicalizer, LegacyVariantVerification.ConstructedVariantOnly);
 
     /// <summary>
     /// The contexts a context-less document (an envelope invocation or a signed revocation) and its

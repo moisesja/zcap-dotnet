@@ -12,21 +12,20 @@ using ZcapLd.Core.Tests.Helpers;
 namespace ZcapLd.Core.Tests.Cryptography;
 
 /// <summary>
-/// Pins which legacy-suite variants zcap's verifier accepts (#159, acceptance criterion 2). zcap signs
-/// RDFC-1.0 only, but DataProofs 1.5.0's legacy suites verify the construction-time variant first and then
-/// fall back to the other, because the JCS and RDFC variants share a proof <c>type</c> and carry no
-/// <c>cryptosuite</c>. A proof produced with DataProofs' JCS variant over a zcap capability is therefore
-/// accepted today. That is not a forgery path (JCS binds every member verbatim) but it is wider than the
-/// documented RDFC-1.0 profile. When DataProofs ships <c>LegacyVariantVerification.ConstructedVariantOnly</c>,
-/// <see cref="LegacyProofCrypto"/> adopts it and this test flips to <see cref="VerificationOutcome.InvalidSignature"/>
-/// (tracked follow-up to #159).
+/// zcap signs and verifies RDFC-1.0 only (#159, acceptance criterion 2). DataProofs' legacy suites verify the
+/// construction-time variant and, by default, fall back to the other, because the JCS and RDFC variants share
+/// a proof <c>type</c> and carry no <c>cryptosuite</c>; on DataProofs 1.5.0 a JCS-variant proof over a zcap
+/// capability therefore verified. <see cref="LegacyProofCrypto"/> constructs both suites with
+/// <c>LegacyVariantVerification.ConstructedVariantOnly</c> (DataProofs 2.0.0), so such a proof is refused as an
+/// invalid signature. JCS binds every member verbatim, so the fallback was never a forgery path; it accepted
+/// input outside the documented profile.
 /// </summary>
 public class LegacyProofCryptoVariantTests
 {
-    [Theory(DisplayName = "A JCS-variant legacy proof is accepted through DataProofs' fallback (pinned; flips with ConstructedVariantOnly)")]
+    [Theory(DisplayName = "A JCS-variant legacy proof is refused: only RDFC-1.0 proofs verify")]
     [InlineData(KeyType.Ed25519)]
     [InlineData(KeyType.P256)]
-    public async Task JcsVariantProof_IsCurrentlyAccepted_AndIsNotAnRdfcSignature(KeyType keyType)
+    public async Task JcsVariantProof_IsRefused_AndIsNotAnRdfcSignature(KeyType keyType)
     {
         var did = new InMemoryDidProvider();
         var signing = new SigningService(did, did);
@@ -83,17 +82,10 @@ public class LegacyProofCryptoVariantTests
             : crypto.Verify(KeyType.P256, resolved.PublicKeyBytes, rdfcPayload, signature, EcdsaSignatureFormat.IeeeP1363);
         validOverRdfc.Should().BeFalse("the JCS variant signs different bytes");
 
-        // Turns this pin red the moment the DataProofs pin gains the option that turns the fallback off,
-        // so the flip cannot be forgotten on a dependency bump.
-        typeof(LegacyCanonicalization).Assembly.GetType("DataProofsDotnet.Legacy.DataIntegrity.LegacyVariantVerification")
-            .Should().BeNull("DataProofs now ships LegacyVariantVerification: construct both suites in LegacyProofCrypto " +
-                             "with ConstructedVariantOnly and assert InvalidSignature below");
-
         delegated.Proof = forged;
         var result = await verifier.VerifyCapabilityProofDetailedAsync(delegated);
 
-        result.Outcome.Should().Be(VerificationOutcome.Valid,
-            "DataProofs 1.5.0 falls back to the JCS variant; assert InvalidSignature once LegacyProofCrypto " +
-            "constructs the suites with LegacyVariantVerification.ConstructedVariantOnly");
+        result.Outcome.Should().Be(VerificationOutcome.InvalidSignature,
+            "LegacyProofCrypto constructs the suites with ConstructedVariantOnly, so the JCS variant is never tried");
     }
 }

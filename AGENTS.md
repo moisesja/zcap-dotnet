@@ -137,8 +137,10 @@ bash interop/run-interop.sh
   Context-less documents (envelope invocations, signed revocations) are canonicalized under
   zcap/v1 plus the proof's suite context, so `created`/`proofPurpose` are signed (#157). Revocations
   also get `urn:zcap-dotnet:revocation-context:v1`, which defines their purpose, reason and metadata.
-  DataProofs ≥ 1.5.0 refuses undefined terms and dropped or respelled IRIs. That is a second layer
-  only for RDFC: its legacy verifier also accepts the JCS variant, which signs bytes verbatim.
+  DataProofs ≥ 1.5.0 refuses undefined terms and dropped or respelled IRIs, and 2.0.0 compares the proof
+  members it models (`created`, `expires`, `proofPurpose`, `verificationMethod`, …) with the signed
+  N-Quads. zcap constructs the legacy suites with `LegacyVariantVerification.ConstructedVariantOnly`, so
+  only the RDFC-1.0 variant verifies (#159).
   Adversarial tests forge with `LenientRdfcCanonicalizer` (test helper) and assert zcap's specific
   outcome, so they keep proving zcap's own checks reject first.
 - **Identifiers (#157)**: RDFC normalizes IRIs, so keys must be the signed form. Capability,

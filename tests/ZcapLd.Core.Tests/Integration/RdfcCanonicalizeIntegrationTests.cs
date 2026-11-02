@@ -84,8 +84,7 @@ public class RdfcCanonicalizeIntegrationTests
     [InlineData("\"invocationTarget\":\"HTTPS://example.com/foo\"", "spell differently")]
     public void LossyInput_RefusedByProductionButSignedByLenient(string member, string cause)
     {
-        // DataProofs 1.5.0 is a second layer behind zcap's own checks for RDFC proofs (its legacy
-        // verifier also accepts the JCS variant, which signs bytes verbatim). Tests that forge such
+        // DataProofs is a second layer behind zcap's own checks for RDFC proofs. Tests that forge such
         // documents sign them with LenientRdfcCanonicalizer and assert zcap's own outcome.
         var json = $"{{\"@context\":{Contexts},\"id\":\"urn:uuid:lossy\",\"allowedAction\":\"read\",{member}}}";
 

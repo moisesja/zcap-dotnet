@@ -107,6 +107,14 @@ Planned as 6.0.0 (breaking: new interface/constructor parameters and in-stack si
 
 ### Changed
 
+- **DataProofsDotnet.Core, Rdfc and Legacy 2.0.0** (from 1.5.0). The proof members DataProofs models
+  (`created`, `expires`, `proofPurpose`, `verificationMethod`, `challenge`, `domain`, `nonce`, …) are now
+  compared with the signed N-Quads in both directions (GHSA-6fxh-mc39-94vc), so a modeled member renamed
+  away through a context, or one the issuer never signed, fails as an invalid signature. zcap's
+  `capabilityChain`, `capability`, `capabilityAction` and `invocationTarget` are unmodeled there and remain
+  bound by zcap's own context and profile checks. RDFC tied-blank-node labelling is corrected upstream;
+  zcap documents carry no such nodes and every golden vector is unchanged. Strings with `` are
+  now signed instead of refused. Consumers must recompile against 2.0.0 (legacy-suite constructor change).
 - `DataProofsDotnet.Core`/`Rdfc`/`Legacy` 1.3.0 → 1.5.0 (see Security for the fail-closed
   canonicalization; accepted input signs the same bytes). `NetDid.Core`/`Method.Key` 3.1.0 → 4.0.0:
   its breaking change concerns did:webvh witness files, which zcap does not use.
@@ -151,12 +159,13 @@ Planned as 6.0.0 (breaking: new interface/constructor parameters and in-stack si
   frozen proof. Caveat registration now reserves the terms of every catalog suite context and fails
   loudly when the loader cannot serve one (it silently skipped the P-256 context). The test
   `InMemoryDidProvider` holds P-256 keys.
-- **JCS-variant verification is pinned (#159).** DataProofs 1.5.0's legacy suites also verify a proof
-  made with their JCS variant (the variants share a proof type), including one over a document carrying
-  members no context defines. zcap never produces one and the fallback is not a forgery path (JCS binds
-  every member verbatim), but it is wider than the RDFC-1.0 profile.
-  `LegacyProofCryptoVariantTests` pins the current acceptance for both suites; the fallback is turned
-  off once DataProofs ships `LegacyVariantVerification.ConstructedVariantOnly` (follow-up to #159).
+- **JCS-variant legacy proofs no longer verify (#159).** DataProofs' legacy suites fall back from the
+  RDFC variant to the JCS variant by default (the variants share a proof type), including over a document
+  carrying members no context defines. zcap never produced one and the fallback was not a forgery path
+  (JCS binds every member verbatim), but it was wider than the RDFC-1.0 profile. The suites are now
+  constructed with `LegacyVariantVerification.ConstructedVariantOnly` (DataProofs 2.0.0): a JCS-variant
+  `Ed25519Signature2020` or `EcdsaSecp256r1Signature2019` proof returns `InvalidSignature`, and an invalid
+  proof is canonicalized once instead of twice. `LegacyProofCryptoVariantTests` pins the refusal.
 - A proof member DataProofs models with a fixed JSON type, given another type (`"domain": 123`,
   `"challenge": {}`), made the proof mapping throw. Verification reported `CouldNotVerify`, which is
   reserved for infrastructure faults, and logged it as one. The profile gate now refuses such a proof
