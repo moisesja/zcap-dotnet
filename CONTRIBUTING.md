@@ -80,9 +80,8 @@ Examples:
    - Core: `core-v<major>.<minor>.<patch>` (for example `core-v0.2.0`)
    - ASP.NET adapter: `aspnet-v<major>.<minor>.<patch>` (for example `aspnet-v0.2.0`)
 4. Push tag to GitHub.
-5. Package-specific publish workflows push NuGet packages using:
-   - `NUGET_API_KEY_CORE` (or fallback `NUGET_API_KEY`)
-   - `NUGET_API_KEY_ASPNET` (or fallback `NUGET_API_KEY`)
+5. Package-specific publish workflows push NuGet packages through nuget.org Trusted Publishing,
+   with one policy per workflow (`docs/NUGET-RELEASE.md`). The repository stores no API key.
 
 ## Security Reporting
 
