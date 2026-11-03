@@ -15,8 +15,10 @@ permissions:
   contents: read
 
 jobs:
-  publish-aspnet:
+  build-aspnet:
     runs-on: ubuntu-latest
+    outputs:
+      package_version: ${{ steps.version.outputs.package_version }}
 
     steps:
       - name: Checkout
@@ -109,24 +111,34 @@ jobs:
             artifacts/aspnet/*.snupkg
           if-no-files-found: error
 
-      - name: Resolve NuGet API key
-        id: apikey
-        shell: bash
-        run: |
-          API_KEY="${{ secrets.NUGET_API_KEY_ASPNET }}"
-          if [[ -z "$API_KEY" ]]; then
-            API_KEY="${{ secrets.NUGET_API_KEY }}"
-          fi
+  # A separate job because id-token: write covers every step in a job. This one runs no repository
+  # or dependency code, so nothing built or tested above can obtain a nuget.org publishing token.
+  publish-aspnet:
+    needs: build-aspnet
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
 
-          if [[ -z "$API_KEY" ]]; then
-            echo "Neither NUGET_API_KEY_ASPNET nor NUGET_API_KEY is configured."
-            exit 1
-          fi
+    steps:
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
 
-          echo "api_key=$API_KEY" >> "$GITHUB_OUTPUT"
+      - name: Download ASP.NET adapter package artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: aspnet-nuget-release-${{ needs.build-aspnet.outputs.package_version }}
+          path: artifacts/aspnet
+
+      - name: NuGet login (Trusted Publishing)
+        id: login
+        uses: NuGet/login@v1
+        with:
+          user: moisesja
 
       - name: Publish ASP.NET adapter package to NuGet.org
-        run: dotnet nuget push "artifacts/aspnet/ZcapLd.AspNetCore.*.nupkg" --api-key "${{ steps.apikey.outputs.api_key }}" --source "https://api.nuget.org/v3/index.json" --skip-duplicate
+        run: dotnet nuget push "artifacts/aspnet/ZcapLd.AspNetCore.*.nupkg" --api-key "${{ steps.login.outputs.NUGET_API_KEY }}" --source "https://api.nuget.org/v3/index.json" --skip-duplicate
 
       - name: Publish ASP.NET adapter symbols to NuGet.org
-        run: dotnet nuget push "artifacts/aspnet/ZcapLd.AspNetCore.*.snupkg" --api-key "${{ steps.apikey.outputs.api_key }}" --source "https://api.nuget.org/v3/index.json" --skip-duplicate
+        run: dotnet nuget push "artifacts/aspnet/ZcapLd.AspNetCore.*.snupkg" --api-key "${{ steps.login.outputs.NUGET_API_KEY }}" --source "https://api.nuget.org/v3/index.json" --skip-duplicate

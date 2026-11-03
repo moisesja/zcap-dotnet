@@ -39,9 +39,8 @@ Related revocation integration guidance: `docs/REVOCATION-INTEGRATION.md`.
    - `core-vX.Y.Z`
    - `aspnet-vX.Y.Z`
 4. Run both CI workflows on shared interface changes (`src/ZcapLd.Core`), since the adapter depends on core contracts.
-5. Prefer package-specific API keys:
-   - `NUGET_API_KEY_CORE`
-   - `NUGET_API_KEY_ASPNET`
+5. Publish through nuget.org Trusted Publishing, with one policy per release workflow
+   (`docs/NUGET-RELEASE.md`).
 
 ## Dependency Considerations
 

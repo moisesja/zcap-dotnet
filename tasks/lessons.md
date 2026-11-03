@@ -1,5 +1,22 @@
 # Lessons Learned
 
+## 2026-11-02 — Release 6.0.0: Trusted Publishing, branch upstreams and what a run really uses
+
+- **Correction from the owner:** "API keys are no longer recommended." I gave step-by-step instructions
+  for a new NuGet key without checking current guidance. Publish through nuget.org Trusted Publishing
+  (`NuGet/login`), and check the vendor's current recommendation before walking anyone through a credential.
+- `git checkout -b x origin/main` makes `origin/main` the upstream, so a plain push or a VS Code Sync on
+  `x` goes to `main`. The output said so ("set up to track 'origin/main'") and I missed it, and the 6.0.0
+  prep commits reached `main` with no PR. Use `git checkout --no-track -b x origin/main`, and check the
+  branch immediately before committing, because the checkout can move underneath you.
+- `gh secret list` shows when a secret was set, not whether the key still works. A publish that succeeded
+  a week earlier proves nothing either. Don't report a credential as fine because it exists.
+- A tag-triggered run uses the workflow file from the tag's commit, so `gh run rerun` cannot pick up a
+  workflow fix. If nothing was published, move the tag.
+- `id-token: write` covers every step in its job. Publish from a separate job that runs no repository or
+  dependency code, or any test dependency can request a publishing token.
+- `gh run watch … | tail; echo $?` reports `tail`. Read the run's `conclusion` before saying how it went.
+
 ## 2026-11-03 — PR #163 review: a profile rule must be tested on the wire shape, and a canonicalizer bump must be tested with pre-upgrade artifacts
 
 - **Correction 1.** My proof-level `@context` rule covered typed `Proof.AdditionalProperties` only; the

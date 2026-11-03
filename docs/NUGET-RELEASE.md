@@ -12,12 +12,21 @@ Related developer docs:
 
 ## One-Time Setup
 
-1. Create NuGet.org API keys with push permissions.
-2. In GitHub repository settings, configure secrets:
-   - `NUGET_API_KEY_CORE` (preferred for core releases)
-   - `NUGET_API_KEY_ASPNET` (preferred for ASP.NET adapter releases)
-   - `NUGET_API_KEY` (optional shared fallback)
-3. Ensure default branch is `main`.
+Publishing uses [nuget.org Trusted Publishing](https://learn.microsoft.com/nuget/nuget-org/trusted-publishing).
+Each release run exchanges a GitHub OIDC token for a NuGet API key valid for one hour, so the
+repository stores no key.
+
+1. On nuget.org, open your username menu, choose **Trusted Publishing**, and add one policy per
+   release workflow, owned by `moisesja`:
+
+   | Repository Owner | Repository | Workflow File | Environment |
+   | --- | --- | --- | --- |
+   | `moisesja` | `zcap-dotnet` | `release-core-nuget.yml` | empty |
+   | `moisesja` | `zcap-dotnet` | `release-aspnet-nuget.yml` | empty |
+
+2. Ensure default branch is `main`.
+
+Renaming a release workflow file requires updating its policy.
 
 ## CI Workflows
 
@@ -27,6 +36,13 @@ Related developer docs:
 Both run on push/PR with path filters and can be run manually.
 
 ## Release Workflows
+
+Each workflow builds, tests and packs in one job and publishes in a second. Only the publish job
+has `id-token: write`, and it runs no repository or dependency code, because that permission covers
+every step in a job. Keep it that way.
+
+A tag-triggered run uses the workflow file from the tag's commit, so a fix to a release workflow
+does not apply to an existing tag, and rerunning a failed run repeats the old workflow.
 
 ### Core Package Release
 
@@ -80,7 +96,8 @@ dotnet pack src/ZcapLd.AspNetCore/ZcapLd.AspNetCore.csproj -c Release --no-build
 
 ## Troubleshooting
 
-- `Neither NUGET_API_KEY_* nor NUGET_API_KEY is configured`: configure package-specific secret (or shared fallback).
+- `NuGet login (Trusted Publishing)` fails: check the policy's owner, repository and workflow file
+  name on nuget.org. Nothing has been uploaded at that point, so the job can be rerun once fixed.
 - `skip duplicate` on push is non-fatal when retrying the same version.
 - Inspect package integrity with:
 

@@ -24,11 +24,31 @@ to NuGet is irreversible for a version number). Branch: `release-6.0.0`.
 - [x] Stale statements: `Directory.Build.props` comment, supported-profile target version.
 - [x] Confirm the AOT limitation on 6.0.0; state it in the CHANGELOG, README and Core package README.
 - [x] Date CHANGELOG 6.0.0.
-- [ ] Preflight on the branch: clean Release build, full tests, pack, verify packages.
-- [ ] PR → CI green → merge commit.
-- [ ] Tag `core-v6.0.0` and `aspnet-v6.0.0` on the merge commit and push.
-- [ ] Watch both release workflows; verify nuget.org and a scratch consumer.
-- [ ] Comment on #161 with the decision and corrections.
+- [x] Preflight on the branch: clean Release build, full tests, pack, verify packages.
+- [x] Commits reached `main` directly (see "What changed"); CI passed on e5b03a5.
+- [x] Tag e5b03a5; both publishes refused because `NUGET_API_KEY` had expired. Nothing uploaded.
+- [x] Move publishing to Trusted Publishing, with a separate publish job.
+- [ ] Merge the workflow change; move the tags to that merge commit.
+- [ ] Publish Core, wait for nuget.org, then publish ASP.NET.
+- [ ] Verify nuget.org and a scratch consumer.
+- [ ] Delete the `NUGET_API_KEY` secret; comment on #161 with the decision and corrections.
+
+## What changed after approval
+
+- **Direct push to `main`.** About 20 seconds after the two prep commits, a push from this clone
+  moved `main` to e5b03a5 with no PR. None of the agent's commands pushed then, and the trigger
+  could not be determined. `git checkout -b release-6.0.0 origin/main` had set `origin/main` as the
+  branch's upstream, so any plain push or Sync on that branch went to `main`. The history was left
+  alone, because a force-push would have rewritten the default branch for an identical tree.
+- **Expired API key.** The owner directed the move to Trusted Publishing instead of a new key:
+  "API keys are no longer recommended."
+- **Tags move.** A run uses the workflow file from the tag's commit, so rerunning the failed runs
+  could not pick up the change. No package was published from the old tags, and moving them keeps
+  each tag equal to the commit recorded in its package.
+- **Separate publish job.** `id-token: write` covers every step in a job, and the old job built and
+  tested. Only a job that runs no repository or dependency code gets the permission.
+- **Core before ASP.NET,** per `docs/MONOREPO-PIPELINES.md`, so the new pipeline's first real run
+  risks one package.
 
 ## Results
 
