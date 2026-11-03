@@ -119,6 +119,12 @@ internal static class CapabilityProfile
             {
                 if (capabilityLevel && property.Name == CaveatCodec.Property)
                     caveat = property.Value;
+                else if (capabilityLevel && property.Name == "proof")
+                {
+                    // A serialized capability's proofs (an embedded ancestor on the wire) follow the typed
+                    // Proof rules below; elsewhere "proof" is an ordinary member.
+                    if (!CheckRawProofs(property.Value, depth + 1)) return false;
+                }
                 else if (!CheckProperty(property.Name, property.Value, depth))
                     return false;
                 if (property.Name == "@context")
@@ -126,6 +132,40 @@ internal static class CapabilityProfile
             }
 
             return caveat is not { } caveatValue || CheckCaveat(caveatValue, context);
+        }
+
+        // A proof reached as JSON: an embedded ancestor's proof or proof array on the wire. The same rules
+        // as a typed Proof (#159 review): no @context of its own (it is never signed), capabilityChain
+        // entries and an embedded capability are capability-level, every other member is ordinary.
+        bool CheckRawProofs(JsonElement value, int depth)
+        {
+            if (--remaining < 0 || depth > MaxInspectionDepth)
+                return Fail(Malformed(InspectionLimitMessage));
+            if (value.ValueKind == JsonValueKind.Array)
+                return value.EnumerateArray().All(entry => CheckRawProofs(entry, depth + 1));
+            if (value.ValueKind != JsonValueKind.Object)
+                return Check(value, depth);
+
+            foreach (var member in value.EnumerateObject())
+            {
+                if (member.Name == "@context")
+                    return Fail(Malformed(ProofContextMessage));
+                if (member.Name == "capabilityChain" && member.Value.ValueKind == JsonValueKind.Array)
+                {
+                    if (!member.Value.EnumerateArray().All(entry => Check(entry, depth + 1, capabilityLevel: true)))
+                        return false;
+                }
+                else if (member.Name == "capability" && member.Value.ValueKind == JsonValueKind.Object)
+                {
+                    if (!Check(member.Value, depth + 1, capabilityLevel: true)) return false;
+                }
+                else if (!CheckProperty(member.Name, member.Value, depth))
+                {
+                    return false;
+                }
+            }
+
+            return true;
         }
 
         bool CheckCapabilityProperties(Dictionary<string, JsonElement>? properties, object? context, int depth)

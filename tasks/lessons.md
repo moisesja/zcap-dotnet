@@ -1,5 +1,23 @@
 # Lessons Learned
 
+## 2026-11-03 — PR #163 review: a profile rule must be tested on the wire shape, and a canonicalizer bump must be tested with pre-upgrade artifacts
+
+- **Correction 1.** My proof-level `@context` rule covered typed `Proof.AdditionalProperties` only; the
+  reviewer showed a serialized embedded parent (a `JsonElement` chain entry, the normal wire shape)
+  passing signing and standalone verification. Rule: a profile rule has two code paths (typed model and
+  raw JSON) and the wire is raw; write the deny-test with `JsonNode`-edited, JSON-round-tripped input,
+  for proof arrays and for an ancestor nested inside the parent's proof. Doing so also exposed a
+  pre-existing bug (depth-3 caveat chains refused on the wire).
+- **Correction 2.** I wrote "zcap documents carry no such [tied blank] nodes" because the goldens and the
+  suite stayed green. The reviewer generated 16 co-signed chains on the base and 7 failed on the head.
+  Rule: when a signing or canonicalization dependency changes an algorithm, generate artifacts with the
+  OLD version (a worktree at the pre-bump commit), verify them on the new one, and freeze an affected and
+  an unaffected one as fixtures; "green tests and unchanged simple goldens do not establish
+  compatibility for embedded proof sets". Never assert absence of a shape without enumerating the
+  shapes zcap signs (embedded parents with proof sets are one).
+- A test helper that tracks the production algorithm hides cross-version breaks: after fixing the
+  lenient signer, only frozen pre-upgrade bytes can show what old issuers produced.
+
 ## 2026-11-02 — Issue #159 / DataProofs 2.0.0: a test helper that re-implements a production algorithm drifts when the dependency fixes a bug
 
 - `LenientRdfcCanonicalizer` (test helper) called dotNetRDF 3.5.1's `RdfCanonicalizer` directly, while

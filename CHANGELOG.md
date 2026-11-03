@@ -34,7 +34,10 @@ Planned as 6.0.0 (breaking: new interface/constructor parameters and in-stack si
 - A proof may no longer carry its own `@context` (#159 adversarial review). Proofs are canonicalized
   under the document's context and DataProofs replaces a proof-level one before RDFC, so the member
   was accepted on the wire but never signed or read. It is now refused on every path (delegation,
-  envelope and Data Integrity invocation, signed revocation), at signing as well as verification. The
+  envelope and Data Integrity invocation, signed revocation), at signing as well as verification,
+  including the proofs of serialized embedded ancestors at any depth and proof arrays (the normal wire
+  representation, which the first cut missed: PR #163 review); the standalone route walk also
+  re-validates each deserialized ancestor against the profile. The
   standalone proof path (`VerifyCapabilityProofAsync`) now applies the chain path's context-shape rule:
   a delegated capability must list zcap/v1 first and the signing suite's context. Caveat type and
   parameter names also reserve the revocation context's terms.
@@ -112,9 +115,18 @@ Planned as 6.0.0 (breaking: new interface/constructor parameters and in-stack si
   compared with the signed N-Quads in both directions (GHSA-6fxh-mc39-94vc), so a modeled member renamed
   away through a context, or one the issuer never signed, fails as an invalid signature. zcap's
   `capabilityChain`, `capability`, `capabilityAction` and `invocationTarget` are unmodeled there and remain
-  bound by zcap's own context and profile checks. RDFC tied-blank-node labelling is corrected upstream;
-  zcap documents carry no such nodes and every golden vector is unchanged. Strings with `` are
-  now signed instead of refused. Consumers must recompile against 2.0.0 (legacy-suite constructor change).
+  bound by zcap's own context and profile checks. RDFC tied-blank-node labelling is corrected upstream
+  (dotnetrdf#917). **Breaking (wire): this changes the signed bytes of some existing capabilities.** A
+  delegation whose `capabilityChain` embeds a parent that carries two or more delegation proofs (a
+  co-signed parent) canonicalizes those proof graphs as tied blank nodes. 5.x and earlier labelled them in
+  dotNetRDF's defective order, so a child signed then verifies under 6.0 only when that order happened to
+  be the correct one: 13 of 24 generated chains return `InvalidSignature`. The co-signed parent itself,
+  single-proof chains and every golden vector are unchanged. Reissue (re-delegate) affected children under
+  6.0. Verifiers on 5.x and 6.0 disagree on such children, so during a rollout either upgrade every
+  verifier before reissuing, or expect an affected child to be refused by whichever side did not sign it.
+  `DataProofsCanonicalizationCompatibilityTests` pins a pre-upgrade affected chain (`InvalidSignature`)
+  and an unaffected one (`Valid`) from `tests/ZcapLd.Core.Tests/Compliance/fixtures`. Strings with
+  `@direction` are now signed instead of refused. Consumers must recompile against 2.0.0 (legacy-suite constructor change).
   The lenient test canonicalizer (`LenientRdfcCanonicalizer`) keeps dotNetRDF's lossy expansion but now
   canonicalizes through DataProofs, so adversarial signers share the corrected labelling.
 - `DataProofsDotnet.Core`/`Rdfc`/`Legacy` 1.3.0 → 1.5.0 (see Security for the fail-closed
@@ -147,6 +159,12 @@ Planned as 6.0.0 (breaking: new interface/constructor parameters and in-stack si
 
 ### Fixed
 
+- **Caveat chains of three or more delegations were refused on the wire.** The profile scan treated an
+  embedded ancestor's own `capabilityChain` entries as ordinary members, so a grandparent's caveat inside
+  the parent's serialized proof was refused as unsupported vocabulary once the leaf had been parsed from
+  JSON; the same chain verified while it was still typed in the issuing process. Found while closing the
+  serialized-proof `@context` gap (PR #163 review): `CheckRawProofs` now scans those entries
+  capability-level. `DeepCaveatChainWireTests` pins it.
 - **P-256 (`EcdsaSecp256r1Signature2019`) could not sign or RDFC-verify (#159).** The suite catalog
   advertised it with `https://w3id.org/security/suites/ecdsa-2019/v1`, a URL from the 2022 CG draft
   that was never published, so the offline context loader failed closed and every P-256 delegation,

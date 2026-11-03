@@ -2336,6 +2336,12 @@ public class VerificationService : IVerificationService
         if (!string.Equals(parent.Id, current.ParentCapability, StringComparison.Ordinal))
             return RouteWalk.NoFit;
 
+        // Defense in depth (#159 review): the entry gate scanned this ancestor as raw JSON; the typed copy
+        // verified below must pass the same profile, so a proof-level @context or other unsupported
+        // vocabulary cannot ride in through a route the gate did not see.
+        if (CapabilityProfile.Validate(parent, caveats: _caveats) is not null)
+            return RouteWalk.NoFit;
+
         // The embedded parent is trusted only through a proof of its own that names the prefix AND
         // verifies as a chain link against the next ancestor AND whose own ancestry walks to the root; it
         // is then looked up under that proof's delegator. Each proof is its own branch: a branch that

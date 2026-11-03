@@ -149,6 +149,14 @@ embedded parent).
 > **NetCid**. This is **source-breaking** (recompile; the `NetDid.Core.Crypto.*` types moved to
 > `NetCrypto.*`) but **wire-compatible**: the `Ed25519Signature2020` / `EcdsaSecp256r1Signature2019`
 > proof bytes are unchanged, so capabilities issued by 3.x still verify — no re-delegation.
+>
+> **Breaking change (6.0.0):** DataProofs 2.0.0 corrects RDFC-1.0 tied-blank-node labelling. A
+> delegation whose `capabilityChain` embeds a **co-signed** parent (two or more delegation proofs)
+> canonicalizes those proofs as tied blank nodes, so a child signed by 5.x over such a parent may
+> return `InvalidSignature` under 6.0 (about half do). Re-delegate affected children under 6.0, and
+> upgrade verifiers before issuers: a 5.x verifier and a 6.0 verifier disagree on them. Single-proof
+> chains, co-signed parents themselves and golden vectors are unchanged. Envelope invocations and
+> signed revocations signed by 5.x also do not verify under 6.0 (see the CHANGELOG).
 
 ## Revocation Extensibility
 

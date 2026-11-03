@@ -3,6 +3,8 @@ using System.Text.Json.Nodes;
 using FluentAssertions;
 using NetCrypto;
 using Xunit;
+using ZcapLd.Core.Cryptography;
+using ZcapLd.Core.Exceptions;
 using ZcapLd.Core.Models;
 using ZcapLd.Core.Services;
 using ZcapLd.Core.Tests.Helpers;
@@ -141,4 +143,96 @@ public class ProofContextRejectionTests
     }
 
     private static string ZcapSuiteCatalogP256Context() => ZcapLd.Core.Cryptography.ZcapSuiteCatalog.P256ContextUrl;
+
+    // ─── Serialized embedded ancestors (the normal wire representation) ───────────────────────────────
+    // A capabilityChain entry parsed from JSON is a JsonElement, not a typed Capability, so its proofs are
+    // scanned as raw JSON. The @context rule must hold there too (PR #163 review): the chain walk later
+    // deserializes the ancestor and verifies it without re-running the profile.
+
+    private const string Ed25519Context = "https://w3id.org/security/suites/ed25519-2020/v1";
+
+    private static JsonElement Serialized(Capability capability, Action<JsonObject> edit)
+    {
+        var node = JsonNode.Parse(CapabilityJson.Serialize(capability))!.AsObject();
+        edit(node);
+        return JsonSerializer.SerializeToElement(node, ZcapJsonOptions.Default);
+    }
+
+    private async Task AssertRefusedAsync(Capability child, string signer, object[] chain)
+    {
+        // The issuer refuses to sign the shape.
+        var unsigned = CapabilityJson.Parse(CapabilityJson.Serialize(child));
+        unsigned.Proof = null;
+        var act = () => _signing.SignCapabilityAsync(unsigned, signer, Proof.CapabilityDelegationPurpose, chain);
+        (await act.Should().ThrowAsync<CapabilityValidationException>())
+            .WithMessage($"*{CapabilityProfile.ProofContextMessage}*");
+
+        // A holder on a lenient stack signs it anyway: both verification paths refuse it, before and after
+        // a full JSON round trip of the leaf.
+        var forged = CapabilityJson.Parse(CapabilityJson.Serialize(child));
+        forged.Proof = await RawProofSigner.SignCapabilityAsync(_did, forged, signer, chain);
+        foreach (var candidate in new[] { forged, CapabilityJson.Parse(CapabilityJson.Serialize(forged)) })
+        {
+            var standalone = await _verifier.VerifyCapabilityProofDetailedAsync(candidate);
+            standalone.Outcome.Should().Be(VerificationOutcome.MalformedCapability);
+            standalone.Message.Should().Contain(CapabilityProfile.ProofContextMessage);
+            var fullChain = await _verifier.VerifyCapabilityChainDetailedAsync(candidate);
+            fullChain.Outcome.Should().Be(VerificationOutcome.MalformedCapability);
+        }
+    }
+
+    [Fact(DisplayName = "A serialized embedded parent whose proof carries @context is refused at signing and on both paths")]
+    public async Task EmbeddedParentProof_WithOwnContext_SerializedInput_IsRefused()
+    {
+        var owner = _did.GenerateDidKey();
+        var mid = _did.GenerateDidKey();
+        var holder = _did.GenerateDidKey();
+        var root = _did.RegisterRoot(await _caps.CreateRootCapabilityAsync(owner, Target, new[] { "read" }));
+        var parent = await _caps.DelegateCapabilityAsync(root, mid, new[] { "read" }, DateTime.UtcNow.AddHours(2));
+        var child = await _caps.DelegateCapabilityAsync(parent, holder, new[] { "read" }, DateTime.UtcNow.AddHours(1));
+        (await _verifier.VerifyCapabilityProofDetailedAsync(child)).Outcome.Should().Be(VerificationOutcome.Valid);
+
+        var rawParent = Serialized(parent, node => node["proof"]!["@context"] = Ed25519Context);
+
+        await AssertRefusedAsync(child, mid, new object[] { root.Id, rawParent });
+    }
+
+    [Fact(DisplayName = "A proof array on a serialized embedded parent is scanned member by member")]
+    public async Task EmbeddedParentProofArray_WithOwnContextOnOneMember_IsRefused()
+    {
+        var ownerA = _did.GenerateDidKey();
+        var ownerB = _did.GenerateDidKey();
+        var mid = _did.GenerateDidKey();
+        var holder = _did.GenerateDidKey();
+        var root = _did.RegisterRoot(await _caps.CreateRootCapabilityAsync(new[] { ownerA, ownerB }, Target, new[] { "read" }));
+        var parent = await _caps.DelegateCapabilityAsync(root, mid, new[] { "read" }, DateTime.UtcNow.AddHours(2), signerDid: ownerA);
+        var second = await _signing.SignCapabilityAsync(parent, ownerB, Proof.CapabilityDelegationPurpose, new object[] { root.Id });
+        parent.Proof = ProofSet.FromValues(new[] { parent.Proof!.Primary, second });
+        var child = await _caps.DelegateCapabilityAsync(parent, holder, new[] { "read" }, DateTime.UtcNow.AddHours(1));
+        (await _verifier.VerifyCapabilityChainDetailedAsync(child)).Outcome.Should().Be(VerificationOutcome.Valid);
+
+        var rawParent = Serialized(parent, node => node["proof"]!.AsArray()[1]!["@context"] = Ed25519Context);
+
+        await AssertRefusedAsync(child, mid, new object[] { root.Id, rawParent });
+    }
+
+    [Fact(DisplayName = "A proof @context on the ancestor embedded inside the parent's proof is refused")]
+    public async Task DeeperEmbeddedAncestorProof_WithOwnContext_IsRefused()
+    {
+        var owner = _did.GenerateDidKey();
+        var a = _did.GenerateDidKey();
+        var b = _did.GenerateDidKey();
+        var c = _did.GenerateDidKey();
+        var root = _did.RegisterRoot(await _caps.CreateRootCapabilityAsync(owner, Target, new[] { "read" }));
+        var first = await _caps.DelegateCapabilityAsync(root, a, new[] { "read" }, DateTime.UtcNow.AddHours(3));
+        var second = await _caps.DelegateCapabilityAsync(first, b, new[] { "read" }, DateTime.UtcNow.AddHours(2));
+        var third = await _caps.DelegateCapabilityAsync(second, c, new[] { "read" }, DateTime.UtcNow.AddHours(1));
+        (await _verifier.VerifyCapabilityChainDetailedAsync(third)).Outcome.Should().Be(VerificationOutcome.Valid);
+
+        // second's proof embeds first; the @context goes on first's proof inside second's serialized copy.
+        var rawSecond = Serialized(second,
+            node => node["proof"]!["capabilityChain"]!.AsArray()[1]!["proof"]!["@context"] = Ed25519Context);
+
+        await AssertRefusedAsync(third, b, new object[] { root.Id, first.Id, rawSecond });
+    }
 }
