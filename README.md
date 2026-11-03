@@ -31,6 +31,11 @@ dotnet add package ZcapLd.Core
 dotnet add package ZcapLd.AspNetCore # Optional endpoint adapter
 ```
 
+ZcapLd needs reflection-based `System.Text.Json`, so native AOT, trimmed apps and .NET 10
+file-based apps (`dotnet run app.cs`) are not supported yet: the first delegation throws
+`InvalidOperationException` ("Reflection-based serialization has been disabled…"), and nothing
+is authorized. Use a regular `net10.0` project (#154).
+
 ## Quick Start
 
 ```csharp

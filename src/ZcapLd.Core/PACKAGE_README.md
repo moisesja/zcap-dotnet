@@ -56,5 +56,10 @@ every chain. A forged copy of an id under another chain lands in the forger's sc
 genuine chain looks. Custom `IRevocationStore`s key rows by `RevocationRecord.Key`, never by the
 id. See [Revocation scope](https://github.com/moisesja/zcap-dotnet/blob/main/architecture.md#revocation-scope).
 
+ZcapLd needs reflection-based `System.Text.Json`, so native AOT, trimmed apps and .NET 10
+file-based apps (`dotnet run app.cs`) are not supported yet: the first delegation throws
+`InvalidOperationException` ("Reflection-based serialization has been disabled…"), and nothing
+is authorized. Use a regular `net10.0` project (#154).
+
 See [the repository](https://github.com/moisesja/zcap-dotnet) for the full guide,
 policy options, examples and live JavaScript interoperability tests.

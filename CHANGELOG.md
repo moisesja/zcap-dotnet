@@ -5,9 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [6.0.0] - 2026-11-02
 
-Planned as 6.0.0 (breaking: new interface/constructor parameters and in-stack signing bytes).
+Breaking: new interface and constructor parameters, a scoped `IRevocationStore`, in-stack signing
+bytes, and re-delegation of some children of co-signed parents. See Changed and Security below.
+
+### Known limitations
+
+- Native AOT, trimmed apps and .NET 10 file-based apps (`dotnet run app.cs`) are not supported: the
+  library needs reflection-based `System.Text.Json`, so the first delegation throws
+  `InvalidOperationException` ("Reflection-based serialization has been disabled…") and nothing is
+  authorized (#154).
 
 ### Added
 
@@ -246,6 +254,13 @@ Planned as 6.0.0 (breaking: new interface/constructor parameters and in-stack si
   `RevocationService` refuses records it did not request, reads each write back before the replay
   nonce is consumed, and evicts expired records by exact key, so a misbehaving store fails closed.
   The revocation-authorization memo of refused controllers now records refusals only.
+- Accepted for this release (#161): a signed revocation request binds the capability id, not the copy
+  presented with it, and it does not name a verifier (`invocationTarget` is signed but only compared
+  with the request body). Records are written before the nonce is consumed, so a failed write can be
+  retried. A captured request can be re-posted while fresh (five minutes by default) with another
+  copy of the id, which records that copy's scopes before the replay is refused, or sent to another
+  verifier that trusts the chain. It can only widen a revocation the signer could have made, and it
+  grants nothing.
 
 ## [5.0.0] - 2026-10-25
 

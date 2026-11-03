@@ -3,7 +3,8 @@
     <!-- Shared major version: #157 restores custom caveats as a signed, opt-in extension
          profile (new interface/constructor parameters) and signs envelope invocation/revocation
          `created` under the suite context (in-stack signing bytes change). Capability proof
-         bytes remain unchanged (RDFC-1.0). -->
+         bytes are unchanged (RDFC-1.0), except for a child of a co-signed parent (DataProofs
+         2.0.0, #159). -->
     <ZcapLdVersion>6.0.0</ZcapLdVersion>
   </PropertyGroup>
 </Project>
