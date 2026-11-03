@@ -218,6 +218,14 @@ public interface IVerificationService
     /// not matched by its record, so, as everywhere, never pass a holder-supplied root object to the
     /// chain or envelope verification APIs.
     /// </para>
+    /// <para>
+    /// A request binds the capability id, not the copy presented with it, and it does not name a
+    /// verifier: its signed <c>invocationTarget</c> is only compared with the request body (#161). While
+    /// it is fresh (five minutes by default), a captured request can be re-posted with another copy of
+    /// the id, which records that copy's scopes before the replay check returns false, or sent to
+    /// another verifier that trusts the chain, which records it too. Both still need a chain on which
+    /// the signer may revoke, so a replay can only widen a revocation the signer could have made.
+    /// </para>
     /// </remarks>
     /// <param name="capability">The capability to revoke, with its full delegation chain.</param>
     /// <param name="signedRevocation">The signed request from <see cref="ISigningService.SignRevocationAsync"/>.</param>

@@ -2536,16 +2536,17 @@ public class VerificationService : IVerificationService
             // Record the revocation durably BEFORE consuming the replay nonce. If the store write
             // throws, control passes to the fail-closed catch with the nonce still unconsumed, so a
             // legitimate retry with the same signed request is not mistaken for a replay when nothing
-            // was actually recorded. Revocation is idempotent, so the only cost of this ordering is a
-            // replayed-after-eviction request re-applying the same record before the nonce check
-            // below rejects it — harmless. (INonceStore has no release primitive, so reordering is
-            // the minimal robust fix.)
+            // was actually recorded. The cost of this ordering: a replay inside the freshness window
+            // writes before the nonce check below rejects it, and the request binds the capability id,
+            // not the copy, so a replay presenting a fuller copy also records that copy's scopes (#161).
+            // Those scopes still come from a chain the signer may revoke. (INonceStore has no release
+            // primitive, so reordering is the minimal robust fix.)
             var revokerDid = RevocationScope.DelegatorOf(proof.VerificationMethod);
             if (!await RevokeCapabilityCoreAsync(capability.Id, grant, revokerDid, reason, metadata))
                 return false;
 
             // Replay protection (nonce = request id): consumed only after the durable write
-            // succeeded. A replayed id still returns false here; the record was idempotent.
+            // succeeded. A replayed id still returns false here, without undoing what it wrote.
             var nonceExpiry = DateTime.UtcNow.Add(_nonceWindow);
             if (await _nonceStore.TryMarkAsUsedAsync(signedRevocation.Id, nonceExpiry))
                 return false;

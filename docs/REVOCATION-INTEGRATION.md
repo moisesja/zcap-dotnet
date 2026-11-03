@@ -266,7 +266,27 @@ revocation request under its own revocation context (`urn:zcap-dotnet:revocation
 defines them and the `capabilityRevocation` purpose. Editing either one now invalidates the request.
 
 They are still informational: they are recorded on the `RevocationRecord` for audit, and never
-decide authorization. Authorization rests on the bound capability (`capability`), the `revoke`
-action (`capabilityAction`), the `invocationTarget` and the revoker's identity, authenticated by key
-possession (`RevokedBy` is the verification method that signed the request, never client-asserted).
-Revocation requests signed by 5.x do not verify under 6.0, and vice versa.
+decide authorization. Authorization rests on the bound capability id (`capability`), the `revoke`
+action (`capabilityAction`) and the revoker's identity, authenticated by key possession (`RevokedBy`
+is the verification method that signed the request, never client-asserted). The `invocationTarget`
+is signed and must match the request body, but it is not compared with the capability or the
+verifier. Revocation requests signed by 5.x do not verify under 6.0, and vice versa.
+
+### Security note — a signed request binds the id, not the copy (6.0.0)
+
+A signed revocation request binds the capability id. It does not bind the capability object sent
+with it, and it does not name a verifier. Records are written before the replay nonce is consumed,
+so a failed store write can be retried with the same request.
+
+While a request is fresh (five minutes by default, the verifier's `nonceWindow`), anyone who
+captured it can re-post it:
+
+- **With another copy of the id.** That copy's scopes are recorded, and the replay is then refused.
+  For example, a co-signed capability revoked from a one-proof copy can also be revoked under its
+  other signers.
+- **To another verifier that trusts the chain.** That verifier records it too.
+
+Neither reaches beyond the signer's authority: the verifier must trust the chain, and the signer
+must be allowed to revoke on it, so a replay can only widen a revocation the signer could have made.
+It never grants access. Binding the request to the copy is tracked in
+[#161](https://github.com/moisesja/zcap-dotnet/issues/161).

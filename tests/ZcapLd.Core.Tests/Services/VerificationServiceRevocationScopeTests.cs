@@ -624,6 +624,82 @@ public class VerificationServiceRevocationScopeTests
         (await _verifier.VerifyCapabilityChainDetailedAsync(bothChild)).Outcome.Should().Be(VerificationOutcome.Revoked);
     }
 
+    // ----- (l) a request binds the capability id, not the copy, until its nonce is spent (#161) -----
+
+    [Fact]
+    public async Task Replay_WithAFullerCopy_RecordsTheCoSigner_ThenIsDeniedByTheNonce()
+    {
+        var alice = _dids.GenerateDidKey();
+        var bob = _dids.GenerateDidKey();
+        var holder = _dids.GenerateDidKey();
+        var root = await RootAsync(new[] { alice, bob }, "https://example.com/replay-copy");
+        var aliceOnly = await DelegateAsync(root, holder, signerDid: alice);
+        var bobProof = await _signing.SignCapabilityAsync(aliceOnly, bob, "capabilityDelegation", new object[] { root.Id });
+        var bothProofs = CapabilityJson.Parse(CapabilityJson.Serialize(aliceOnly));
+        bothProofs.Proof = ProofSet.FromValues([aliceOnly.Proof!.Primary, bobProof]);
+        var request = await _signing.SignRevocationAsync(aliceOnly.Id, alice, aliceOnly.InvocationTarget);
+
+        (await _verifier.RevokeCapabilityAsync(aliceOnly, request)).Should().BeTrue();
+        (await _verifier.IsCapabilityRevokedAsync(aliceOnly.Id, RevocationScope.Delegated(bob))).Should().BeFalse(
+            "the presented copy carries only Alice's proof");
+
+        (await _verifier.RevokeCapabilityAsync(bothProofs, request)).Should().BeFalse("the request id is spent");
+        (await _verifier.IsCapabilityRevokedAsync(aliceOnly.Id, RevocationScope.Delegated(bob))).Should().BeTrue(
+            "the write precedes the nonce, and the revoker could have presented this copy");
+    }
+
+    [Fact]
+    public async Task Replay_WithACopyTheRevokerHasNoAuthorityOver_RecordsNothing()
+    {
+        var revoker = _dids.GenerateDidKey();
+        var holder = _dids.GenerateDidKey();
+        var stranger = _dids.GenerateDidKey();
+        var root = await RootAsync(revoker, "https://example.com/replay-authority");
+        var genuine = await DelegateAsync(root, holder);
+        var strangerRoot = await RootAsync(stranger, "https://stranger.example/replay-authority");
+        var copy = Forge(genuine.Id, stranger, strangerRoot);
+        copy.Proof = await _signing.SignCapabilityAsync(copy, stranger, "capabilityDelegation", new object[] { strangerRoot.Id });
+        var request = await _signing.SignRevocationAsync(genuine.Id, revoker, genuine.InvocationTarget);
+
+        (await _verifier.RevokeCapabilityAsync(genuine, request)).Should().BeTrue();
+        (await _verifier.RevokeCapabilityAsync(copy, request)).Should().BeFalse(
+            "no link of the stranger's chain authorizes the revoker");
+
+        (await _verifier.IsCapabilityRevokedAsync(copy.Id, RevocationScope.Delegated(stranger))).Should().BeFalse();
+        (await _verifier.VerifyCapabilityChainDetailedAsync(copy)).Outcome.Should().Be(VerificationOutcome.Valid);
+    }
+
+    [Fact]
+    public async Task Replay_AtAVerifierWithItsOwnStores_RecordsThere_OnlyIfItTrustsTheChain()
+    {
+        var owner = _dids.GenerateDidKey();
+        var holder = _dids.GenerateDidKey();
+        var root = await RootAsync(owner, "https://example.com/replay-verifiers");
+        var leaf = await DelegateAsync(root, holder);
+        var request = await _signing.SignRevocationAsync(leaf.Id, owner, leaf.InvocationTarget);
+        (await _verifier.RevokeCapabilityAsync(leaf, request)).Should().BeTrue();
+
+        var untrusting = NewVerifier(new InMemoryRootCapabilityResolver(), new RevocationService(new InMemoryRevocationStore()));
+        (await untrusting.RevokeCapabilityAsync(leaf, request)).Should().BeFalse("this verifier does not know the root");
+
+        var trusting = NewVerifier(_roots, new RevocationService(new InMemoryRevocationStore()));
+        (await trusting.RevokeCapabilityAsync(leaf, request)).Should().BeTrue("nothing binds a request to one verifier");
+        (await trusting.IsCapabilityRevokedAsync(leaf.Id, RevocationScope.Delegated(owner))).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task SignedInvocationTarget_IsNotComparedWithTheCapability()
+    {
+        var owner = _dids.GenerateDidKey();
+        var holder = _dids.GenerateDidKey();
+        var root = await RootAsync(owner, "https://example.com/replay-target");
+        var leaf = await DelegateAsync(root, holder);
+        var request = await _signing.SignRevocationAsync(leaf.Id, owner, "https://elsewhere.example/other");
+
+        (await _verifier.RevokeCapabilityAsync(leaf, request)).Should().BeTrue(
+            "the capability id names what is revoked; the target only has to match the request body");
+    }
+
     /// <summary>Drops writes while <see cref="LoseWrites"/> is set, as a store with a broken key column would.</summary>
     private sealed class LossyStore : IRevocationStore
     {

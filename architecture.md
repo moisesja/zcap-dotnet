@@ -214,6 +214,17 @@ proof or co-controller revokes it, and a revoked delegated id re-presented as a
 self-asserted root is not matched, which matters only to an application that accepts a
 holder-supplied root object.
 
+A signed request binds the capability id. It does not bind the copy presented with it, and
+it does not name a verifier: `invocationTarget` is signed but only compared with the request
+body. Records are written before the nonce is consumed, so a failed write can be retried
+with the same request. A captured request can therefore be re-posted while it is fresh
+(five minutes by default) with another copy of the id, which records that copy's scopes
+before the replay is refused, or sent to another verifier that trusts the chain, which
+records it too. Every recorded scope still comes from a proof verified on a chain that
+verifier trusts and on which the signer may revoke, so a replay can only widen a revocation
+the signer could have made, and it grants nothing. This is accepted for 6.0.0; binding the
+request to the copy is tracked in #161.
+
 The store key is `RevocationScope.KeyFor(id)`, a SHA-256 over the RFC 8785 form of the id
 and the scope's text, so no bare id is ever a key and collation cannot merge records.
 Stores implement `UpsertAsync`, a batched `GetAsync(keys)` and `DeleteAsync(key)`.

@@ -73,7 +73,10 @@ Community Group draft; interoperability claims are limited to the tested cases.
   proof, as `bedrock-zcap-storage` keys them), `Root` for a root, `Unscoped` only for migrated
   5.x and operator records. Look a link up after its proof verifies, under that proof's
   delegator; never key, memoize or delete revocation by bare id; never let the signed path
-  write `Unscoped` (architecture.md, "Revocation scope"). Distribution to
+  write `Unscoped` (architecture.md, "Revocation scope"). A signed request binds the capability id,
+  not the presented copy or a verifier: records are written before the nonce is consumed so a failed
+  write can be retried, and a replay inside the window can only widen a revocation the signer could
+  have made (#161, accepted for 6.0.0). Distribution to
   independent verifiers is a deployment responsibility. HTTP-signature invocation
   transport (#119), gRPC hosting and WASM remain separate work.
 
