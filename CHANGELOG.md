@@ -115,6 +115,8 @@ Planned as 6.0.0 (breaking: new interface/constructor parameters and in-stack si
   bound by zcap's own context and profile checks. RDFC tied-blank-node labelling is corrected upstream;
   zcap documents carry no such nodes and every golden vector is unchanged. Strings with `` are
   now signed instead of refused. Consumers must recompile against 2.0.0 (legacy-suite constructor change).
+  The lenient test canonicalizer (`LenientRdfcCanonicalizer`) keeps dotNetRDF's lossy expansion but now
+  canonicalizes through DataProofs, so adversarial signers share the corrected labelling.
 - `DataProofsDotnet.Core`/`Rdfc`/`Legacy` 1.3.0 → 1.5.0 (see Security for the fail-closed
   canonicalization; accepted input signs the same bytes). `NetDid.Core`/`Method.Key` 3.1.0 → 4.0.0:
   its breaking change concerns did:webvh witness files, which zcap does not use.

@@ -222,6 +222,9 @@ public class VerificationResultTests
         _didProvider.GenerateAndRegisterKeyPair(rootDid);
         var root = await CreateAndRegisterRootAsync(rootDid, "https://example.com/resource", new[] { "read" });
 
+        // One expiry for every link: a child may not expire after its parent, and a per-iteration
+        // UtcNow would drift past the creation-time tolerance on a loaded runner.
+        var expires = DateTime.UtcNow.AddDays(30);
         var current = root;
         var currentSigner = rootDid;
         for (int i = 0; i < 11; i++)
@@ -229,7 +232,7 @@ public class VerificationResultTests
             var childDid = $"did:key:z6MkLong{i}";
             _didProvider.GenerateAndRegisterKeyPair(childDid);
             current = await _capabilityService.DelegateCapabilityAsync(
-                current, childDid, new[] { "read" }, DateTime.UtcNow.AddDays(30), signerDid: currentSigner);
+                current, childDid, new[] { "read" }, expires, signerDid: currentSigner);
             currentSigner = childDid;
         }
 

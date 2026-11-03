@@ -1,5 +1,21 @@
 # Lessons Learned
 
+## 2026-11-02 — Issue #159 / DataProofs 2.0.0: a test helper that re-implements a production algorithm drifts when the dependency fixes a bug
+
+- `LenientRdfcCanonicalizer` (test helper) called dotNetRDF 3.5.1's `RdfCanonicalizer` directly, while
+  production canonicalized through DataProofs. Both shared dotNetRDF's tied-blank-node labelling defect
+  (dotnetrdf#917), so signer and verifier always agreed. DataProofs 2.0.0 fixed the labelling, and a test
+  whose fixture embeds a parent with two proofs (a tied shape) started failing on roughly half of the random
+  fixtures: the helper signed one labelling, the verifier computed the other. The first full run after the
+  bump happened to pass; CI caught it. Rule: a helper exists for ONE intentional difference from production
+  (here, lenient data loss); every other step must go through the production seam (`CanonicalizeNQuads`), or
+  the helper silently becomes a second implementation. When a dependency changes an algorithm, run the suite
+  several times and grep the tests for direct uses of the dependency's dependencies.
+- Diagnose a flaky signature test by comparing the signer's and verifier's payload bytes per fixture inside
+  one process (`payloadsEqual=False` on every failing iteration) before theorising about nondeterminism; a
+  handcrafted repro can miss the shape, random fixture values decide whether the defective ordering
+  coincides with the correct one.
+
 ## 2026-10-29 — Issue #159: a catalog entry that names an external resource needs a test that loads it
 
 - `ZcapSuiteCatalog` advertised P-256 with a context URL (`…/suites/ecdsa-2019/v1`) that nothing ever
