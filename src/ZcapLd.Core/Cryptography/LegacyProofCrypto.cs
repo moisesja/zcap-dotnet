@@ -24,10 +24,10 @@ namespace ZcapLd.Core.Cryptography;
 /// </summary>
 internal sealed class LegacyProofCrypto
 {
-    private const string ZcapContext = "https://w3id.org/zcap/v1";
+    private const string ZcapContext = ZcapSuiteCatalog.ZcapContextUrl;
 
-    // RDFC canonicalizer wired with zcap's offline context loader (serves zcap/v1 + ed25519-2020/v1,
-    // plus the generated context of each registered caveat type). RDFC-1.0 (W3C RDF Dataset
+    // RDFC canonicalizer wired with zcap's offline context loader (serves zcap/v1, the suite contexts,
+    // the revocation context and the generated context of each registered caveat type). RDFC-1.0 (W3C RDF Dataset
     // Canonicalization) is the ONLY canonicalization zcap supports — it is what makes proofs
     // interoperable with @digitalbazaar/zcap. Immutable, thread-safe.
     private readonly DataProofsRdfc.RdfcDocumentCanonicalizer _rdfCanonicalizer;
@@ -106,10 +106,16 @@ internal sealed class LegacyProofCrypto
         };
     }
 
+    // RDFC-1.0 only (#159). DataProofs' legacy suites verify the construction-time variant and, by
+    // default, fall back to the other, because the JCS and RDFC variants share the proof type. zcap has
+    // no JCS profile (removed in 4.0.0), so a JCS-signed proof must not verify here, and an invalid proof
+    // is canonicalized once, not twice. LegacyProofCryptoVariantTests pins the refusal.
     private ICryptosuite Create(string proofType)
         => proofType == Ed25519Signature2020Cryptosuite.ProofType
-            ? new Ed25519Signature2020Cryptosuite(LegacyCanonicalization.Rdfc, _rdfCanonicalizer)
-            : new EcdsaSecp256r1Signature2019Cryptosuite(LegacyCanonicalization.Rdfc, _rdfCanonicalizer);
+            ? new Ed25519Signature2020Cryptosuite(
+                LegacyCanonicalization.Rdfc, _rdfCanonicalizer, LegacyVariantVerification.ConstructedVariantOnly)
+            : new EcdsaSecp256r1Signature2019Cryptosuite(
+                LegacyCanonicalization.Rdfc, _rdfCanonicalizer, LegacyVariantVerification.ConstructedVariantOnly);
 
     /// <summary>
     /// The contexts a context-less document (an envelope invocation or a signed revocation) and its

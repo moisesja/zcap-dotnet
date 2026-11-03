@@ -6,10 +6,10 @@ namespace ZcapLd.Core.Cryptography;
 
 /// <summary>
 /// A DataProofs.Rdfc <see cref="IDocumentLoader"/> that serves ZCAP-LD's JSON-LD contexts
-/// (<c>zcap/v1</c>, <c>ed25519-2020/v1</c>, and zcap-dotnet's revocation context) from embedded
-/// assembly resources, delegating any
-/// other context to DataProofs' <see cref="OfflineDocumentLoader"/>. Offline and fail-closed:
-/// no ambient network I/O during signing or verification.
+/// (<c>zcap/v1</c>, <c>ed25519-2020/v1</c>, zcap-dotnet's P-256 suite context (#159) and its
+/// revocation context) from embedded assembly resources, delegating any other context to
+/// DataProofs' <see cref="OfflineDocumentLoader"/>. Offline and fail-closed: no ambient network I/O
+/// during signing or verification.
 /// </summary>
 /// <remarks>
 /// Serving zcap's own embedded context bytes — the exact resources the canonicalizer used before
@@ -36,17 +36,24 @@ internal sealed class RdfcContextDocumentLoader : IDocumentLoader
     /// </summary>
     internal const string RevocationContextUrl = "urn:zcap-dotnet:revocation-context:v1";
 
-    // Context URL → embedded resource name. Ordinal keying so URL matching is exact.
-    private static readonly IReadOnlyDictionary<string, string> ResourceByUrl =
-        new Dictionary<string, string>(StringComparer.Ordinal)
+    // Context URL → embedded resource name, keyed ordinally on Uri.AbsoluteUri. System.Uri has already
+    // normalized the lookup key (scheme case, surrounding whitespace, percent-encoded unreserved
+    // characters), so a few spellings of a URL map to one resource; the bytes served are the same, and
+    // the profile admits only the exact spelling on a capability. The suite entries come from the
+    // catalog (#159), so a suite the catalog advertises is always one this loader serves.
+    private static readonly IReadOnlyDictionary<string, string> ResourceByUrl = BuildResourceMap();
+
+    private static Dictionary<string, string> BuildResourceMap()
+    {
+        var map = new Dictionary<string, string>(StringComparer.Ordinal)
         {
-            ["https://w3id.org/zcap/v1"] =
-                "ZcapLd.Core.Cryptography.Contexts.zcap-v1.jsonld",
-            ["https://w3id.org/security/suites/ed25519-2020/v1"] =
-                "ZcapLd.Core.Cryptography.Contexts.ed25519-2020-v1.jsonld",
-            [RevocationContextUrl] =
-                "ZcapLd.Core.Cryptography.Contexts.zcap-dotnet-revocation-v1.jsonld",
+            [ZcapSuiteCatalog.ZcapContextUrl] = "ZcapLd.Core.Cryptography.Contexts.zcap-v1.jsonld",
+            [RevocationContextUrl] = "ZcapLd.Core.Cryptography.Contexts.zcap-dotnet-revocation-v1.jsonld",
         };
+        foreach (var suite in ZcapSuiteCatalog.Suites)
+            map.Add(suite.ContextUrl, suite.ContextResource);
+        return map;
+    }
 
     private static readonly Assembly ResourceAssembly = typeof(RdfcContextDocumentLoader).Assembly;
 

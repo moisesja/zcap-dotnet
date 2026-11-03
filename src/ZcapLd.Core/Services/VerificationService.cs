@@ -47,7 +47,7 @@ public class VerificationService : IVerificationService
     /// </summary>
     internal const int MaxChainCandidates = 16;
     private const string RootIdPrefix = "urn:zcap:root:";
-    private const string ZcapV1Context = "https://w3id.org/zcap/v1";
+    private const string ZcapV1Context = ZcapSuiteCatalog.ZcapContextUrl;
 
     /// <summary>
     /// Default window during which invocation nonces are tracked for replay protection. Also serves as
@@ -456,6 +456,17 @@ public class VerificationService : IVerificationService
                 return VerificationResult.Fail(VerificationOutcome.InvalidSignature,
                     "Resolved key type does not match the delegation proof's suite.");
             }
+
+            // The chain path's context-shape rule (R-CTX-2) applies on this path too (#159 review): the
+            // proof's terms are defined only by the signing suite's context, so the capability must list
+            // zcap/v1 first and that context. The triples are the same either way, so this precedes the
+            // signature check rather than relying on DataProofs' data-loss refusal.
+            var capabilityContext = AsArrayContext(capability.Context);
+            if (capabilityContext is null || capabilityContext.Count == 0 || capabilityContext[0] != ZcapV1Context ||
+                !capabilityContext.Contains(suite.ContextUrl))
+                return VerificationResult.Fail(VerificationOutcome.MalformedCapability,
+                    $"Delegated capability '{capability.Id}' @context MUST be an array beginning with \"{ZcapV1Context}\" " +
+                    $"and include the signing suite context '{suite.ContextUrl}'.");
 
             var capabilityWithoutProof = ProofSigningPayloadBuilder.CloneCapabilityWithoutProof(capability);
 
@@ -2323,6 +2334,12 @@ public class VerificationService : IVerificationService
         }
 
         if (!string.Equals(parent.Id, current.ParentCapability, StringComparison.Ordinal))
+            return RouteWalk.NoFit;
+
+        // Defense in depth (#159 review): the entry gate scanned this ancestor as raw JSON; the typed copy
+        // verified below must pass the same profile, so a proof-level @context or other unsupported
+        // vocabulary cannot ride in through a route the gate did not see.
+        if (CapabilityProfile.Validate(parent, caveats: _caveats) is not null)
             return RouteWalk.NoFit;
 
         // The embedded parent is trusted only through a proof of its own that names the prefix AND

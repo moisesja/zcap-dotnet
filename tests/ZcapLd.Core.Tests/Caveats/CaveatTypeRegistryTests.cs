@@ -27,6 +27,14 @@ public class CaveatTypeRegistryTests
         public string Created { get; init; } = "";
     }
 
+    public sealed class P256SuiteTermParameterCaveat : Caveat
+    {
+        public override string Type => "P256SuiteTermParameter";
+
+        [JsonPropertyName("EcdsaSecp256r1VerificationKey2019")]
+        public string KeyType { get; init; } = "";
+    }
+
     public sealed class ExtensionDataCaveat : Caveat
     {
         public override string Type => "ExtensionData";
@@ -92,6 +100,10 @@ public class CaveatTypeRegistryTests
     [InlineData("caveat")]
     [InlineData("proofPurpose")]
     [InlineData("Ed25519Signature2020")]
+    [InlineData("EcdsaSecp256r1Signature2019")]
+    [InlineData("EcdsaSecp256r1VerificationKey2019")]
+    [InlineData("capabilityRevocation")]
+    [InlineData("revocationReason")]
     public void Register_ReservedTypeName_Throws(string type)
     {
         var act = () => new CaveatTypeRegistry().Register<EpsilonBudgetCaveat>(type);
@@ -118,6 +130,8 @@ public class CaveatTypeRegistryTests
             .Should().Throw<ArgumentException>("id would turn the caveat into a named node");
         new Action(() => new CaveatTypeRegistry().Register<ColonParameterCaveat>("ColonParameter"))
             .Should().Throw<ArgumentException>("a colon makes the name an IRI");
+        new Action(() => new CaveatTypeRegistry().Register<P256SuiteTermParameterCaveat>("P256SuiteTermParameter"))
+            .Should().Throw<ArgumentException>("the P-256 suite context's terms are reserved as well (#159)");
     }
 
     [Fact(DisplayName = "Classes that capture undeclared members are refused")]

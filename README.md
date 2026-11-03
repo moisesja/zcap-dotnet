@@ -20,7 +20,7 @@ This library provides:
 - Cross-language wire-format compatibility — proven live against `@digitalbazaar/zcap` (RDFC-1.0 / W3C Data Integrity; see [`interop/`](interop/README.md))
 - Invocation replay protection with pluggable nonce stores
 - Revocation persistence with pluggable storage backends
-- Ed25519 and P-256 signature suites with RDFC-1.0 canonicalization (crypto delegated to NetCrypto via DataProofs)
+- Ed25519 and P-256 signature suites with RDFC-1.0 canonicalization (crypto delegated to NetCrypto via DataProofs); P-256 is a zcap-dotnet-only profile, see the cross-stack notes below
 - DID resolution via [NetDid](https://www.nuget.org/packages/NetDid.Core) (W3C-compliant did:key support)
 - Multibase signature encoding
 
@@ -149,6 +149,14 @@ embedded parent).
 > **NetCid**. This is **source-breaking** (recompile; the `NetDid.Core.Crypto.*` types moved to
 > `NetCrypto.*`) but **wire-compatible**: the `Ed25519Signature2020` / `EcdsaSecp256r1Signature2019`
 > proof bytes are unchanged, so capabilities issued by 3.x still verify — no re-delegation.
+>
+> **Breaking change (6.0.0):** DataProofs 2.0.0 corrects RDFC-1.0 tied-blank-node labelling. A
+> delegation whose `capabilityChain` embeds a **co-signed** parent (two or more delegation proofs)
+> canonicalizes those proofs as tied blank nodes, so a child signed by 5.x over such a parent may
+> return `InvalidSignature` under 6.0 (about half do). Re-delegate affected children under 6.0, and
+> upgrade verifiers before issuers: a 5.x verifier and a 6.0 verifier disagree on them. Single-proof
+> chains, co-signed parents themselves and golden vectors are unchanged. Envelope invocations and
+> signed revocations signed by 5.x also do not verify under 6.0 (see the CHANGELOG).
 
 ## Revocation Extensibility
 
@@ -347,13 +355,14 @@ dotnet pack src/ZcapLd.AspNetCore/ZcapLd.AspNetCore.csproj -c Release
 
 - No default `IDidSigner` ships in the core package — consumers must provide their own (HSM/KMS/Key Vault).
 - `InMemoryDidProvider` (in examples and tests) stores private keys in plaintext memory and is NOT for production use.
-- Canonicalization is RDFC-1.0 (W3C RDF Dataset Canonicalization) only — the format that interoperates with `@digitalbazaar/zcap`. JCS support was removed in 4.0.0; there is no canonicalization option. Known W3C JSON-LD contexts are embedded for offline operation.
+- Canonicalization is RDFC-1.0 (W3C RDF Dataset Canonicalization) only — the format that interoperates with `@digitalbazaar/zcap`. JCS support was removed in 4.0.0; there is no canonicalization option. Known W3C JSON-LD contexts are embedded for offline operation. The legacy suites are constructed to verify the RDFC-1.0 variant only (`LegacyVariantVerification.ConstructedVariantOnly`, DataProofs 2.0.0), so a proof made with DataProofs' JCS variant of the same suite type does not verify (#159).
+- P-256 resolvers must return the compressed 33-byte SEC1 point (an uncompressed key never verifies), and P-256 `proofValue`s are not low-s normalized: a valid `(r, s)` has a second valid form `(r, n−s)`. Nothing in zcap keys on proof bytes (replay uses the invocation id, revocation the delegator and capability id), so the second form is neither a replay nor a bypass.
 - Cryptography is provided by [NetCrypto](https://www.nuget.org/packages/NetCrypto) (Ed25519 / P-256 sign + verify), reached via [NetDid](https://www.nuget.org/packages/NetDid.Core) 4.0.0 for W3C-compliant did:key resolution; multibase via [NetCid](https://www.nuget.org/packages/NetCid); RDFC-1.0 via [DataProofsDotnet.Rdfc](https://www.nuget.org/packages/DataProofsDotnet.Rdfc).
-- Ed25519 and P-256 are the supported signature suites; cryptography is delegated to NetCrypto (via DataProofs), not extended through a zcap API.
+- Ed25519 and P-256 are the supported signature suites; cryptography is delegated to NetCrypto (via DataProofs), not extended through a zcap API. A P-256 capability carries zcap-dotnet's own suite context, `urn:zcap-dotnet:ecdsa-secp256r1-2019-context:v1` (the `ed25519-2020/v1` shape with the P-256 names, embedded and never fetched), because no suite context is published for `EcdsaSecp256r1Signature2019`: the `…/suites/ecdsa-2019/v1` URL of the 2022 CG draft does not resolve (#159).
 
 ### Cross-stack interop caveats (`@digitalbazaar/zcap`)
 
 Capability **delegation** interoperates with `@digitalbazaar/zcap` (proven live by [`interop/`](interop/README.md)). Two things to know for cross-stack use:
 
-- **Use `Ed25519Signature2020`.** P-256 (`EcdsaSecp256r1Signature2019`) has no `@digitalbazaar/zcap` counterpart — it ships/tests Ed25519 only and serves no `ecdsa-2019/v1` context, so a P-256 capability will not verify there.
+- **Use `Ed25519Signature2020`.** P-256 (`EcdsaSecp256r1Signature2019`) is a zcap-dotnet-only profile: `@digitalbazaar/zcap` has no such suite (it ships/tests Ed25519 only), the base58-btc `proofValue` over an IEEE P1363 signature is zcap-dotnet's convention, and the capability's suite context is zcap-dotnet's own, so a P-256 capability will not verify there.
 - **Invocation** interop works via Data Integrity `capabilityInvocation` proofs (`SignCapabilityInvocationAsync` / `VerifyCapabilityInvocationAsync`), proven cross-stack for root + delegated. The verifier requires the relying party to declare the **expected action and target(s)** it authorizes (as the reference impl does) and validates the application document's `@context`, so a valid invocation can't be replayed against a different endpoint or have its terms rewritten. HTTP-Signature invocations (the `ezcap` transport) are not yet supported (tracked in #119).

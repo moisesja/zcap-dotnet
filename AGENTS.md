@@ -22,7 +22,8 @@ Community Group draft; interoperability claims are limited to the tested cases.
 - **Native restrictions** use `expires`, `allowedAction` and target narrowing. Without a
   `CaveatTypeRegistry`, reject `caveat`, `https://w3id.org/security#caveat` and
   `sec:caveat`, including null/empty values, ancestors and extension JSON. In every profile,
-  capability/proof JSON may not use `:` keys or keywords other than `@context`: `@nest`,
+  capability/proof JSON may not use `:` keys or keywords other than `@context`, and a proof may not
+  carry `@context` at all (it is canonicalized under the document's, so its own is never signed): `@nest`,
   `@included` or a full-IRI key restates a signed term the model does not read, which let a holder
   drop its own `allowedAction`. Capability/proof contexts are limited to zcap/v1, supported suite
   contexts and registered caveat contexts; inline aliases and unrelated vocabularies are rejected.
@@ -44,7 +45,10 @@ Community Group draft; interoperability claims are limited to the tested cases.
 - **Proofs** use RDFC-1.0 with `Ed25519Signature2020` or
   `EcdsaSecp256r1Signature2019`. Use the shared DataProofs/NetCrypto foundation;
   do not implement crypto or canonicalization inside zcap. Modernized v0.4 examples
-  do not mandate a suite migration. Golden vectors pin supported proof bytes.
+  do not mandate a suite migration. Golden vectors pin supported proof bytes. P-256 is a
+  zcap-dotnet-only profile (#159): its capabilities carry `urn:zcap-dotnet:ecdsa-secp256r1-2019-context:v1`,
+  because no suite context is published for the type (the `…/suites/ecdsa-2019/v1` URL never
+  resolved). Every `ZcapSuiteCatalog` context must be served by `RdfcContextDocumentLoader`.
 - **Chains** are exactly `[rootId]` for the first delegation and
   `[rootId, ...ancestorIds, {immediateParent}]` for deeper links. Each delegation
   requires parent-controller authorization. Validate every link before granting
@@ -133,8 +137,10 @@ bash interop/run-interop.sh
   Context-less documents (envelope invocations, signed revocations) are canonicalized under
   zcap/v1 plus the proof's suite context, so `created`/`proofPurpose` are signed (#157). Revocations
   also get `urn:zcap-dotnet:revocation-context:v1`, which defines their purpose, reason and metadata.
-  DataProofs ≥ 1.5.0 refuses undefined terms and dropped or respelled IRIs. That is a second layer
-  only for RDFC: its legacy verifier also accepts the JCS variant, which signs bytes verbatim.
+  DataProofs ≥ 1.5.0 refuses undefined terms and dropped or respelled IRIs, and 2.0.0 compares the proof
+  members it models (`created`, `expires`, `proofPurpose`, `verificationMethod`, …) with the signed
+  N-Quads. zcap constructs the legacy suites with `LegacyVariantVerification.ConstructedVariantOnly`, so
+  only the RDFC-1.0 variant verifies (#159).
   Adversarial tests forge with `LenientRdfcCanonicalizer` (test helper) and assert zcap's specific
   outcome, so they keep proving zcap's own checks reject first.
 - **Identifiers (#157)**: RDFC normalizes IRIs, so keys must be the signed form. Capability,

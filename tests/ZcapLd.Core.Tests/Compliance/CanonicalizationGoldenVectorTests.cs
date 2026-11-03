@@ -151,4 +151,29 @@ public class CanonicalizationGoldenVectorTests
             "71BB1368AA95EB694E29ADAE5EE321ED1CB13ADB777873C87E8034DB6E91D540",
             "the RDFC-1.0 revocation signing payload must stay byte-stable");
     }
+
+    [Fact(DisplayName = "Golden: a capability's document N-Quads do not depend on which suite context it carries")]
+    public void Rdfc_P256Context_ProducesTheSameDocumentNQuadsAsEd25519()
+    {
+        // The @context is not a triple. zcap-dotnet's P-256 suite context (#159) defines the same terms
+        // as ed25519-2020/v1, so the same document canonicalizes to the same N-Quads under either; only
+        // the proof options differ, by the proof type. (The Ed25519 N-Quads are pinned above.)
+        Capability Build(string suiteContext) => new()
+        {
+            Context = new object[] { "https://w3id.org/zcap/v1", suiteContext },
+            Id = "urn:uuid:00000000-0000-0000-0000-0000000000de",
+            ParentCapability = "urn:zcap:root:https%3A%2F%2Fexample.com%2Fapi%2Fresource",
+            Controller = "did:key:z6MkfixedController",
+            InvocationTarget = "https://example.com/api/resource",
+            AllowedAction = new[] { "read" },
+            Expires = "2027-01-01T00:00:00.000000Z",
+        };
+        var canonicalizer = new RdfcDocumentCanonicalizer();
+
+        var ed25519 = canonicalizer.Canonicalize(Build("https://w3id.org/security/suites/ed25519-2020/v1"));
+        var p256 = canonicalizer.Canonicalize(Build(ZcapSuiteCatalog.P256ContextUrl));
+
+        p256.Should().Equal(ed25519);
+        Encoding.UTF8.GetString(p256).Should().Contain("<https://w3id.org/security#controller> <did:key:z6MkfixedController>");
+    }
 }

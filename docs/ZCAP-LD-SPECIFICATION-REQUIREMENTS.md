@@ -30,12 +30,13 @@ fields. A private vocabulary would not establish enforcement by other stacks.
 | Ancestors | `[rootId]` at first hop; deeper chains use `[rootId, ...ancestorIds, {immediateParent}]`. Reject duplicate IDs and inconsistent embedding. | `DelegatedInvocationComplianceTests`, `VerificationServiceTests` |
 | Root resolution | Explicit trusted root or `IRootCapabilityResolver`. Root is never embedded as a delegated ancestor. | `CapabilityChainShapeTests` |
 | Chain bound | Limit work while walking chains; maximum length 10. | `VerificationServiceTests` |
-| Cryptography | RDFC-1.0 with Ed25519Signature2020 or EcdsaSecp256r1Signature2019, via DataProofs/NetCrypto. Hash proof options first, document second. | `ProofGoldenVectorTests`, `CanonicalizationGoldenVectorTests`, `interop/run-interop.sh` |
+| Cryptography | RDFC-1.0 with Ed25519Signature2020 or EcdsaSecp256r1Signature2019, via DataProofs/NetCrypto. Hash proof options first, document second. | `ProofGoldenVectorTests`, `CanonicalizationGoldenVectorTests`, `P256EndToEndTests`, `interop/run-interop.sh` |
 
 The v0.4 examples use `DataIntegrityProof` / `eddsa-jcs-2022`; examples alone do
 not require a cryptosuite migration. This library retains its explicitly tested
-RDFC/legacy-suite profile. P-256 is supported locally but is not covered by the
-stock Ed25519 JavaScript harness.
+RDFC/legacy-suite profile. P-256 is a zcap-dotnet-only profile (its capabilities carry
+`urn:zcap-dotnet:ecdsa-secp256r1-2019-context:v1`, because no suite context is published
+for `EcdsaSecp256r1Signature2019`) and is not covered by the stock Ed25519 JavaScript harness.
 
 ## Attenuation
 

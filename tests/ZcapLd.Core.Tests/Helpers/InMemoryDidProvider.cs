@@ -10,9 +10,9 @@ namespace ZcapLd.Core.Tests.Helpers;
 
 /// <summary>
 /// Test-only IDidSigner + IDidResolver (+ IVerificationRelationshipResolver + IRootCapabilityResolver)
-/// backed by in-memory Ed25519 keys. NOT for production use — private keys are stored in plaintext
-/// memory. Because <see cref="VerificationService"/> auto-detects an <see cref="IDidResolver"/> that
-/// also implements <see cref="IRootCapabilityResolver"/>, registering a root via
+/// backed by in-memory Ed25519 or P-256 keys (#159). NOT for production use — private keys are stored
+/// in plaintext memory. Because <see cref="VerificationService"/> auto-detects an <see cref="IDidResolver"/>
+/// that also implements <see cref="IRootCapabilityResolver"/>, registering a root via
 /// <see cref="RegisterRoot"/> makes the verifier resolve spec-exact (root-by-id) chains without
 /// passing the root on each call.
 /// </summary>
@@ -20,7 +20,7 @@ public class InMemoryDidProvider : IDidSigner, IDidResolver, IVerificationRelati
 {
     private static readonly DefaultCryptoProvider Crypto = new();
     private static readonly DefaultKeyGenerator KeyGen = new();
-    private readonly ConcurrentDictionary<string, byte[]> _keyStore = new();
+    private readonly ConcurrentDictionary<string, (KeyType KeyType, byte[] PrivateKey)> _keyStore = new();
     private readonly ConcurrentDictionary<string, Capability> _rootStore = new(StringComparer.Ordinal);
     private readonly DidKeyResolver _didKeyResolver = new();
 
@@ -33,11 +33,16 @@ public class InMemoryDidProvider : IDidSigner, IDidResolver, IVerificationRelati
         if (data == null)
             throw new ArgumentNullException(nameof(data));
 
-        if (!_keyStore.TryGetValue(did, out var privateKey))
+        if (!_keyStore.TryGetValue(did, out var key))
             throw new InvalidOperationException($"No private key registered for DID: {did}");
 
-        var signatureBytes = Crypto.Sign(KeyType.Ed25519, privateKey, data);
-        return Task.FromResult(new SignatureResult(signatureBytes, "Ed25519Signature2020"));
+        // P-256 signs the W3C wire form directly (IEEE P1363 r‖s), as a production signer would;
+        // DataProofs also accepts DER and transcodes it, but the helper should not rely on that.
+        return Task.FromResult(key.KeyType == KeyType.Ed25519
+            ? new SignatureResult(Crypto.Sign(KeyType.Ed25519, key.PrivateKey, data), "Ed25519Signature2020")
+            : new SignatureResult(
+                Crypto.Sign(KeyType.P256, key.PrivateKey, data, EcdsaSignatureFormat.IeeeP1363),
+                "EcdsaSecp256r1Signature2019"));
     }
 
     // --- IDidResolver ---
@@ -49,10 +54,13 @@ public class InMemoryDidProvider : IDidSigner, IDidResolver, IVerificationRelati
 
         // Try registered keys first (derive public from stored private)
         var baseDid = didOrVerificationMethod.Split('#')[0];
-        if (_keyStore.TryGetValue(baseDid, out var privateKey))
+        if (_keyStore.TryGetValue(baseDid, out var key))
         {
-            var publicKey = KeyGen.FromPrivateKey(KeyType.Ed25519, privateKey).PublicKey;
-            return Task.FromResult(new ResolvedKey(publicKey, "Ed25519VerificationKey2020"));
+            var publicKey = KeyGen.FromPrivateKey(key.KeyType, key.PrivateKey).PublicKey;
+            // The W3C key type the suite catalog binds to (mirrors DidKeyResolver.MapKeyType, which is
+            // internal and this helper is also compiled into the AspNetCore tests).
+            var keyType = key.KeyType == KeyType.Ed25519 ? "Ed25519VerificationKey2020" : "EcdsaSecp256r1VerificationKey2019";
+            return Task.FromResult(new ResolvedKey(publicKey, keyType));
         }
 
         // Fall back to did:key resolver for public-key-in-DID resolution
@@ -121,29 +129,36 @@ public class InMemoryDidProvider : IDidSigner, IDidResolver, IVerificationRelati
         return root;
     }
 
-    public void RegisterKey(string did, byte[] privateKey)
+    /// <summary>
+    /// Registers a raw private key for <paramref name="did"/>: a 32-byte Ed25519 seed (the default) or a
+    /// 32-byte P-256 scalar. Only the two supported suites' key types are accepted.
+    /// </summary>
+    public void RegisterKey(string did, byte[] privateKey, KeyType keyType = KeyType.Ed25519)
     {
         if (string.IsNullOrEmpty(did))
             throw new ArgumentException("DID cannot be null or empty", nameof(did));
+        if (keyType is not (KeyType.Ed25519 or KeyType.P256))
+            throw new ArgumentException($"Unsupported key type {keyType}: only Ed25519 and P-256 sign ZCAP proofs.", nameof(keyType));
         if (privateKey == null || privateKey.Length != 32)
-            throw new ArgumentException("Private key must be 32 bytes for Ed25519", nameof(privateKey));
+            throw new ArgumentException($"Private key must be 32 bytes for {keyType}", nameof(privateKey));
 
-        _keyStore[did] = privateKey;
+        _keyStore[did] = (keyType, privateKey);
     }
 
-    public (byte[] PrivateKey, byte[] PublicKey) GenerateAndRegisterKeyPair(string did)
+    public (byte[] PrivateKey, byte[] PublicKey) GenerateAndRegisterKeyPair(string did, KeyType keyType = KeyType.Ed25519)
     {
-        var kp = KeyGen.Generate(KeyType.Ed25519);
-        RegisterKey(did, kp.PrivateKey);
+        var kp = KeyGen.Generate(keyType);
+        RegisterKey(did, kp.PrivateKey, keyType);
         return (kp.PrivateKey, kp.PublicKey);
     }
 
-    public string GenerateDidKey()
+    /// <summary>Generates a real did:key (Ed25519 <c>z6Mk…</c> by default, P-256 <c>zDn…</c>) and registers its key.</summary>
+    public string GenerateDidKey(KeyType keyType = KeyType.Ed25519)
     {
-        var keyPair = KeyGen.Generate(KeyType.Ed25519);
+        var keyPair = KeyGen.Generate(keyType);
         var did = $"did:key:{keyPair.MultibasePublicKey}";
 
-        RegisterKey(did, keyPair.PrivateKey);
+        RegisterKey(did, keyPair.PrivateKey, keyType);
         return did;
     }
 }

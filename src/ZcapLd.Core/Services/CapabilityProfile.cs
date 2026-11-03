@@ -27,6 +27,9 @@ internal static class CapabilityProfile
         "domain, challenge or nonce that is not a string).";
     internal const string InspectionLimitMessage =
         "Capability/proof inspection exceeds the depth (64) or visited-value (65536) limit.";
+    internal const string ProofContextMessage =
+        "A proof may not carry its own @context: proofs are canonicalized under the document's context, so a " +
+        "proof-level @context is never signed.";
 
     // Expanded and prefixed forms of the zcap/v1 caveat term are never accepted: only the compact
     // key at capability level, checked against registered types, can carry a caveat.
@@ -116,6 +119,12 @@ internal static class CapabilityProfile
             {
                 if (capabilityLevel && property.Name == CaveatCodec.Property)
                     caveat = property.Value;
+                else if (capabilityLevel && property.Name == "proof")
+                {
+                    // A serialized capability's proofs (an embedded ancestor on the wire) follow the typed
+                    // Proof rules below; elsewhere "proof" is an ordinary member.
+                    if (!CheckRawProofs(property.Value, depth + 1)) return false;
+                }
                 else if (!CheckProperty(property.Name, property.Value, depth))
                     return false;
                 if (property.Name == "@context")
@@ -123,6 +132,40 @@ internal static class CapabilityProfile
             }
 
             return caveat is not { } caveatValue || CheckCaveat(caveatValue, context);
+        }
+
+        // A proof reached as JSON: an embedded ancestor's proof or proof array on the wire. The same rules
+        // as a typed Proof (#159 review): no @context of its own (it is never signed), capabilityChain
+        // entries and an embedded capability are capability-level, every other member is ordinary.
+        bool CheckRawProofs(JsonElement value, int depth)
+        {
+            if (--remaining < 0 || depth > MaxInspectionDepth)
+                return Fail(Malformed(InspectionLimitMessage));
+            if (value.ValueKind == JsonValueKind.Array)
+                return value.EnumerateArray().All(entry => CheckRawProofs(entry, depth + 1));
+            if (value.ValueKind != JsonValueKind.Object)
+                return Check(value, depth);
+
+            foreach (var member in value.EnumerateObject())
+            {
+                if (member.Name == "@context")
+                    return Fail(Malformed(ProofContextMessage));
+                if (member.Name == "capabilityChain" && member.Value.ValueKind == JsonValueKind.Array)
+                {
+                    if (!member.Value.EnumerateArray().All(entry => Check(entry, depth + 1, capabilityLevel: true)))
+                        return false;
+                }
+                else if (member.Name == "capability" && member.Value.ValueKind == JsonValueKind.Object)
+                {
+                    if (!Check(member.Value, depth + 1, capabilityLevel: true)) return false;
+                }
+                else if (!CheckProperty(member.Name, member.Value, depth))
+                {
+                    return false;
+                }
+            }
+
+            return true;
         }
 
         bool CheckCapabilityProperties(Dictionary<string, JsonElement>? properties, object? context, int depth)
@@ -142,13 +185,17 @@ internal static class CapabilityProfile
             return true;
         }
 
-        // Proof extensions. A revocation's metadata is a JSON literal under the revocation context:
-        // its member names are data, not JSON-LD keys.
+        // Proof extensions. A proof carries no @context of its own: it is canonicalized under the
+        // document's, so one on the wire is unsigned under RDFC (DataProofs replaces it) and unread, and
+        // is refused (#159 review). A revocation's metadata is a JSON literal under the revocation
+        // context: its member names are data, not JSON-LD keys.
         bool CheckProperties(Dictionary<string, JsonElement>? properties, int depth)
             => properties == null || properties.All(property =>
-                property.Key == Proof.RevocationMetadataField
-                    ? property.Value.ValueKind == JsonValueKind.Object
-                    : CheckProperty(property.Key, property.Value, depth));
+                property.Key == "@context"
+                    ? Fail(Malformed(ProofContextMessage))
+                    : property.Key == Proof.RevocationMetadataField
+                        ? property.Value.ValueKind == JsonValueKind.Object
+                        : CheckProperty(property.Key, property.Value, depth));
 
         bool CheckProperty(string name, JsonElement value, int depth)
         {
@@ -185,7 +232,7 @@ internal static class CapabilityProfile
 
         bool CheckContext(object? context)
         {
-            bool Known(string? url) => url == "https://w3id.org/zcap/v1" || ZcapSuiteCatalog.IsSupportedContext(url) ||
+            bool Known(string? url) => url == ZcapSuiteCatalog.ZcapContextUrl || ZcapSuiteCatalog.IsSupportedContext(url) ||
                                        (registry is not null && url is not null && registry.TryGetByContextUrl(url, out _));
             if (context is string url) return Known(url);
             var json = context is JsonElement element ? element : JsonSerializer.SerializeToElement(context);

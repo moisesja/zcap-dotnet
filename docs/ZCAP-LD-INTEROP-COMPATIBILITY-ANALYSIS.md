@@ -81,7 +81,8 @@ use `DataIntegrityProof` / `eddsa-jcs-2022`; upstream labels the release changes
 non-normative. This does not require abandoning the existing peer-compatible
 format. Supporting another suite requires a separately tested peer configuration.
 
-P-256 is locally supported, but not covered by the stock Ed25519 harness. The
+P-256 is a zcap-dotnet-only profile (its own suite context and `proofValue`
+convention) and is not covered by the stock Ed25519 harness. The
 in-stack `Invocation` envelope is distinct from the interoperable application-doc
 DI mode. HTTP-signature invocation transport remains separate (#119).
 

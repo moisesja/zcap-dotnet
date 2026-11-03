@@ -31,6 +31,16 @@ Planned as 6.0.0 (breaking: new interface/constructor parameters and in-stack si
 
 ### Security
 
+- A proof may no longer carry its own `@context` (#159 adversarial review). Proofs are canonicalized
+  under the document's context and DataProofs replaces a proof-level one before RDFC, so the member
+  was accepted on the wire but never signed or read. It is now refused on every path (delegation,
+  envelope and Data Integrity invocation, signed revocation), at signing as well as verification,
+  including the proofs of serialized embedded ancestors at any depth and proof arrays (the normal wire
+  representation, which the first cut missed: PR #163 review); the standalone route walk also
+  re-validates each deserialized ancestor against the profile. The
+  standalone proof path (`VerifyCapabilityProofAsync`) now applies the chain path's context-shape rule:
+  a delegated capability must list zcap/v1 first and the signing suite's context. Caveat type and
+  parameter names also reserve the revocation context's terms.
 - Envelope invocations and signed revocation requests were canonicalized under `zcap/v1` only.
   That context does not define `created`, `proofPurpose` or `verificationMethod`, so RDFC
   dropped them from the signature: a captured request could be re-stamped to pass the #71
@@ -100,6 +110,25 @@ Planned as 6.0.0 (breaking: new interface/constructor parameters and in-stack si
 
 ### Changed
 
+- **DataProofsDotnet.Core, Rdfc and Legacy 2.0.0** (from 1.5.0). The proof members DataProofs models
+  (`created`, `expires`, `proofPurpose`, `verificationMethod`, `challenge`, `domain`, `nonce`, …) are now
+  compared with the signed N-Quads in both directions (GHSA-6fxh-mc39-94vc), so a modeled member renamed
+  away through a context, or one the issuer never signed, fails as an invalid signature. zcap's
+  `capabilityChain`, `capability`, `capabilityAction` and `invocationTarget` are unmodeled there and remain
+  bound by zcap's own context and profile checks. RDFC tied-blank-node labelling is corrected upstream
+  (dotnetrdf#917). **Breaking (wire): this changes the signed bytes of some existing capabilities.** A
+  delegation whose `capabilityChain` embeds a parent that carries two or more delegation proofs (a
+  co-signed parent) canonicalizes those proof graphs as tied blank nodes. 5.x and earlier labelled them in
+  dotNetRDF's defective order, so a child signed then verifies under 6.0 only when that order happened to
+  be the correct one: 13 of 24 generated chains return `InvalidSignature`. The co-signed parent itself,
+  single-proof chains and every golden vector are unchanged. Reissue (re-delegate) affected children under
+  6.0. Verifiers on 5.x and 6.0 disagree on such children, so during a rollout either upgrade every
+  verifier before reissuing, or expect an affected child to be refused by whichever side did not sign it.
+  `DataProofsCanonicalizationCompatibilityTests` pins a pre-upgrade affected chain (`InvalidSignature`)
+  and an unaffected one (`Valid`) from `tests/ZcapLd.Core.Tests/Compliance/fixtures`. Strings with
+  `@direction` are now signed instead of refused. Consumers must recompile against 2.0.0 (legacy-suite constructor change).
+  The lenient test canonicalizer (`LenientRdfcCanonicalizer`) keeps dotNetRDF's lossy expansion but now
+  canonicalizes through DataProofs, so adversarial signers share the corrected labelling.
 - `DataProofsDotnet.Core`/`Rdfc`/`Legacy` 1.3.0 → 1.5.0 (see Security for the fail-closed
   canonicalization; accepted input signs the same bytes). `NetDid.Core`/`Method.Key` 3.1.0 → 4.0.0:
   its breaking change concerns did:webvh witness files, which zcap does not use.
@@ -130,6 +159,33 @@ Planned as 6.0.0 (breaking: new interface/constructor parameters and in-stack si
 
 ### Fixed
 
+- **Caveat chains of three or more delegations were refused on the wire.** The profile scan treated an
+  embedded ancestor's own `capabilityChain` entries as ordinary members, so a grandparent's caveat inside
+  the parent's serialized proof was refused as unsupported vocabulary once the leaf had been parsed from
+  JSON; the same chain verified while it was still typed in the issuing process. Found while closing the
+  serialized-proof `@context` gap (PR #163 review): `CheckRawProofs` now scans those entries
+  capability-level. `DeepCaveatChainWireTests` pins it.
+- **P-256 (`EcdsaSecp256r1Signature2019`) could not sign or RDFC-verify (#159).** The suite catalog
+  advertised it with `https://w3id.org/security/suites/ecdsa-2019/v1`, a URL from the 2022 CG draft
+  that was never published, so the offline context loader failed closed and every P-256 delegation,
+  invocation and revocation failed with `ProofGenerationException`. A P-256 capability now carries
+  zcap-dotnet's own suite context, `urn:zcap-dotnet:ecdsa-secp256r1-2019-context:v1` (the
+  `ed25519-2020/v1` shape with the P-256 suite and key type names, embedded and never fetched). It
+  defines the same terms as the `ed25519-2020/v1` shape, and a probe against the published definitions
+  of the type (`security/v2`, `credentials/v1`) produced identical N-Quads, so the choice does not
+  affect signed bytes; the unpublished URL is no longer a supported context. P-256 remains a zcap-dotnet-only profile. New tests sign and verify P-256 delegation, chain
+  verification, envelope and Data Integrity invocation, revocation, a mixed Ed25519/P-256 chain and the
+  suite-context binding; golden vectors pin the fixed-key did:key, the RDFC-1.0 signing payload and a
+  frozen proof. Caveat registration now reserves the terms of every catalog suite context and fails
+  loudly when the loader cannot serve one (it silently skipped the P-256 context). The test
+  `InMemoryDidProvider` holds P-256 keys.
+- **JCS-variant legacy proofs no longer verify (#159).** DataProofs' legacy suites fall back from the
+  RDFC variant to the JCS variant by default (the variants share a proof type), including over a document
+  carrying members no context defines. zcap never produced one and the fallback was not a forgery path
+  (JCS binds every member verbatim), but it was wider than the RDFC-1.0 profile. The suites are now
+  constructed with `LegacyVariantVerification.ConstructedVariantOnly` (DataProofs 2.0.0): a JCS-variant
+  `Ed25519Signature2020` or `EcdsaSecp256r1Signature2019` proof returns `InvalidSignature`, and an invalid
+  proof is canonicalized once instead of twice. `LegacyProofCryptoVariantTests` pins the refusal.
 - A proof member DataProofs models with a fixed JSON type, given another type (`"domain": 123`,
   `"challenge": {}`), made the proof mapping throw. Verification reported `CouldNotVerify`, which is
   reserved for infrastructure faults, and logged it as one. The profile gate now refuses such a proof

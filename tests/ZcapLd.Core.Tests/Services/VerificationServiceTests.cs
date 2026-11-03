@@ -893,6 +893,9 @@ public class VerificationServiceTests
             "https://example.com/resource",
             new[] { "read" });
 
+        // One expiry for every link: a child may not expire after its parent, and a per-iteration
+        // UtcNow would drift past the creation-time tolerance on a loaded runner.
+        var expires = DateTime.UtcNow.AddDays(30);
         Capability current = rootCapability;
         for (int i = 1; i <= 11; i++)
         {
@@ -900,7 +903,7 @@ public class VerificationServiceTests
                 current,
                 controllers[i],
                 new[] { "read" },
-                DateTime.UtcNow.AddDays(30));
+                expires);
         }
 
         // Act
