@@ -106,7 +106,7 @@ zcap-dotnet/
 ├── interop/                     # .NET CLI, pinned JS peer, target/profile matrix
 ├── examples/
 │   ├── ZcapLd.Examples/          # Native restrictions, invocation formats and revocation
-│   └── ZcapLd.RevocationEndpointsDemo/ # ASP.NET signed revocation with SQLite
+│   └── ZcapLd.RevocationEndpointsDemo/ # ASP.NET signed revocation with SQLite, protected resource, --walkthrough
 ├── docs/
 ├── tasks/
 ├── .github/workflows/
@@ -123,7 +123,8 @@ dotnet build ZcapLd.sln
 dotnet test ZcapLd.sln
 dotnet pack src/ZcapLd.Core/ZcapLd.Core.csproj -c Release
 dotnet pack src/ZcapLd.AspNetCore/ZcapLd.AspNetCore.csproj -c Release
-dotnet run --project examples/ZcapLd.Examples
+dotnet run --project examples/ZcapLd.Examples            # self-checking; non-zero exit on a mismatch
+dotnet run --project examples/ZcapLd.RevocationEndpointsDemo -- --walkthrough
 bash interop/run-interop.sh
 ```
 

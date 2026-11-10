@@ -7,6 +7,8 @@ on:
       - 'src/ZcapLd.AspNetCore/**'
       - 'src/ZcapLd.Core/**'
       - 'tests/ZcapLd.Core.Tests/**'
+      - 'tests/ZcapLd.AspNetCore.Tests/**'
+      - 'examples/ZcapLd.RevocationEndpointsDemo/**'
       - 'ZcapLd.sln'
       - '.github/workflows/ci-aspnet.yml'
   pull_request:
@@ -15,6 +17,8 @@ on:
       - 'src/ZcapLd.AspNetCore/**'
       - 'src/ZcapLd.Core/**'
       - 'tests/ZcapLd.Core.Tests/**'
+      - 'tests/ZcapLd.AspNetCore.Tests/**'
+      - 'examples/ZcapLd.RevocationEndpointsDemo/**'
       - 'ZcapLd.sln'
       - '.github/workflows/ci-aspnet.yml'
   workflow_dispatch:
@@ -40,21 +44,28 @@ jobs:
           dotnet restore src/ZcapLd.Core/ZcapLd.Core.csproj
           dotnet restore src/ZcapLd.AspNetCore/ZcapLd.AspNetCore.csproj
           dotnet restore tests/ZcapLd.Core.Tests/ZcapLd.Core.Tests.csproj
+          dotnet restore tests/ZcapLd.AspNetCore.Tests/ZcapLd.AspNetCore.Tests.csproj
 
       - name: Clean
         run: |
           dotnet clean src/ZcapLd.Core/ZcapLd.Core.csproj --configuration Release
           dotnet clean src/ZcapLd.AspNetCore/ZcapLd.AspNetCore.csproj --configuration Release
           dotnet clean tests/ZcapLd.Core.Tests/ZcapLd.Core.Tests.csproj --configuration Release
+          dotnet clean tests/ZcapLd.AspNetCore.Tests/ZcapLd.AspNetCore.Tests.csproj --configuration Release
 
+      # The ASP.NET test project references examples/ZcapLd.RevocationEndpointsDemo (its system under
+      # test), so building it also builds the demo.
       - name: Build
         run: |
           dotnet build src/ZcapLd.Core/ZcapLd.Core.csproj --configuration Release --no-restore --no-incremental
           dotnet build src/ZcapLd.AspNetCore/ZcapLd.AspNetCore.csproj --configuration Release --no-restore --no-incremental
           dotnet build tests/ZcapLd.Core.Tests/ZcapLd.Core.Tests.csproj --configuration Release --no-restore --no-incremental
+          dotnet build tests/ZcapLd.AspNetCore.Tests/ZcapLd.AspNetCore.Tests.csproj --configuration Release --no-restore --no-incremental
 
       - name: Test
-        run: dotnet test tests/ZcapLd.Core.Tests/ZcapLd.Core.Tests.csproj --configuration Release --no-build --verbosity normal
+        run: |
+          dotnet test tests/ZcapLd.Core.Tests/ZcapLd.Core.Tests.csproj --configuration Release --no-build --verbosity normal
+          dotnet test tests/ZcapLd.AspNetCore.Tests/ZcapLd.AspNetCore.Tests.csproj --configuration Release --no-build --verbosity normal
 
       - name: Pack ASP.NET adapter package
         run: dotnet pack src/ZcapLd.AspNetCore/ZcapLd.AspNetCore.csproj --configuration Release --no-build -o artifacts/aspnet

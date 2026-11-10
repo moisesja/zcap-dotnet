@@ -320,8 +320,11 @@ var verifier = new VerificationService(resolver, revocations, nonces,
 - `src/ZcapLd.Core`: library code
 - `src/ZcapLd.AspNetCore`: optional ASP.NET endpoint adapter package
 - `tests/ZcapLd.Core.Tests`: unit, integration, and compliance tests
-- `examples/ZcapLd.Examples`: native restriction and signed revocation examples
-- `examples/ZcapLd.RevocationEndpointsDemo`: ASP.NET revocation with SQLite
+- `examples/ZcapLd.Examples`: native restrictions, invocation formats and signed revocation (refused
+  signer, mid-chain revocation, `Revoked` descendants); every outcome is checked and CI runs it
+- `examples/ZcapLd.RevocationEndpointsDemo`: ASP.NET signed revocation with SQLite, a protected resource,
+  and `-- --walkthrough`, which provisions a root and shows read `200` → stranger revoke `403` → owner
+  revoke `200` → read `403 Revoked` over HTTP
 - `interop`: live cross-stack interop harness vs `@digitalbazaar/zcap` (run `interop/run-interop.sh`)
 - `docs`: implementation/security notes
 
