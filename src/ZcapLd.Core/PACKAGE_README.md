@@ -56,8 +56,8 @@ every chain. A forged copy of an id under another chain lands in the forger's sc
 genuine chain looks. Custom `IRevocationStore`s key rows by `RevocationRecord.Key`, never by the
 id. See [Revocation scope](https://github.com/moisesja/zcap-dotnet/blob/main/architecture.md#revocation-scope).
 
-Native AOT, trimming and .NET 10 file-based apps (`dotnet run app.cs`) are supported; the package
-declares `IsAotCompatible` (#154). zcap's wire models serialize through source-generated metadata,
+Native AOT, trimming and .NET 10 file-based apps (`dotnet run app.cs`) are supported since 6.0.1; the
+package declares `IsAotCompatible` (#154). zcap's wire models serialize through source-generated metadata,
 so the round trip above needs nothing from you. Custom caveats register through generated metadata:
 `Register<TCaveat>(string, JsonTypeInfo<TCaveat>)` with a `JsonSerializerContext` that lists the
 class; the reflection overload is annotated and throws where reflection-based serialization is

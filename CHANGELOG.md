@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [6.0.1] - 2026-11-10
+
+Native AOT, trimming and .NET 10 file-based app support (#154). Every wire form, signing payload,
+revocation key and caveat context is byte-identical to 6.0.0, and JIT applications see no behaviour
+change. The typed caveat registration overloads below are additive.
+
 ### Added
 
 - **Native AOT, trimming and .NET 10 file-based apps are supported (#154).** Every type zcap puts
