@@ -19,6 +19,10 @@ Related revocation integration guidance: `docs/REVOCATION-INTEGRATION.md`.
 - `.github/workflows/ci-aspnet.yml`
   - Scope: ASP.NET adapter + dependency validation against core
   - Triggered by adapter paths and shared core paths
+- `.github/workflows/ci-aot.yml`
+  - Scope: native AOT publish of `examples/ZcapLd.AotSample` (both packages) on Linux, failing on any
+    IL2xxx/IL3xxx warning from ZcapLd, DataProofs or NetCid, plus the file-based app (#154)
+  - Triggered by `src/**`, the two AOT example folders and the solution
 
 ## CD (publishing)
 

@@ -7,6 +7,19 @@ Optional ASP.NET Core adapter for `ZcapLd.Core` signed revocation workflows.
 - Minimal API endpoint rail for signed revocation requests
 - DI registration helpers for default and custom `IRevocationStore` backends
 - Works with pluggable stores (database, contract client, oracle bridge, cache)
+- Native AOT and trimming support: the package declares `IsAotCompatible` (#154)
+
+## Native AOT
+
+The revocation endpoint works in a `WebApplication.CreateSlimBuilder` host published with
+`PublishAot`, with no `JsonOptions` configuration: it reads the request body and writes the `200`
+response and the `400` string bodies through explicit source-generated metadata, mapped with the
+`RequestDelegate` overload so the host binds nothing by reflection. Custom caveats register with
+`AddZcapCaveatType<TCaveat>(type, JsonTypeInfo<TCaveat>)` and a `JsonSerializerContext` that lists
+the class; the reflection sibling `AddZcapCaveatType<TCaveat>(type)` is annotated
+`[RequiresUnreferencedCode]`/`[RequiresDynamicCode]` and throws where reflection-based
+serialization is disabled. `examples/ZcapLd.AotSample` in the repository drives the endpoint over
+loopback from a native binary.
 
 ## Quick Start
 
@@ -119,6 +132,8 @@ before the ZCAP services are first resolved:
 ```csharp
 builder.Services.AddZcapServices();
 builder.Services.AddZcapCaveatType<EpsilonBudgetCaveat>("EpsilonBudget");
+// Native AOT, trimming or a file-based app: generated metadata instead of reflection (#154).
+// builder.Services.AddZcapCaveatType("EpsilonBudget", EpsilonBudgetCaveatContext.Default.EpsilonBudgetCaveat);
 builder.Services.AddZcapCaveatHandler<EpsilonBudgetLedger>();
 ```
 

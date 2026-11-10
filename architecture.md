@@ -12,8 +12,8 @@ see [requirements](docs/ZCAP-LD-SPECIFICATION-REQUIREMENTS.md).
   It does not install an invocation HTTP-signature transport or private-key store.
 - **NetCrypto / NetDid**: cryptographic primitives, key types and DID resolution.
 - **DataProofsDotnet**: legacy cryptosuites and RDFC-1.0 canonicalization.
-- **NetCid**: multibase encoding. Core contains thin adapters rather than separate
-  implementations of these cryptographic foundations.
+- **NetCid**: multibase encoding and RFC 8785 (JCS). Core contains thin adapters rather than
+  separate implementations of these cryptographic foundations.
 
 ## Models
 
@@ -120,7 +120,8 @@ EcdsaSecp256r1Signature2019 suites. `ZcapSuiteCatalog` binds proof type, key typ
 context. `ProofSigningPayloadBuilder` supplies clone helpers and the test oracle.
 Signing bytes remain `SHA-256(RDFC(proofOptions)) || SHA-256(RDFC(document))`.
 `RdfcContextDocumentLoader` serves embedded contexts offline; `ZcapJsonOptions`
-provides consistent serialization and rejects duplicate JSON properties. A P-256 capability
+provides consistent serialization and rejects duplicate JSON properties (see
+[Serialization](#serialization)). A P-256 capability
 carries zcap-dotnet's own suite context, `urn:zcap-dotnet:ecdsa-secp256r1-2019-context:v1`
 (the ed25519-2020/v1 shape with the P-256 suite and key type names), because no suite context
 is published for `EcdsaSecp256r1Signature2019` (#159). It defines the same terms as the Ed25519
@@ -135,6 +136,62 @@ the application context before trusting the proof so invocation fields cannot be
 dropped from the signed RDF dataset. Golden vectors and the live JS harness pin
 canonicalization and proof interoperability. Modern v0.4 example suites do not
 require replacing this explicitly supported proof format.
+
+## Serialization
+
+Source-generated `System.Text.Json` metadata is the single source of serializer behaviour (#154).
+`ZcapJsonContext` (internal, `JsonSourceGenerationMode.Metadata`) lists every type zcap puts on the
+wire or hands to a canonicalizer: the wire models, the JSON DOM types, the field dictionaries and
+the collection shapes the services pass to the serializer. `ZcapJsonOptions.Default` resolves
+through it first; when `JsonSerializer.IsReflectionEnabledByDefault` is true (a JIT application that
+has not opted out) a `DefaultJsonTypeInfoResolver` is combined after it, for the consumer's own
+types only, under an `UnconditionalSuppressMessage` the trimmer honours because the switch is a
+feature switch. Under native AOT, trimming or a .NET 10 file-based app the context is the only
+resolver and an unlisted type fails with `NotSupportedException`. Metadata mode drives the same
+converters reflection does, so the bytes are identical by construction; `SourceGeneratedJsonTests`
+pin them against a reflection-only options instance, and the golden vectors, payload oracle and
+live interop harness are unchanged.
+
+Library code resolves metadata through `ZcapJsonOptions.TypeInfo<T>()`, never through
+`ZcapJsonContext.Default.X`: those properties bind to the context's own options, whose default
+encoder escapes `+<>&'` and would change the signed bytes. The generator cannot express the encoder,
+so it lives on the options.
+
+Two union members keep their `object` types and gain converters: `ContextJsonConverter`
+(`Capability.Context`) and `CapabilityChainJsonConverter` (`Proof.CapabilityChain`), both over
+`UnionJsonValue`. Reads yield `JsonElement`s, as the reflection object converter did; writes handle
+a string, a `JsonElement`, a `JsonNode`, an embedded `Capability` (chain only) and enumerables of
+those directly, and any other CLR type through `options.GetTypeInfo(runtimeType)`, which works in
+JIT through the reflection resolver and throws a `NotSupportedException` naming the member and type
+where reflection is disabled.
+
+`Jcs` is the only call site of `NetCid.JcsCanonicalizer`, and it uses the `JsonElement` overload
+only: NetCid's `JsonNode` overloads reach the element walker through the reflection-based
+`JsonSerializer.SerializeToDocument` (moisesja/net-cid#65). A node is converted with
+`JsonNode.WriteTo` and `JsonDocument.Parse`, which yields the same element, so
+`RevocationScope.KeyFor`, caveat grant keys and generated caveat context documents are byte-identical
+to 6.0.0 (`JcsTests` pin them). The DataProofs proof model is read through DataProofs' own
+generated metadata.
+
+Caveat metadata is resolved per registration (`CaveatCodec.ResolveTypeInfo`): both
+`CaveatTypeRegistry.Register` overloads build the strict caveat options (unmapped members
+disallowed, strict numbers, nullability and `required` honoured, the overriding `Type` property
+dropped) over the registration's resolver, a `DefaultJsonTypeInfoResolver` or the originating
+resolver of the caller's `JsonSerializerContext`, and prove at registration that it covers every
+parameter type. Every caveat read, write and comparison goes through that `JsonTypeInfo`.
+`Caveat.IsAttenuationOf`, which has no registry in scope, compares parameters through a
+process-wide `Type -> JsonTypeInfo` metadata cache that both overloads fill; the cache holds
+serializer metadata, not accepted types, so the no-global-registry rule is unchanged. The
+reflection overload is annotated `[RequiresUnreferencedCode]`/`[RequiresDynamicCode]` and throws
+with a message naming the typed overload where reflection is disabled. The adapter's
+`ZcapAspNetCoreJsonContext` covers only its two HTTP contracts and sits right after Core's context
+in `ZcapAspNetCoreJsonOptions.Default`, so every Core model still resolves through Core's context.
+
+`IsAotCompatible` on both package projects turns the trim, single-file and AOT analyzers on, and
+`src/.editorconfig` raises every diagnostic in those categories to an error; `ci-aot` publishes the
+sample natively and fails on any IL2xxx/IL3xxx warning that names a ZcapLd, DataProofsDotnet or
+NetCid assembly. Rule: every new `JsonSerializer` call in `src/` takes a `JsonTypeInfo`; a new wire
+type goes into `ZcapJsonContext` (or the AspNetCore context) and into the byte-identity tests.
 
 ## Time, revocation and replay
 

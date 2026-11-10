@@ -222,7 +222,13 @@ internal partial class EpsilonBudgetCaveatContext : JsonSerializerContext { }
 
 var caveats = new CaveatTypeRegistry()
     .Register("EpsilonBudget", EpsilonBudgetCaveatContext.Default.EpsilonBudgetCaveat);
+
+// ASP.NET Core
+services.AddZcapCaveatType("EpsilonBudget", EpsilonBudgetCaveatContext.Default.EpsilonBudgetCaveat);
 ```
+
+`examples/ZcapLd.AotSample` and `examples/ZcapLd.AotFileBasedApp/app.cs` register a caveat this
+way and run it as a native binary and as a file-based app.
 
 A context that does not cover one of the class's parameter types fails at registration, not at
 the first delegation. The overriding `Type` property is dropped from the metadata on both paths,
