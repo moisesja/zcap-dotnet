@@ -84,9 +84,11 @@ Hard constraints (from the issue and the orchestrator brief):
   internal (smallest new surface; a consumer embeds `Capability` in its own source-generated DTO as
   `JsonElement` and converts with `ZcapJsonOptions.Default.GetTypeInfo(typeof(Capability))`, which the
   README documents). Widening to public later is additive.
-- **D7. Enforcement.** `IsAotCompatible=true` on both package projects and an explicit
-  `WarningsAsErrors` list of the IL2xxx/IL3xxx codes (not `TreatWarningsAsErrors`, which would also
-  turn NuGet audit warnings into build breaks).
+- **D7. Enforcement.** `IsAotCompatible=true` on both package projects and `src/.editorconfig`
+  escalating the `Trimming`, `SingleFile` and `AOT` analyzer categories to errors (revised from an
+  explicit 115-code `WarningsAsErrors` list, which was correct but unreadable; proven by injecting a
+  reflection call and watching the build fail). Not `TreatWarningsAsErrors`, which would also turn
+  NuGet audit warnings into build breaks.
 - **D8. NU1903 (ILCompiler 10.0.100 advisory GHSA-p3jp-9v83-76w9).** CI uses `dotnet-version:
   10.0.x` (latest patch). The AOT sample carries a scoped `<NuGetAuditSuppress>` for that one advisory
   with a comment, so a developer on the 10.0.100 SDK can publish locally; no global NoWarn.
@@ -103,33 +105,72 @@ Hard constraints (from the issue and the orchestrator brief):
 
 ### Phase 2: implementation (one sub-agent per task, sequenced where files are shared)
 
-- [ ] T1. Core: `ZcapJsonContext` (`JsonSerializerContext`, settings mirroring
+- [x] T1. Core: `ZcapJsonContext` (`JsonSerializerContext`, settings mirroring
   `ZcapJsonOptions.Default`), `ZcapJsonOptions.Default` resolver (D1), `ContextJsonConverter` and
   `CapabilityChainJsonConverter` (D4), byte-identity tests (reflection-only options vs context-only
   options over rich fixtures).
-- [ ] T2. Core: every reflection `JsonSerializer` call (issue table + `ProofSigningPayloadBuilder`,
+- [x] T2. Core: every reflection `JsonSerializer` call (issue table + `ProofSigningPayloadBuilder`,
   `RdfcDocumentCanonicalizer`, `CanonicalIri`, `SigningService`, `CapabilityService`,
   `VerificationService`, `LegacyProofCrypto`, `CapabilityProfile`, converters) to `JsonTypeInfo`
   overloads; profile message (D5).
-- [ ] T3. Core: NetCid element path (D2) with pinned `KeyFor`/`GrantKey`/context-document tests;
+- [x] T3. Core: NetCid element path (D2) with pinned `KeyFor`/`GrantKey`/context-document tests;
   caveat registration overload and metadata plumbing (D3); upstream issue filed.
-- [ ] T4. AspNetCore context and endpoint (D6); existing ASP.NET tests green.
-- [ ] T5. `IsAotCompatible` + IL warnings-as-errors (D7); fix what the analyzers report; AOT sample
+- [x] T4. AspNetCore context and endpoint (D6); existing ASP.NET tests green.
+- [x] T5. `IsAotCompatible` + IL warnings-as-errors (D7); fix what the analyzers report; AOT sample
   + file-based app (D8, D9); `ci-aot.yml`.
-- [ ] T6. Docs: README, both package READMEs, CHANGELOG, architecture.md "Serialization", AGENTS.md
+- [x] T6. Docs: README, both package READMEs, CHANGELOG, architecture.md "Serialization", AGENTS.md
   serialization bullet, docs/CAVEAT-PROFILE.md.
-- [ ] T7. Red team on the serialization changes (reflection vs source-gen differences, dropped signed
+- [x] T7. Red team on the serialization changes (reflection vs source-gen differences, dropped signed
   terms, silent reflection fallbacks under AOT). Fix real findings.
 
 ### Phase 3: verification and PR
 
-- [ ] `dotnet build ZcapLd.sln` with 0 warnings; `dotnet test ZcapLd.sln` green.
-- [ ] `bash interop/run-interop.sh` passes unchanged.
-- [ ] Local native AOT publish of the sample on macOS: zero IL warnings from ZcapLd.*, DataProofs,
+- [x] `dotnet build ZcapLd.sln` with 0 warnings; `dotnet test ZcapLd.sln` green.
+- [x] `bash interop/run-interop.sh` passes unchanged.
+- [x] Local native AOT publish of the sample on macOS: zero IL warnings from ZcapLd.*, DataProofs,
   NetCid; the binary runs the full round trip.
-- [ ] `dotnet run examples/ZcapLd.AotFileBasedApp/app.cs` passes.
+- [x] `dotnet run examples/ZcapLd.AotFileBasedApp/app.cs` passes.
 - [ ] No untracked artifacts; PR opened with `Closes #154`; CI green.
 
 ## Results
 
-(filled in as work lands)
+Commits on `154-native-aot` (one per task): ae4eece (T1), 919472f (T2), 6fa38e9 (T3), ac279da (T4),
+527fa23 (T5), 5de836c (T6), 5f6a9a9 (T7 fixes). Upstream: moisesja/net-cid#65 filed (D2).
+
+- **Build:** `dotnet build ZcapLd.sln -c Release --no-incremental` 0 warnings, 0 errors (four
+  pre-existing cref warnings fixed on the way). The IL gate was proven by injecting a reflection call.
+- **Tests:** Core 889 (was 783; +106), AspNetCore 89 (was 56; +33), 0 failures. No existing test or
+  fixture changed except two assertions in the new AspNetCore `SourceGeneratedJsonTests` that had pinned
+  the regressed 200 body (T7/F3). Byte identity pinned against 6.0.0 (4f0cc8e): wire fixtures via a
+  reflection-only oracle, 20 `RevocationScope.KeyFor` digests, 4 grant keys, 4 caveat context
+  documents and 3 caveat wire forms, all computed from a 4f0cc8e worktree.
+- **Interop:** `bash interop/run-interop.sh` ALL 12 CHECKS + ALL 118 PROFILE CHECKS passed.
+- **Native AOT (macOS arm64):** `dotnet publish examples/ZcapLd.AotSample -c Release -r osx-arm64
+  -p:TrimmerSingleWarn=false`: 10 IL warnings, all Newtonsoft.Json 13.0.4 (`JObject/JToken/JValue.
+  GetMetaObject`, `JValue.IConvertible.ToType`, five IL2026/IL3050 pairs; dotNetRDF's `dynamic`
+  support, unreachable from RDFC); zero from ZcapLd.*, DataProofsDotnet.*, NetCid, NetDid, NetCrypto.
+  The 22 MB binary runs all 15 checks (round trip, non-controller denial, custom caveat through the
+  typed overload, signed revocation, the revocation endpoint in a slim host: 200, replay 403,
+  duplicate key 400).
+- **File-based app:** `dotnet run examples/ZcapLd.AotFileBasedApp/app.cs` prints `Dynamic code
+  supported: False; STJ reflection enabled: False` and passes all 9 checks; `dotnet publish app.cs`
+  also produces a working native binary. NU1903 (ILCompiler advisory) is a warning there on SDK
+  10.0.100; CI uses the latest 10.0.x.
+- **Reflection-disabled test sweep** (`JsonSerializerIsReflectionEnabledByDefault=false` on the Core
+  test project, then reverted): every remaining failure is test-only reflection (test helpers calling
+  option-less `JsonSerializer`, registrations through the reflection overload) or a JIT-state
+  assertion; zero failures inside library code.
+- **Red team (T7):** no Critical/High. Six findings, all fixed in 5f6a9a9: F1 Medium, a context with
+  `UseStringEnumConverter` made the two `Register` overloads write different enum bytes (now probed at
+  registration; member- and type-level `[JsonConverter]` stay accepted); F2 Low, `Jcs` mapped lone
+  surrogates to U+FFFD so two malformed ids could share a `KeyFor` digest where 6.0.0 threw (NetCid's
+  validation walk ported); F3 Low, the endpoint's 200 body had lost its null members (6.0.0 shape
+  restored and pinned, including its relaxed escaping); F4 Low, the `RequestDelegate` mapping lost
+  `IAcceptsMetadata`/`IDisableCookieRedirectMetadata` (declared explicitly, pinned); F5 Low,
+  `object`-typed caveat parameters failed at first delegation under a caveat-only context (Core's
+  context combined as fallback); F6 Info, the union writer lacked the 64-deep cycle guard (added).
+  Not reproduced: any dropped/duplicated/moved signed term, any duplicate-key acceptance, any silent
+  reflection fallback, any wire-byte divergence over 85 fixtures, endpoint route/body matrix changes.
+- **Decisions revised during the work:** D7 (editorconfig gate). D6's resolver order: the adapter's
+  context is inserted right after Core's context in the chain (not appended), or the JIT reflection
+  resolver would answer first for the contract types.

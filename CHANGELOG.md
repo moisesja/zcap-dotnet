@@ -19,7 +19,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   property of a `JsonSerializerContext`. The registry applies its own strict settings through that
   context's resolver, proves the resolver also covers every parameter type at registration, and
   produces the same context document and wire bytes as the reflection overload
-  (`SourceGeneratedCaveatRegistrationTests`).
+  (`SourceGeneratedCaveatRegistrationTests`). Enum parameters are probed at registration: a context
+  whose options-level converter (`UseStringEnumConverter`) would make the two overloads write
+  different bytes is refused; a `[JsonConverter]` on the member or on the enum type is honoured by
+  both. An `object`-typed parameter reads back through Core's metadata.
 - `IsAotCompatible` on `ZcapLd.Core` and `ZcapLd.AspNetCore`; `src/.editorconfig` makes every
   trim, single-file and AOT analyzer diagnostic a build error in both packages.
 - `examples/ZcapLd.AotSample` (a `PublishAot` consumer of both packages: the round trip, a custom
@@ -45,7 +48,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   read through DataProofs' own generated metadata. RFC 8785 goes through NetCid's `JsonElement`
   overload only (`Jcs`), so `RevocationScope.KeyFor`, caveat grant keys and generated caveat
   contexts no longer need reflection; their bytes are byte-identical to 6.0.0 and pinned
-  (`JcsTests`). NetCid stays at 1.6.0; its `JsonNode` overloads are reported upstream
+  (`JcsTests`), and `Jcs` validates a node as NetCid does, so an unpaired surrogate or a non-finite
+  number still throws `JcsFormatException` instead of producing a colliding key. NetCid stays at 1.6.0; its `JsonNode` overloads are reported upstream
   ([moisesja/net-cid#65](https://github.com/moisesja/net-cid/issues/65)).
 - The reflection overloads `Register<TCaveat>(string)` and `AddZcapCaveatType<TCaveat>(type)` are
   annotated `[RequiresUnreferencedCode]`/`[RequiresDynamicCode]` and throw an
@@ -54,8 +58,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   registered.
 - The revocation endpoint is mapped with the `RequestDelegate` overload and responds with
   `TypedResults.Json` and explicit metadata (Core's context first, the adapter's
-  `ZcapAspNetCoreJsonContext` for the two contracts): same bytes and content type, no host
-  `JsonOptions` needed. Under native AOT its `400` string bodies would otherwise have been `500`s.
+  `ZcapAspNetCoreJsonContext` for the two contracts): same bytes and content type as 6.0.0 (the
+  `200` body keeps its null members), no host `JsonOptions` needed, and the `Accepts` and
+  cookie-redirect metadata the delegate overload used to add are declared explicitly. Under native
+  AOT its `400` string bodies would otherwise have been `500`s.
 - The DI helpers' generic type parameters carry `[DynamicallyAccessedMembers(PublicConstructors)]`
   so the trimmer keeps the constructors the container activates.
 - A `CapabilityProfile` inspection failure now includes its cause ("could not be inspected safely:

@@ -390,3 +390,21 @@
   adversarial pass probed `[]`, `{}`, `{"bogus":1}` and an oversized body and missed it. Add "duplicate key,
   top-level and nested" to the standard malformed-body probe list, and run it in both Development and
   Production (the latter must stay an empty 4xx, never a 500).
+
+## 2026-11-10 — Source-generated JSON migration (#154): parity claims need a 6.0.0 oracle, not a brief
+- **Red-team correction of my own brief:** I told the fix agent the 6.0.0 revocation endpoint escaped `+<>&'`
+  in its 200 body; it did not (ASP.NET's default `JsonOptions` already uses `UnsafeRelaxedJsonEscaping`). The
+  agent only caught it because it ran the probe in a `4f0cc8e` worktree first. **Rule — every "byte-identical
+  to the previous release" statement is pinned by a value computed from the previous release's code (throwaway
+  worktree), never from the new code or from memory; the brief states the method, not the expected bytes.**
+- **Swapping a minimal-API `Delegate` handler for a `RequestDelegate` silently drops the metadata the binder
+  added** (`IAcceptsMetadata`, `IDisableCookieRedirectMetadata`, `Produces<T>`). Re-declare each one explicitly
+  and pin the endpoint's `Metadata` in a test; the 405/400/403 matrix alone does not reveal the loss.
+- **Generated `System.Text.Json` metadata bakes options-level converters in** (`UseStringEnumConverter`,
+  `Converters = …`), invisibly to the public metadata API (`Options.Converters` is empty, the converter type is
+  the same `EnumConverter<T>`). When two resolvers must write the same bytes, probe behaviour (serialize a
+  defined member) at registration instead of inspecting metadata.
+- **A `JsonNode` → `JsonElement` shim through `Utf8JsonWriter` is lossy for malformed UTF-16** (lone surrogates
+  become U+FFFD) and reports NaN as `ArgumentException`; a canonicalizer that keyed stores on its output
+  (`RevocationScope.KeyFor`) would collide where the upstream node path threw. Port the upstream validation
+  walk along with the shim and compare exception type and message per input.
