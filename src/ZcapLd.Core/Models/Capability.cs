@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using ZcapLd.Core.Cryptography;
 
 namespace ZcapLd.Core.Models;
 
@@ -15,9 +16,11 @@ public class Capability
     public string Id { get; set; } = string.Empty;
 
     /// <summary>
-    /// JSON-LD context for the capability
+    /// JSON-LD context for the capability. A string or an array of strings in the supported profile;
+    /// deserialized values are a <see cref="JsonElement"/> (see <see cref="ContextJsonConverter"/>).
     /// </summary>
     [JsonPropertyName("@context")]
+    [JsonConverter(typeof(ContextJsonConverter))]
     public object Context { get; set; } = "https://w3id.org/zcap/v1";
 
     /// <summary>

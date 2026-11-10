@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.Json.Serialization.Metadata;
 using ZcapLd.Core.Models;
 
 namespace ZcapLd.Core.Cryptography;
@@ -21,6 +22,11 @@ namespace ZcapLd.Core.Cryptography;
 /// </summary>
 internal sealed class InvocationCapabilityJsonConverter : JsonConverter<InvocationCapability>
 {
+    // Resolved from the options in use (not from a fixed context) so consumer-supplied options keep
+    // working, and through metadata so no reflection is needed under AOT (#154).
+    private static JsonTypeInfo<Capability> CapabilityTypeInfo(JsonSerializerOptions options)
+        => (JsonTypeInfo<Capability>)options.GetTypeInfo(typeof(Capability));
+
     public override InvocationCapability? Read(
         ref Utf8JsonReader reader,
         Type typeToConvert,
@@ -36,7 +42,7 @@ internal sealed class InvocationCapabilityJsonConverter : JsonConverter<Invocati
 
             case JsonTokenType.StartObject:
             {
-                var capability = JsonSerializer.Deserialize<Capability>(ref reader, options)
+                var capability = JsonSerializer.Deserialize(ref reader, CapabilityTypeInfo(options))
                     ?? throw new JsonException("Invocation capability object deserialized to null.");
                 if (string.IsNullOrEmpty(capability.Id))
                 {
@@ -61,7 +67,7 @@ internal sealed class InvocationCapabilityJsonConverter : JsonConverter<Invocati
             // Delegated invocation: emit the full delegated zcap object so it participates in the
             // signed canonical payload (Issue #51). Serialized through the shared options so the
             // embedded object's extension fields/proof/chain round-trip identically.
-            JsonSerializer.Serialize(writer, embedded, options);
+            JsonSerializer.Serialize(writer, embedded, CapabilityTypeInfo(options));
         }
         else
         {

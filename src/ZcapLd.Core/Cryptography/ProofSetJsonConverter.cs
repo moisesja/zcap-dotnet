@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.Json.Serialization.Metadata;
 using ZcapLd.Core.Models;
 
 namespace ZcapLd.Core.Cryptography;
@@ -20,6 +21,11 @@ namespace ZcapLd.Core.Cryptography;
 /// </summary>
 internal sealed class ProofSetJsonConverter : JsonConverter<ProofSet>
 {
+    // Resolved from the options in use (not from a fixed context) so consumer-supplied options keep
+    // working, and through metadata so no reflection is needed under AOT (#154).
+    private static JsonTypeInfo<Proof> ProofTypeInfo(JsonSerializerOptions options)
+        => (JsonTypeInfo<Proof>)options.GetTypeInfo(typeof(Proof));
+
     public override ProofSet Read(
         ref Utf8JsonReader reader,
         Type typeToConvert,
@@ -29,7 +35,7 @@ internal sealed class ProofSetJsonConverter : JsonConverter<ProofSet>
         {
             case JsonTokenType.StartObject:
             {
-                var proof = JsonSerializer.Deserialize<Proof>(ref reader, options)
+                var proof = JsonSerializer.Deserialize(ref reader, ProofTypeInfo(options))
                     ?? throw new JsonException("proof object deserialized to null.");
                 return ProofSet.FromSingle(proof);
             }
@@ -50,7 +56,7 @@ internal sealed class ProofSetJsonConverter : JsonConverter<ProofSet>
                             $"proof array entries MUST be objects, got {reader.TokenType}.");
                     }
 
-                    var proof = JsonSerializer.Deserialize<Proof>(ref reader, options)
+                    var proof = JsonSerializer.Deserialize(ref reader, ProofTypeInfo(options))
                         ?? throw new JsonException("proof array entry deserialized to null.");
                     proofs.Add(proof);
                 }
@@ -78,14 +84,14 @@ internal sealed class ProofSetJsonConverter : JsonConverter<ProofSet>
             writer.WriteStartArray();
             foreach (var proof in value.Values)
             {
-                JsonSerializer.Serialize(writer, proof, options);
+                JsonSerializer.Serialize(writer, proof, ProofTypeInfo(options));
             }
             writer.WriteEndArray();
         }
         else
         {
             // Object form (single proof) → bare proof object, identical to the pre-#48 wire shape.
-            JsonSerializer.Serialize(writer, value.Primary, options);
+            JsonSerializer.Serialize(writer, value.Primary, ProofTypeInfo(options));
         }
     }
 }
