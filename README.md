@@ -35,7 +35,7 @@ dotnet add package ZcapLd.AspNetCore # Optional endpoint adapter
 
 ### Native AOT, trimming and file-based apps
 
-Both packages declare `IsAotCompatible` and run under native AOT, trimming and .NET 10 file-based
+Since 6.0.1, both packages declare `IsAotCompatible` and run under native AOT, trimming and .NET 10 file-based
 apps (`dotnet run app.cs`, which disables reflection-based `System.Text.Json` by default). zcap's
 wire models serialize through source-generated metadata, so the round trip below needs nothing
 from you (#154). Two things to know:

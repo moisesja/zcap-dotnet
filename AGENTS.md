@@ -134,7 +134,7 @@ bash interop/run-interop.sh
 
 ## Architecture Notes
 
-- **Framework and packages**: .NET 10, ZcapLd.Core and ZcapLd.AspNetCore 6.0.0.
+- **Framework and packages**: .NET 10, ZcapLd.Core and ZcapLd.AspNetCore 6.0.1.
   Exact dependency pins live in the project files. NetCrypto handles cryptographic
   primitives, NetDid handles DID resolution, DataProofs handles legacy proof suites
   and RDFC, and NetCid handles multibase and RFC 8785. Do not claim a spec compliance percentage.

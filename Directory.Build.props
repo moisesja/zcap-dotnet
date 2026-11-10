@@ -1,10 +1,11 @@
 <Project>
   <PropertyGroup>
-    <!-- Shared major version: #157 restores custom caveats as a signed, opt-in extension
-         profile (new interface/constructor parameters) and signs envelope invocation/revocation
-         `created` under the suite context (in-stack signing bytes change). Capability proof
-         bytes are unchanged (RDFC-1.0), except for a child of a co-signed parent (DataProofs
-         2.0.0, #159). -->
-    <ZcapLdVersion>6.0.0</ZcapLdVersion>
+    <!-- Shared version for both packages. 6.0.1 adds native AOT, trimming and file-based app
+         support through source-generated JSON (#154); every wire form, revocation key and caveat
+         context is byte-identical to 6.0.0. 6.0.0 was the major: #157 restored custom caveats as a
+         signed, opt-in extension profile and signed envelope invocation/revocation `created` under
+         the suite context; capability proof bytes are unchanged (RDFC-1.0), except for a child of
+         a co-signed parent (DataProofs 2.0.0, #159). -->
+    <ZcapLdVersion>6.0.1</ZcapLdVersion>
   </PropertyGroup>
 </Project>

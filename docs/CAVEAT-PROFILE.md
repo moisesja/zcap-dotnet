@@ -1,6 +1,6 @@
 # Caveat extension profile v1
 
-Status: implemented in ZcapLd.Core 6.0.0 (#157). This is an **application-specific
+Status: implemented in ZcapLd.Core 6.0.0 (#157); source-generated registration since 6.0.1 (#154). This is an **application-specific
 extension** of ZCAP-LD, not part of the v0.4 draft. Capabilities that carry caveats are
 rejected by `@digitalbazaar/zcap` and by any zcap-dotnet verifier that has not registered the
 caveat types. Capabilities without caveats are unaffected and stay interoperable.
@@ -215,7 +215,7 @@ services.AddZcapCaveatHandler<EpsilonBudgetLedger>();
 `Register<TCaveat>(string)` reads and writes the class with reflection-based serializer
 metadata, which native AOT, trimming and .NET 10 file-based apps (`dotnet run app.cs`) disable;
 it is annotated `[RequiresUnreferencedCode]`/`[RequiresDynamicCode]` and throws there. Those
-applications register through source-generated metadata instead (#154). The overload takes a
+applications register through source-generated metadata instead (since 6.0.1, #154). The overload takes a
 property of a `JsonSerializerContext` that lists the class; the registry applies its own strict
 settings through that context's resolver (the context's options are irrelevant), and the
 generated context document and wire bytes are identical to the reflection overload's:

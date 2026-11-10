@@ -7,7 +7,7 @@ Optional ASP.NET Core adapter for `ZcapLd.Core` signed revocation workflows.
 - Minimal API endpoint rail for signed revocation requests
 - DI registration helpers for default and custom `IRevocationStore` backends
 - Works with pluggable stores (database, contract client, oracle bridge, cache)
-- Native AOT and trimming support: the package declares `IsAotCompatible` (#154)
+- Native AOT and trimming support since 6.0.1: the package declares `IsAotCompatible` (#154)
 
 ## Native AOT
 

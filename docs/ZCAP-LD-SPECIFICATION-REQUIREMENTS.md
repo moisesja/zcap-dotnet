@@ -1,7 +1,7 @@
 # ZCAP v0.4.0 requirements and supported profile
 
 Source: [Authorization Capabilities v0.4.0](https://w3c-ccg.github.io/zcap-spec/v0.4.0/).
-Implementation target: zcap-dotnet 6.0.0, .NET 10. This document describes the
+Implementation target: zcap-dotnet 6.0.1, .NET 10. This document describes the
 supported profile and its verification evidence; it does not claim a percentage
 of complete specification compliance.
 
