@@ -79,7 +79,9 @@ internal static class CapabilityProfile
         }
         catch (Exception ex) when (ex is JsonException or NotSupportedException or InvalidOperationException)
         {
-            return Malformed("Capability/proof JSON could not be inspected safely.");
+            // The cause is part of the message: a serializer without metadata for a value (reflection
+            // disabled under native AOT, #154) reads very differently from a malformed body.
+            return Malformed($"Capability/proof JSON could not be inspected safely: {ex.Message}");
         }
 
         // capabilityLevel: the value sits where a capability object belongs (the scanned capability,
@@ -107,7 +109,7 @@ internal static class CapabilityProfile
             }
 
             var json = value is JsonElement element ? element :
-                JsonSerializer.SerializeToElement(value, ZcapJsonOptions.Default);
+                JsonSerializer.SerializeToElement(value, ZcapJsonOptions.TypeInfo<object>());
             if (json.ValueKind == JsonValueKind.Array)
                 return json.EnumerateArray().All(entry => Check(entry, depth + 1));
             if (json.ValueKind != JsonValueKind.Object)
@@ -235,7 +237,8 @@ internal static class CapabilityProfile
             bool Known(string? url) => url == ZcapSuiteCatalog.ZcapContextUrl || ZcapSuiteCatalog.IsSupportedContext(url) ||
                                        (registry is not null && url is not null && registry.TryGetByContextUrl(url, out _));
             if (context is string url) return Known(url);
-            var json = context is JsonElement element ? element : JsonSerializer.SerializeToElement(context);
+            var json = context is JsonElement element ? element
+                : JsonSerializer.SerializeToElement(context!, ZcapJsonOptions.TypeInfo<object>());
             if (json.ValueKind == JsonValueKind.String) return Known(json.GetString());
             // No inline definitions, scoped aliases, or unrelated offline vocabulary. This is
             // intentionally a supported-profile restriction, not a second JSON-LD expander.

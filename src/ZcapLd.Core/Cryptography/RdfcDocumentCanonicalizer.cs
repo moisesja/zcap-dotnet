@@ -12,9 +12,6 @@ namespace ZcapLd.Core.Cryptography;
 /// </summary>
 public class RdfcDocumentCanonicalizer : IDocumentCanonicalizer
 {
-    // Use the same serialization options as the production proof engine.
-    private static readonly JsonSerializerOptions SerializerOptions = ZcapJsonOptions.Default;
-
     private static readonly InnerCanonicalizer Shared = new(RdfcContextDocumentLoader.Instance);
 
     private readonly InnerCanonicalizer _inner;
@@ -32,9 +29,11 @@ public class RdfcDocumentCanonicalizer : IDocumentCanonicalizer
     {
         ArgumentNullException.ThrowIfNull(document);
 
+        // The same metadata as the production proof engine: zcap's models and the JSON DOM resolve
+        // without reflection, a consumer's own type needs the options' reflection resolver (#154).
         using var parsed = document is string s
             ? JsonDocument.Parse(s)
-            : JsonSerializer.SerializeToDocument(document, SerializerOptions);
+            : JsonSerializer.SerializeToDocument(document, ZcapJsonOptions.TypeInfo<object>());
 
         return _inner.CanonicalizeJsonLd(parsed.RootElement);
     }

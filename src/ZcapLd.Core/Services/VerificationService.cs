@@ -669,7 +669,7 @@ public class VerificationService : IVerificationService
                     "Secured invocation document is missing a proof.");
 
             Proof? proof;
-            try { proof = proofNode.Deserialize<Proof>(ZcapJsonOptions.Default); }
+            try { proof = proofNode.Deserialize(ZcapJsonOptions.TypeInfo<Proof>()); }
             catch (JsonException) { proof = null; }
             if (proof is null)
                 return VerificationResult.Fail(VerificationOutcome.MalformedCapability,
@@ -2186,7 +2186,7 @@ public class VerificationService : IVerificationService
         if (element is JsonElement jsonElement && jsonElement.ValueKind == JsonValueKind.Object)
         {
             // Preserve the same JSON representation used by the signing boundary.
-            capability = JsonSerializer.Deserialize<Capability>(jsonElement.GetRawText(), ZcapJsonOptions.Default);
+            capability = JsonSerializer.Deserialize(jsonElement.GetRawText(), ZcapJsonOptions.TypeInfo<Capability>());
             return capability != null;
         }
 
@@ -2406,8 +2406,8 @@ public class VerificationService : IVerificationService
     // legitimate maximum-length chain is not refused as CouldNotVerify.
     private const int MaxComparedJsonBytes = 16 * 1024 * 1024;
 
-    private static byte[] CanonicalForComparison(object value) => NetCid.JcsCanonicalizer.Canonicalize(
-        JsonSerializer.SerializeToElement(value, ZcapJsonOptions.Default), MaxComparedJsonBytes);
+    private static byte[] CanonicalForComparison(object value) => Jcs.Canonicalize(
+        JsonSerializer.SerializeToElement(value, ZcapJsonOptions.TypeInfo<object>()), MaxComparedJsonBytes);
 
     private static bool IsSameJson(object first, object second)
         => CanonicalForComparison(first).AsSpan().SequenceEqual(CanonicalForComparison(second));
@@ -2764,7 +2764,7 @@ public class VerificationService : IVerificationService
             if (metadataElement.ValueKind != JsonValueKind.Object ||
                 metadataElement.EnumerateObject().Any(entry => entry.Value.ValueKind != JsonValueKind.String))
                 return false;
-            metadata = metadataElement.Deserialize<Dictionary<string, string>>(ZcapJsonOptions.Default);
+            metadata = metadataElement.Deserialize(ZcapJsonOptions.TypeInfo<Dictionary<string, string>>());
         }
 
         return true;

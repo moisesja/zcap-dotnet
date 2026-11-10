@@ -68,11 +68,14 @@ internal static class CanonicalIri
         string? form = null;
         try
         {
+            // Through zcap's metadata rather than the serializer's reflection defaults, so the probe also
+            // runs under native AOT (#154); the element's decoded strings, which are all RDFC sees, are
+            // the same either way.
             var document = JsonSerializer.SerializeToElement(new Dictionary<string, object>
             {
                 ["@id"] = value,
                 [ProbePredicate] = new Dictionary<string, string> { ["@id"] = value },
-            });
+            }, ZcapJsonOptions.TypeInfo<Dictionary<string, object>>());
             var nquads = Encoding.UTF8.GetString(Probe.CanonicalizeJsonLd(document));
             // Exactly one triple "<s> <p> <o> ." when the IRI survives in both positions.
             var middle = $"> <{ProbePredicate}> <";

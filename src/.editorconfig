@@ -1,0 +1,10 @@
+# Native AOT and trimming contract for the two packages (#154). IsAotCompatible in each csproj turns
+# the trim, single-file and AOT analyzers on; this makes every diagnostic they raise a build error,
+# by analyzer category rather than by listing IL2xxx/IL3xxx codes. Tests and examples sit outside src/
+# and are not covered.
+root = false
+
+[*.cs]
+dotnet_analyzer_diagnostic.category-Trimming.severity = error
+dotnet_analyzer_diagnostic.category-SingleFile.severity = error
+dotnet_analyzer_diagnostic.category-AOT.severity = error

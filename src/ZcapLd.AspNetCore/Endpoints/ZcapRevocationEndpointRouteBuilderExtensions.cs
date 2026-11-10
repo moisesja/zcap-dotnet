@@ -2,9 +2,10 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Features;
+using Microsoft.AspNetCore.Http.Metadata;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.DependencyInjection;
 using ZcapLd.AspNetCore.Contracts;
-using ZcapLd.Core.Cryptography;
 using ZcapLd.Core.Services;
 
 namespace ZcapLd.AspNetCore.Endpoints;
@@ -58,29 +59,50 @@ public static class ZcapRevocationEndpointRouteBuilderExtensions
         var normalizedPrefix = NormalizePrefix(routePrefix);
         var group = endpoints.MapGroup(normalizedPrefix).WithTags("ZCAP Revocations");
 
+        // The RequestDelegate overload: the Delegate overload binds parameters by reflection at startup
+        // (RequiresUnreferencedCode/RequiresDynamicCode), and the Request Delegate Generator only
+        // intercepts MapPost calls in the application's own compilation, never in a referenced library,
+        // so a trimmed or native AOT host (#154) needs the handler to read the route value, request,
+        // services and cancellation token itself. The metadata the Delegate overload inferred is declared
+        // explicitly: the JSON body it accepts, and no cookie-authentication redirect, so an
+        // unauthenticated or forbidden signed request is answered with its status code, not a 302 to a
+        // login page.
         group.MapPost("/{*capabilityId}", RevokeCapabilityAsync)
             .WithName("ZcapRevokeCapability")
-            .Produces<RevocationStatusHttpResponse>(StatusCodes.Status200OK)
-            .Produces<string>(StatusCodes.Status400BadRequest)
-            .Produces(StatusCodes.Status403Forbidden);
+            .DisableCookieRedirect()
+            .WithMetadata(new AcceptsMetadata(["application/json"], typeof(SignedRevocationHttpRequest), isOptional: false))
+            .WithMetadata(new ProducesResponseTypeMetadata(
+                StatusCodes.Status200OK, typeof(RevocationStatusHttpResponse), ["application/json"]))
+            .WithMetadata(new ProducesResponseTypeMetadata(StatusCodes.Status400BadRequest, typeof(string), ["application/json"]))
+            .WithMetadata(new ProducesResponseTypeMetadata(StatusCodes.Status403Forbidden));
 
         return group;
     }
 
+    private static async Task RevokeCapabilityAsync(HttpContext context)
+    {
+        var result = await RevokeCapabilityAsync(
+            context.GetRouteValue("capabilityId") as string,
+            context.Request,
+            context.RequestServices.GetRequiredService<IVerificationService>(),
+            context.RequestAborted);
+        await result.ExecuteAsync(context);
+    }
+
     private static async Task<IResult> RevokeCapabilityAsync(
-        string capabilityId,
+        string? capabilityId,
         HttpRequest httpRequest,
         IVerificationService verificationService,
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(capabilityId))
         {
-            return TypedResults.BadRequest("Capability ID route value is required.");
+            return BadRequest("Capability ID route value is required.");
         }
 
         if (!TryGetCapabilityId(httpRequest.HttpContext, capabilityId, out var requestedCapabilityId))
         {
-            return TypedResults.BadRequest("Capability ID could not be read from the request path.");
+            return BadRequest("Capability ID could not be read from the request path.");
         }
 
         // Bound the unauthenticated request body BEFORE materializing it (DoS): the verifier's
@@ -94,15 +116,16 @@ public static class ZcapRevocationEndpointRouteBuilderExtensions
 
         // Preserve embedded proofs, controller arrays and extension data with the shared options.
         // In particular, forbidden caveat fields must reach the verifier rather than disappear.
+        // Source-generated metadata (#154): the body is read without reflection under native AOT.
         SignedRevocationHttpRequest? request;
         try
         {
-            request = await JsonSerializer.DeserializeAsync<SignedRevocationHttpRequest>(
-                httpRequest.Body, ZcapJsonOptions.Default, cancellationToken);
+            request = await JsonSerializer.DeserializeAsync(
+                httpRequest.Body, ZcapAspNetCoreJsonOptions.Request, cancellationToken);
         }
         catch (JsonException)
         {
-            return TypedResults.BadRequest("Request body is not valid JSON.");
+            return BadRequest("Request body is not valid JSON.");
         }
         catch (BadHttpRequestException)
         {
@@ -112,12 +135,12 @@ public static class ZcapRevocationEndpointRouteBuilderExtensions
 
         if (request?.Capability == null || request.SignedRevocation == null)
         {
-            return TypedResults.BadRequest("Body must include 'capability' and 'signedRevocation'.");
+            return BadRequest("Body must include 'capability' and 'signedRevocation'.");
         }
 
         if (!string.Equals(requestedCapabilityId, request.Capability.Id, StringComparison.Ordinal))
         {
-            return TypedResults.BadRequest("Route capability id does not match the body capability id.");
+            return BadRequest("Route capability id does not match the body capability id.");
         }
 
         // Authentication (signature/proof-of-possession) + authorization happen inside the verifier.
@@ -129,12 +152,27 @@ public static class ZcapRevocationEndpointRouteBuilderExtensions
             return TypedResults.StatusCode(StatusCodes.Status403Forbidden);
         }
 
-        return TypedResults.Ok(new RevocationStatusHttpResponse
-        {
-            CapabilityId = request.Capability.Id,
-            IsRevoked = true
-        });
+        // Explicit metadata so the response serializes without reflection under native AOT (#154): the
+        // host needs no JsonOptions configuration, unlike TypedResults.Ok<T>, which resolves through the
+        // application's JsonOptions resolver chain.
+        return TypedResults.Json(
+            new RevocationStatusHttpResponse
+            {
+                CapabilityId = request.Capability.Id,
+                IsRevoked = true
+            },
+            ZcapAspNetCoreJsonOptions.Response,
+            statusCode: StatusCodes.Status200OK);
     }
+
+    /// <summary>
+    /// A 400 whose body is the message as a JSON string, the shape <c>TypedResults.BadRequest(string)</c>
+    /// writes, through explicit metadata: that result resolves <c>string</c> from the host's
+    /// <c>JsonOptions</c>, whose resolver chain is empty under native AOT, so every malformed body would
+    /// be a 500 there (#154).
+    /// </summary>
+    private static IResult BadRequest(string message)
+        => TypedResults.Json(message, ZcapAspNetCoreJsonOptions.Text, statusCode: StatusCodes.Status400BadRequest);
 
     /// <summary>
     /// Recovers the capability id addressed by the request, decoded exactly once (Issue #155).

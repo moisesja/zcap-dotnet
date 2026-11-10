@@ -147,7 +147,8 @@ public class CapabilityService : ICapabilityService
                 ? null
                 : new Dictionary<string, JsonElement>(StringComparer.Ordinal)
                 {
-                    [CaveatCodec.Property] = JsonSerializer.SerializeToElement(caveatEntries.Values, ZcapJsonOptions.Default)
+                    [CaveatCodec.Property] = JsonSerializer.SerializeToElement(
+                        caveatEntries.Values, ZcapJsonOptions.TypeInfo<IEnumerable<JsonElement>>())
                 }
         };
 

@@ -130,7 +130,11 @@ handler's context contains only authenticated data:
 - `Grants`: each link's caveat of this type, root side first, with `GrantKey`;
 - `Chain` and `RootCapabilityId`;
 - `CapabilityAction` and `InvocationTarget`;
-- `InvocationId` (the replay nonce), `VerificationMethod` and `Created`.
+- `InvocationId` (the replay nonce), `VerificationMethod` and `Created`. `Created` is the proof time
+  the holder signed, admitted anywhere inside the freshness window: record it for audit, but take
+  the time that chooses a rate-limit window, bucket or expiry from the resource's own clock (an
+  injected `TimeProvider`), as the samples' `RateLimitLedger` does. A bucket chosen from `Created`
+  lets a holder reset its own count by alternating two signed minutes.
 
 There is deliberately no property bag. **The resource is responsible for:**
 
@@ -207,6 +211,36 @@ services.AddZcapServices();
 services.AddZcapCaveatType<EpsilonBudgetCaveat>("EpsilonBudget");
 services.AddZcapCaveatHandler<EpsilonBudgetLedger>();
 ```
+
+`Register<TCaveat>(string)` reads and writes the class with reflection-based serializer
+metadata, which native AOT, trimming and .NET 10 file-based apps (`dotnet run app.cs`) disable;
+it is annotated `[RequiresUnreferencedCode]`/`[RequiresDynamicCode]` and throws there. Those
+applications register through source-generated metadata instead (#154). The overload takes a
+property of a `JsonSerializerContext` that lists the class; the registry applies its own strict
+settings through that context's resolver (the context's options are irrelevant), and the
+generated context document and wire bytes are identical to the reflection overload's:
+
+```csharp
+[JsonSerializable(typeof(EpsilonBudgetCaveat))]
+internal partial class EpsilonBudgetCaveatContext : JsonSerializerContext { }
+
+var caveats = new CaveatTypeRegistry()
+    .Register("EpsilonBudget", EpsilonBudgetCaveatContext.Default.EpsilonBudgetCaveat);
+
+// ASP.NET Core
+services.AddZcapCaveatType("EpsilonBudget", EpsilonBudgetCaveatContext.Default.EpsilonBudgetCaveat);
+```
+
+`examples/ZcapLd.AotSample` and `examples/ZcapLd.AotFileBasedApp/app.cs` register a caveat this
+way and run it as a native binary and as a file-based app.
+
+A context that does not cover one of the class's parameter types fails at registration, not at
+the first delegation. The overriding `Type` property is dropped from the metadata on both paths,
+so it is never a parameter. Member-level `[JsonConverter]` attributes are honoured identically by
+both overloads, but options-level converters declared on the context (`UseStringEnumConverter`,
+`Converters = …`) are not, so enum parameters are checked at registration and must serialize as
+JSON numbers; an `object`-typed parameter reads back as a `JsonElement` and, without reflection,
+can hold only a string, a `JsonElement`/`JsonNode` or arrays of those.
 
 Register every type before the services are first resolved: a registry is frozen when a
 service receives it. `capability.GetCaveats(registry)` reads validated caveats (form only, not

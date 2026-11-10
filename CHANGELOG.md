@@ -7,7 +7,75 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-No package change. Examples, tests and CI only (#166):
+### Added
+
+- **Native AOT, trimming and .NET 10 file-based apps are supported (#154).** Every type zcap puts
+  on the wire or hands to a canonicalizer has source-generated `System.Text.Json` metadata
+  (`ZcapJsonContext`, internal, metadata mode), which `ZcapJsonOptions.Default` resolves first, so the
+  full round trip (root, delegation, envelope and Data Integrity invocation, custom caveat, signed
+  revocation, the revocation endpoint) runs where reflection-based serialization is disabled.
+- `CaveatTypeRegistry.Register<TCaveat>(string, JsonTypeInfo<TCaveat>)` and
+  `AddZcapCaveatType<TCaveat>(services, type, JsonTypeInfo<TCaveat>)` register a caveat class with a
+  property of a `JsonSerializerContext`. The registry applies its own strict settings through that
+  context's resolver, proves the resolver also covers every parameter type at registration, and
+  produces the same context document and wire bytes as the reflection overload
+  (`SourceGeneratedCaveatRegistrationTests`). Enum parameters are probed at registration: a context
+  whose options-level converter (`UseStringEnumConverter`) would make the two overloads write
+  different bytes is refused; a `[JsonConverter]` on the member or on the enum type is honoured by
+  both. An `object`-typed parameter reads back through Core's metadata.
+- `IsAotCompatible` on `ZcapLd.Core` and `ZcapLd.AspNetCore`; `src/.editorconfig` makes every
+  trim, single-file and AOT analyzer diagnostic a build error in both packages.
+- `examples/ZcapLd.AotSample` (a `PublishAot` consumer of both packages: the round trip, a custom
+  caveat through the typed registration and the revocation endpoint in a `CreateSlimBuilder` host over
+  loopback), `examples/ZcapLd.AotFileBasedApp/app.cs` (`dotnet run app.cs`, not in the solution), and
+  the `ci-aot` workflow, which publishes both on Linux, runs the binaries and fails on any
+  IL2xxx/IL3xxx warning from a ZcapLd, DataProofsDotnet or NetCid assembly.
+
+### Changed
+
+- `ZcapJsonOptions.Default.TypeInfoResolver` is the generated context, followed by a reflection
+  resolver only when `JsonSerializer.IsReflectionEnabledByDefault` is true, so a JIT application
+  sees no change and can still serialize its own types with the shared options; under native AOT,
+  trimming or a file-based app the context is the only resolver and an unlisted type throws
+  `NotSupportedException` (#154). `ZcapJsonContext` stays internal; embed a `Capability` in your own
+  generated DTO as a `JsonElement` and convert with `ZcapJsonOptions.Default.GetTypeInfo(typeof(Capability))`.
+- `Capability.Context` and `Proof.CapabilityChain` keep their `object`/`object[]` types and gain
+  explicit union converters: reads yield `JsonElement`s as before; writes handle a string, a
+  `JsonElement`, a `JsonNode`, an embedded `Capability` (chain only) and arrays or lists of those
+  without reflection, and any other CLR type through the options' metadata. The bytes are pinned
+  against the 6.0.0 reflection serializer (`SourceGeneratedJsonTests`).
+- Every `JsonSerializer` call in both packages takes a `JsonTypeInfo`; the DataProofs proof model is
+  read through DataProofs' own generated metadata. RFC 8785 goes through NetCid's `JsonElement`
+  overload only (`Jcs`), so `RevocationScope.KeyFor`, caveat grant keys and generated caveat
+  contexts no longer need reflection; their bytes are byte-identical to 6.0.0 and pinned
+  (`JcsTests`), and `Jcs` validates a node as NetCid does, so an unpaired surrogate or a non-finite
+  number still throws `JcsFormatException` instead of producing a colliding key. NetCid stays at 1.6.0; its `JsonNode` overloads are reported upstream
+  ([moisesja/net-cid#65](https://github.com/moisesja/net-cid/issues/65)).
+- The reflection overloads `Register<TCaveat>(string)` and `AddZcapCaveatType<TCaveat>(type)` are
+  annotated `[RequiresUnreferencedCode]`/`[RequiresDynamicCode]` and throw an
+  `InvalidOperationException` naming the typed overload where reflection-based serialization is
+  disabled. `Caveat.IsAttenuationOf` compares parameters through the metadata either overload
+  registered.
+- The revocation endpoint is mapped with the `RequestDelegate` overload and responds with
+  `TypedResults.Json` and explicit metadata (Core's context first, the adapter's
+  `ZcapAspNetCoreJsonContext` for the two contracts): same bytes and content type as 6.0.0 (the
+  `200` body keeps its null members), no host `JsonOptions` needed, and the `Accepts` and
+  cookie-redirect metadata the delegate overload used to add are declared explicitly. Under native
+  AOT its `400` string bodies would otherwise have been `500`s.
+- The DI helpers' generic type parameters carry `[DynamicallyAccessedMembers(PublicConstructors)]`
+  so the trimmer keeps the constructors the container activates.
+- A `CapabilityProfile` inspection failure now includes its cause ("could not be inspected safely:
+  …"), so a serializer without metadata reads differently from a malformed body.
+
+### Fixed
+
+- The 6.0.0 known limitation: under native AOT, trimming or a file-based app the first delegation
+  threw `InvalidOperationException` ("Reflection-based serialization has been disabled…") in
+  `CanonicalIri.SignedForm`, and `CaveatTypeRegistry.Register<T>` threw inside NetCid (#154).
+
+### Examples, tests and CI (#166)
+
+No package change:
 
 - `examples/ZcapLd.RevocationEndpointsDemo` gains `--walkthrough`, which provisions demo keys and a
   root with trusted startup code and drives the real endpoints: a delegated read (`200`), a stranger's

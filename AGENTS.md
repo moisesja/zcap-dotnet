@@ -106,10 +106,12 @@ zcap-dotnet/
 ├── interop/                     # .NET CLI, pinned JS peer, target/profile matrix
 ├── examples/
 │   ├── ZcapLd.Examples/          # Native restrictions, invocation formats and revocation
-│   └── ZcapLd.RevocationEndpointsDemo/ # ASP.NET signed revocation with SQLite, protected resource, --walkthrough
+│   ├── ZcapLd.RevocationEndpointsDemo/ # ASP.NET signed revocation with SQLite, protected resource, --walkthrough
+│   ├── ZcapLd.AotSample/         # Native AOT consumer: round trip, typed caveat registration, slim-host endpoint
+│   └── ZcapLd.AotFileBasedApp/   # app.cs, the .NET 10 file-based app smoke; not in the solution
 ├── docs/
 ├── tasks/
-├── .github/workflows/
+├── .github/workflows/           # ci-core, ci-aspnet, ci-aot, ci-interop, release-*-nuget
 ├── architecture.md
 ├── CONTRIBUTING.md
 └── README.md
@@ -125,6 +127,8 @@ dotnet pack src/ZcapLd.Core/ZcapLd.Core.csproj -c Release
 dotnet pack src/ZcapLd.AspNetCore/ZcapLd.AspNetCore.csproj -c Release
 dotnet run --project examples/ZcapLd.Examples            # self-checking; non-zero exit on a mismatch
 dotnet run --project examples/ZcapLd.RevocationEndpointsDemo -- --walkthrough
+dotnet publish examples/ZcapLd.AotSample -c Release -r <rid>   # native AOT sample; e.g. osx-arm64
+dotnet run examples/ZcapLd.AotFileBasedApp/app.cs              # .NET 10 file-based app
 bash interop/run-interop.sh
 ```
 
@@ -160,6 +164,18 @@ bash interop/run-interop.sh
   strings and extension data, and rejects duplicate JSON properties. A field is authenticated
   only if a context defines it; DataProofs 1.5.0 refuses undefined terms rather than dropping them.
   Revocation `reason`/`metadata` are signed but informational, never authorization inputs.
+  Source-generated metadata is the single source of serializer behaviour (#154): `ZcapJsonContext`
+  (internal, metadata mode) lists every wire and canonicalizer type, and `ZcapJsonOptions.Default`
+  resolves through it first, with a reflection resolver after it only when
+  `JsonSerializer.IsReflectionEnabledByDefault`. Library code resolves metadata with
+  `ZcapJsonOptions.TypeInfo<T>()`, never `ZcapJsonContext.Default.X` (its options use the default
+  encoder and would change signed bytes). `Capability.Context`/`Proof.CapabilityChain` use the
+  `UnionJsonValue` converters; `Jcs` is the only NetCid call site (`JsonElement` overload only, so
+  `KeyFor`, grant keys and caveat contexts are byte-identical to 6.0.0); caveat metadata is resolved
+  per registration and `IsAttenuationOf` reads the metadata cache. `src/.editorconfig` makes every
+  trim/single-file/AOT analyzer diagnostic an error. Rule: every new `JsonSerializer` call in `src/`
+  takes a `JsonTypeInfo`; new wire types go into `ZcapJsonContext` (or the AspNetCore context) and
+  the byte-identity tests (architecture.md, "Serialization").
 - **Profile rejection**: `CapabilityProfile` inspects capability/proof extensions,
   embedded ancestry and every proof-set member with depth/work bounds. Invocation
   and revocation checks cover every capability representation. An application

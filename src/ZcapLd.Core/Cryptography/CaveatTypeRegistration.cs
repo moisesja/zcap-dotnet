@@ -1,13 +1,15 @@
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.Json.Serialization.Metadata;
 using ZcapLd.Core.Models;
 
 namespace ZcapLd.Core.Cryptography;
 
 /// <summary>
-/// A registered caveat type: its CLR class, declared parameter names and the generated, pinned
-/// JSON-LD context that makes the type and every parameter part of the signed N-Quads (#157).
+/// A registered caveat type: its CLR class, the serializer metadata it is read and written with,
+/// its declared parameter names and the generated, pinned JSON-LD context that makes the type and
+/// every parameter part of the signed N-Quads (#157).
 /// </summary>
 internal sealed class CaveatTypeRegistration
 {
@@ -15,10 +17,10 @@ internal sealed class CaveatTypeRegistration
     // would redefine a protected term (expansion fails) or read as ZCAP vocabulary, so it is refused.
     private static readonly Lazy<HashSet<string>> ReservedTerms = new(LoadReservedTerms);
 
-    private CaveatTypeRegistration(string type, Type clrType, IReadOnlyList<string> parameters)
+    private CaveatTypeRegistration(string type, JsonTypeInfo typeInfo, IReadOnlyList<string> parameters)
     {
         Type = type;
-        ClrType = clrType;
+        TypeInfo = typeInfo;
         Parameters = parameters;
         ContextUrl = CaveatTypeRegistry.GetContextUrl(type);
         ContextDocument = BuildContextDocument(type, parameters);
@@ -26,7 +28,14 @@ internal sealed class CaveatTypeRegistration
 
     public string Type { get; }
 
-    public Type ClrType { get; }
+    public Type ClrType => TypeInfo.Type;
+
+    /// <summary>
+    /// The strict caveat metadata (see <see cref="CaveatCodec.ResolveTypeInfo"/>) every read, write and
+    /// comparison of this type goes through; from the consumer's <see cref="System.Text.Json.Serialization.JsonSerializerContext"/>
+    /// or, in a reflection-enabled application, from reflection (#154).
+    /// </summary>
+    public JsonTypeInfo TypeInfo { get; }
 
     /// <summary>The declared parameter (JSON) names, ordinal order.</summary>
     public IReadOnlyList<string> Parameters { get; }
@@ -35,7 +44,13 @@ internal sealed class CaveatTypeRegistration
 
     public string ContextDocument { get; }
 
-    public static CaveatTypeRegistration Create(string type, Type clrType)
+    /// <summary>
+    /// Builds the registration of <paramref name="clrType"/> under <paramref name="type"/>, resolving its
+    /// metadata through <paramref name="resolver"/>. The generated context depends only on the type
+    /// name and the parameter names, so the same class registered through either
+    /// <see cref="CaveatTypeRegistry"/> overload yields the same context and wire bytes.
+    /// </summary>
+    public static CaveatTypeRegistration Create(string type, Type clrType, IJsonTypeInfoResolver resolver)
     {
         if (string.IsNullOrEmpty(type) || !CaveatTypeRegistry.NamePattern.IsMatch(type))
             throw new ArgumentException(
@@ -46,7 +61,7 @@ internal sealed class CaveatTypeRegistration
         if (clrType.IsAbstract || !typeof(Caveat).IsAssignableFrom(clrType))
             throw new ArgumentException($"{clrType.FullName} must be a concrete Caveat subclass.", nameof(clrType));
 
-        var typeInfo = CaveatCodec.SerializerOptions.GetTypeInfo(clrType);
+        var typeInfo = CaveatCodec.ResolveTypeInfo(clrType, resolver);
         var parameters = new List<string>();
         foreach (var property in typeInfo.Properties)
         {
@@ -62,7 +77,7 @@ internal sealed class CaveatTypeRegistration
         }
 
         parameters.Sort(StringComparer.Ordinal);
-        return new CaveatTypeRegistration(type, clrType, parameters);
+        return new CaveatTypeRegistration(type, typeInfo, parameters);
     }
 
     private static string BuildContextDocument(string type, IReadOnlyList<string> parameters)
@@ -80,7 +95,7 @@ internal sealed class CaveatTypeRegistration
                 [type] = new JsonObject { ["@id"] = typeIri, ["@context"] = scoped },
             },
         };
-        return Encoding.UTF8.GetString(NetCid.JcsCanonicalizer.Canonicalize(context));
+        return Encoding.UTF8.GetString(Jcs.Canonicalize(context));
     }
 
     private static HashSet<string> LoadReservedTerms()

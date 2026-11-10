@@ -56,10 +56,28 @@ every chain. A forged copy of an id under another chain lands in the forger's sc
 genuine chain looks. Custom `IRevocationStore`s key rows by `RevocationRecord.Key`, never by the
 id. See [Revocation scope](https://github.com/moisesja/zcap-dotnet/blob/main/architecture.md#revocation-scope).
 
-ZcapLd needs reflection-based `System.Text.Json`, so native AOT, trimmed apps and .NET 10
-file-based apps (`dotnet run app.cs`) are not supported yet: the first delegation throws
-`InvalidOperationException` ("Reflection-based serialization has been disabled…"), and nothing
-is authorized. Use a regular `net10.0` project (#154).
+Native AOT, trimming and .NET 10 file-based apps (`dotnet run app.cs`) are supported; the package
+declares `IsAotCompatible` (#154). zcap's wire models serialize through source-generated metadata,
+so the round trip above needs nothing from you. Custom caveats register through generated metadata:
+`Register<TCaveat>(string, JsonTypeInfo<TCaveat>)` with a `JsonSerializerContext` that lists the
+class; the reflection overload is annotated and throws where reflection-based serialization is
+disabled. `ZcapJsonOptions.Default` resolves zcap's types through its generated context first and,
+only when `JsonSerializer.IsReflectionEnabledByDefault` is true, your own types through reflection
+as before; under AOT an unlisted type throws `NotSupportedException`. `Capability.Context` and
+`Proof.CapabilityChain` accept a string, a `JsonElement`, a `JsonNode` or arrays of those without
+reflection. The generated context is internal: to embed a `Capability` in your own source-generated
+DTO, keep the member a `JsonElement` and convert with
+`ZcapJsonOptions.Default.GetTypeInfo(typeof(Capability))`. DataProofsDotnet 2.0.0 and NetCid 1.6.0
+are the minimum AOT-clean dependencies (zcap calls only NetCid's `JsonElement` overload,
+[moisesja/net-cid#65](https://github.com/moisesja/net-cid/issues/65)). An AOT publish with
+`TrimmerSingleWarn=false` lists IL2026/IL3050 pairs from Newtonsoft.Json (dotNetRdf.Core's `dynamic`
+support, never reached by RDFC;
+[moisesja/dataproofs-dotnet#27](https://github.com/moisesja/dataproofs-dotnet/issues/27)) that can
+be ignored, and the ILCompiler the 10.0.100 SDK resolves reports advisory
+GHSA-p3jp-9v83-76w9 (NU1903): use a newer 10.0.x SDK or a `NuGetAuditSuppress` scoped to it. See
+`examples/ZcapLd.AotSample` (`dotnet publish examples/ZcapLd.AotSample -c Release -r <rid>`) and
+`examples/ZcapLd.AotFileBasedApp/app.cs` (`dotnet run examples/ZcapLd.AotFileBasedApp/app.cs`) in
+the repository.
 
 See [the repository](https://github.com/moisesja/zcap-dotnet) for the full guide,
 policy options, examples and live JavaScript interoperability tests.

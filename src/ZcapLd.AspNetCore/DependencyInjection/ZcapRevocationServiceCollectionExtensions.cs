@@ -1,3 +1,5 @@
+using System.Diagnostics.CodeAnalysis;
+using System.Text.Json.Serialization.Metadata;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
@@ -73,14 +75,53 @@ public static class ZcapRevocationServiceCollectionExtensions
     /// any type enables the caveat extension profile; capabilities that carry caveats are not
     /// interoperable with other ZCAP implementations. Register every type before the ZCAP services are
     /// first resolved: the registry is frozen at that point.
+    /// <para>
+    /// This overload reads and writes the caveat with reflection-based serializer metadata, which is
+    /// unavailable under native AOT, trimming and .NET 10 file-based apps; there use
+    /// <see cref="AddZcapCaveatType{TCaveat}(IServiceCollection, string, JsonTypeInfo{TCaveat})"/> with
+    /// a <see cref="System.Text.Json.Serialization.JsonSerializerContext"/> (#154).
+    /// </para>
     /// </summary>
     /// <param name="services">The service collection.</param>
     /// <param name="type">The caveat's wire type name (see <see cref="CaveatTypeRegistry.Register{TCaveat}(string)"/>).</param>
+    [RequiresUnreferencedCode(ReflectionCaveatMessage)]
+    [RequiresDynamicCode(ReflectionCaveatMessage)]
     public static IServiceCollection AddZcapCaveatType<TCaveat>(this IServiceCollection services, string type)
         where TCaveat : Caveat
     {
         ArgumentNullException.ThrowIfNull(services);
 
+        GetOrAddCaveatRegistry(services).Register<TCaveat>(type);
+        return services;
+    }
+
+    /// <summary>
+    /// Registers a custom caveat type (#157) with source-generated serializer metadata, the overload for
+    /// native AOT, trimmed and file-based applications (#154). Same rules as
+    /// <see cref="AddZcapCaveatType{TCaveat}(IServiceCollection, string)"/>; see
+    /// <see cref="CaveatTypeRegistry.Register{TCaveat}(string, JsonTypeInfo{TCaveat})"/> for the
+    /// metadata requirements.
+    /// </summary>
+    /// <param name="services">The service collection.</param>
+    /// <param name="type">The caveat's wire type name.</param>
+    /// <param name="typeInfo">Generated metadata for <typeparamref name="TCaveat"/>, for example
+    /// <c>MyCaveatContext.Default.MyCaveat</c>.</param>
+    public static IServiceCollection AddZcapCaveatType<TCaveat>(
+        this IServiceCollection services, string type, JsonTypeInfo<TCaveat> typeInfo)
+        where TCaveat : Caveat
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        GetOrAddCaveatRegistry(services).Register(type, typeInfo);
+        return services;
+    }
+
+    private const string ReflectionCaveatMessage =
+        "Reflection-based caveat registration is unavailable under native AOT, trimming and file-based apps. " +
+        "Use AddZcapCaveatType<TCaveat>(string, JsonTypeInfo<TCaveat>) with a JsonSerializerContext.";
+
+    private static CaveatTypeRegistry GetOrAddCaveatRegistry(IServiceCollection services)
+    {
         var registry = services.LastOrDefault(d => d.ServiceType == typeof(CaveatTypeRegistry))?.ImplementationInstance
             as CaveatTypeRegistry;
         if (registry is null)
@@ -89,15 +130,16 @@ public static class ZcapRevocationServiceCollectionExtensions
             services.Replace(ServiceDescriptor.Singleton(registry));
         }
 
-        registry.Register<TCaveat>(type);
-        return services;
+        return registry;
     }
 
     /// <summary>
     /// Registers the resource's enforcement of one caveat type (#157). Invocations whose chain carries
     /// a caveat type without a handler are denied, so every type the resource accepts needs one.
     /// </summary>
-    public static IServiceCollection AddZcapCaveatHandler<THandler>(this IServiceCollection services)
+    public static IServiceCollection AddZcapCaveatHandler<
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] THandler>(
+        this IServiceCollection services)
         where THandler : class, ICaveatHandler
     {
         ArgumentNullException.ThrowIfNull(services);
@@ -126,7 +168,9 @@ public static class ZcapRevocationServiceCollectionExtensions
     /// <see cref="AddZcapServices"/> resolves the provider, or before the
     /// <see cref="IVerificationService"/> singleton is first resolved.
     /// </summary>
-    public static IServiceCollection AddZcapRootCapabilityResolver<TResolver>(this IServiceCollection services)
+    public static IServiceCollection AddZcapRootCapabilityResolver<
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TResolver>(
+        this IServiceCollection services)
         where TResolver : class, IRootCapabilityResolver
     {
         ArgumentNullException.ThrowIfNull(services);
@@ -153,7 +197,9 @@ public static class ZcapRevocationServiceCollectionExtensions
     /// Registers a custom <see cref="IDidSigner"/> implementation.
     /// This is required for any signing/delegation operations.
     /// </summary>
-    public static IServiceCollection AddZcapDidSigner<TSigner>(this IServiceCollection services)
+    public static IServiceCollection AddZcapDidSigner<
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TSigner>(
+        this IServiceCollection services)
         where TSigner : class, IDidSigner
     {
         ArgumentNullException.ThrowIfNull(services);
@@ -189,7 +235,9 @@ public static class ZcapRevocationServiceCollectionExtensions
     /// <see cref="IVerificationRelationshipResolver"/> registered explicitly in the container takes
     /// precedence over what the resolver self-provides.
     /// </remarks>
-    public static IServiceCollection AddZcapDidResolver<TResolver>(this IServiceCollection services)
+    public static IServiceCollection AddZcapDidResolver<
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TResolver>(
+        this IServiceCollection services)
         where TResolver : class, IDidResolver
     {
         ArgumentNullException.ThrowIfNull(services);
@@ -229,7 +277,9 @@ public static class ZcapRevocationServiceCollectionExtensions
     /// <summary>
     /// Registers replay protection using a caller-provided nonce store type.
     /// </summary>
-    public static IServiceCollection AddZcapReplayProtection<TNonceStore>(this IServiceCollection services)
+    public static IServiceCollection AddZcapReplayProtection<
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TNonceStore>(
+        this IServiceCollection services)
         where TNonceStore : class, INonceStore
     {
         ArgumentNullException.ThrowIfNull(services);
@@ -267,7 +317,9 @@ public static class ZcapRevocationServiceCollectionExtensions
     /// <summary>
     /// Registers revocation support using a caller-provided store type.
     /// </summary>
-    public static IServiceCollection AddZcapRevocationSupport<TRevocationStore>(this IServiceCollection services)
+    public static IServiceCollection AddZcapRevocationSupport<
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TRevocationStore>(
+        this IServiceCollection services)
         where TRevocationStore : class, IRevocationStore
     {
         ArgumentNullException.ThrowIfNull(services);

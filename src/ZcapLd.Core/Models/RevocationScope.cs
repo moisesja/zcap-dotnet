@@ -123,7 +123,7 @@ public sealed record RevocationScope
         if (string.IsNullOrWhiteSpace(capabilityId))
             throw new ArgumentException("A capability id is required.", nameof(capabilityId));
         var subject = new JsonObject { ["capabilityId"] = capabilityId, ["scope"] = ToString() };
-        return Convert.ToHexStringLower(SHA256.HashData(NetCid.JcsCanonicalizer.Canonicalize(subject)));
+        return Convert.ToHexStringLower(SHA256.HashData(Jcs.Canonicalize(subject)));
     }
 
     /// <summary>Parses the text form; see <see cref="TryParse"/>.</summary>

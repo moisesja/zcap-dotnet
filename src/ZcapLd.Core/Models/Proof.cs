@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using ZcapLd.Core.Cryptography;
 
 namespace ZcapLd.Core.Models;
 
@@ -77,10 +78,13 @@ public class Proof
     /// Null on invocation proofs (which reference the capability via the
     /// <see cref="Capability"/> field instead) and omitted from the wire when null —
     /// strict cross-language parsers reject `"capabilityChain": []` for the same
-    /// reason they reject empty `allowedAction`.
+    /// reason they reject empty `allowedAction`. Entries are id strings or an embedded
+    /// <see cref="Models.Capability"/>; deserialized entries are <see cref="JsonElement"/>s (see
+    /// <see cref="CapabilityChainJsonConverter"/>).
     /// </summary>
     [JsonPropertyName("capabilityChain")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonConverter(typeof(CapabilityChainJsonConverter))]
     public object[]? CapabilityChain { get; set; }
 
     /// <summary>

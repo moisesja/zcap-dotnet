@@ -390,3 +390,37 @@
   adversarial pass probed `[]`, `{}`, `{"bogus":1}` and an oversized body and missed it. Add "duplicate key,
   top-level and nested" to the standard malformed-body probe list, and run it in both Development and
   Production (the latter must stay an empty 4xx, never a 500).
+
+## 2026-11-10 — Source-generated JSON migration (#154): parity claims need a 6.0.0 oracle, not a brief
+- **Red-team correction of my own brief:** I told the fix agent the 6.0.0 revocation endpoint escaped `+<>&'`
+  in its 200 body; it did not (ASP.NET's default `JsonOptions` already uses `UnsafeRelaxedJsonEscaping`). The
+  agent only caught it because it ran the probe in a `4f0cc8e` worktree first. **Rule — every "byte-identical
+  to the previous release" statement is pinned by a value computed from the previous release's code (throwaway
+  worktree), never from the new code or from memory; the brief states the method, not the expected bytes.**
+- **Swapping a minimal-API `Delegate` handler for a `RequestDelegate` silently drops the metadata the binder
+  added** (`IAcceptsMetadata`, `IDisableCookieRedirectMetadata`, `Produces<T>`). Re-declare each one explicitly
+  and pin the endpoint's `Metadata` in a test; the 405/400/403 matrix alone does not reveal the loss.
+- **Generated `System.Text.Json` metadata bakes options-level converters in** (`UseStringEnumConverter`,
+  `Converters = …`), invisibly to the public metadata API (`Options.Converters` is empty, the converter type is
+  the same `EnumConverter<T>`). When two resolvers must write the same bytes, probe behaviour (serialize a
+  defined member) at registration instead of inspecting metadata.
+- **A `JsonNode` → `JsonElement` shim through `Utf8JsonWriter` is lossy for malformed UTF-16** (lone surrogates
+  become U+FFFD) and reports NaN as `ArgumentException`; a canonicalizer that keyed stores on its output
+  (`RevocationScope.KeyFor`) would collide where the upstream node path threw. Port the upstream validation
+  walk along with the shim and compare exception type and message per input.
+
+## 2026-11-10 — A resource-side caveat handler never takes time, counters or buckets from holder-signed fields (PR #168 review)
+- **Reviewer correction (P2):** the two sample `RateLimitLedger`s bucketed on `context.Created`, the invocation
+  proof's signed timestamp. The holder chooses it, freshness admits the previous minute, and the ledger kept only
+  the last minute per grant, so alternating two signed minutes reset the counter: `Valid, Deny, Valid, Valid, …`.
+  Reproduced through the real verifier with real signatures; no forgery or replay needed.
+- **Rule — anything that selects an enforcement window, bucket, cost or expiry in an `ICaveatHandler` comes from
+  the resource (an injected `TimeProvider`, the signed action/target), never from `Created`, `InvocationId` or any
+  other field the invoker fills in, even when the library has authenticated it.** Authenticated is not
+  resource-chosen. `Created` is for audit records.
+- **Rule — an exhausted bucket must survive a revisit:** never replace stored consumption with an earlier
+  period's; roll over only when the resource clock has moved past the stored period.
+- **Rule — a rate-limit sample's self-check needs the adversarial sequence, not two consecutive calls:** hold the
+  resource clock still (injected fake), alternate the holder-controlled timestamps, then advance the clock to show
+  rollover. Prove it red against the original semantics by rebuilding (the reviewer's exact outcome sequence must
+  reproduce), then green.

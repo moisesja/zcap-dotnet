@@ -27,10 +27,17 @@
     <EmbedUntrackedSources>true</EmbedUntrackedSources>
     <IncludeSourceRevisionInInformationalVersion>true</IncludeSourceRevisionInInformationalVersion>
     <ContinuousIntegrationBuild Condition="'$(GITHUB_ACTIONS)' == 'true'">true</ContinuousIntegrationBuild>
+    <!-- Native AOT and trimming support (#154): declares the package trimmable and AOT-compatible, which
+         turns on the trim, single-file and AOT analyzers; src/.editorconfig makes every diagnostic they
+         raise a build error. -->
+    <IsAotCompatible>true</IsAotCompatible>
   </PropertyGroup>
 
   <ItemGroup>
     <InternalsVisibleTo Include="ZcapLd.Core.Tests" />
+    <!-- The adapter's source-generated JsonSerializerContext embeds Capability/Invocation and must see
+         the internal union converters those models declare (#154). -->
+    <InternalsVisibleTo Include="ZcapLd.AspNetCore" />
   </ItemGroup>
 
   <ItemGroup>

@@ -4,6 +4,7 @@ A .NET 10 implementation of the [W3C ZCAP-LD](https://w3c-ccg.github.io/zcap-spe
 
 [![CI Core](https://github.com/moisesja/zcap-dotnet/actions/workflows/ci-core.yml/badge.svg)](https://github.com/moisesja/zcap-dotnet/actions/workflows/ci-core.yml)
 [![CI ASP.NET](https://github.com/moisesja/zcap-dotnet/actions/workflows/ci-aspnet.yml/badge.svg)](https://github.com/moisesja/zcap-dotnet/actions/workflows/ci-aspnet.yml)
+[![CI AOT](https://github.com/moisesja/zcap-dotnet/actions/workflows/ci-aot.yml/badge.svg)](https://github.com/moisesja/zcap-dotnet/actions/workflows/ci-aot.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 ## Why This Library
@@ -23,6 +24,7 @@ This library provides:
 - Ed25519 and P-256 signature suites with RDFC-1.0 canonicalization (crypto delegated to NetCrypto via DataProofs); P-256 is a zcap-dotnet-only profile, see the cross-stack notes below
 - DID resolution via [NetDid](https://www.nuget.org/packages/NetDid.Core) (W3C-compliant did:key support)
 - Multibase signature encoding
+- Native AOT, trimming and .NET 10 file-based app support through source-generated JSON metadata (see [Install](#native-aot-trimming-and-file-based-apps))
 
 ## Install
 
@@ -31,10 +33,47 @@ dotnet add package ZcapLd.Core
 dotnet add package ZcapLd.AspNetCore # Optional endpoint adapter
 ```
 
-ZcapLd needs reflection-based `System.Text.Json`, so native AOT, trimmed apps and .NET 10
-file-based apps (`dotnet run app.cs`) are not supported yet: the first delegation throws
-`InvalidOperationException` ("Reflection-based serialization has been disabled…"), and nothing
-is authorized. Use a regular `net10.0` project (#154).
+### Native AOT, trimming and file-based apps
+
+Both packages declare `IsAotCompatible` and run under native AOT, trimming and .NET 10 file-based
+apps (`dotnet run app.cs`, which disables reflection-based `System.Text.Json` by default). zcap's
+wire models serialize through source-generated metadata, so the round trip below needs nothing
+from you (#154). Two things to know:
+
+- **Custom caveats** register through generated metadata:
+  `Register<TCaveat>(string, JsonTypeInfo<TCaveat>)`, or
+  `AddZcapCaveatType<TCaveat>(services, type, JsonTypeInfo<TCaveat>)` in ASP.NET Core, with a
+  `JsonSerializerContext` that lists the class. The reflection overloads are annotated
+  `[RequiresUnreferencedCode]`/`[RequiresDynamicCode]` and, where reflection-based serialization
+  is disabled, throw an `InvalidOperationException` naming the typed overload.
+- **`ZcapJsonOptions.Default`** resolves zcap's types through generated metadata first. When
+  `JsonSerializer.IsReflectionEnabledByDefault` is true (every JIT application that has not opted
+  out) a reflection resolver follows it, so your own types serialize with the shared options as
+  before; under AOT, trimming or a file-based app the generated context is the only resolver and
+  an unlisted type throws `NotSupportedException`. `Capability.Context` and `Proof.CapabilityChain`
+  accept a string, a `JsonElement`, a `JsonNode` or arrays/lists of those without reflection. The
+  generated context is internal: to embed a `Capability` in your own source-generated DTO, keep
+  the member a `JsonElement` and convert with `ZcapJsonOptions.Default.GetTypeInfo(typeof(Capability))`.
+
+DataProofsDotnet 2.0.0 and NetCid 1.6.0 are the minimum AOT-clean dependency versions; zcap calls
+only NetCid's reflection-free `JsonElement` overload
+([moisesja/net-cid#65](https://github.com/moisesja/net-cid/issues/65)). `examples/ZcapLd.AotSample`
+runs the full round trip, including a custom caveat and the revocation endpoint in a
+`CreateSlimBuilder` host, as a native binary; `examples/ZcapLd.AotFileBasedApp/app.cs` is the
+file-based app. `ci-aot` publishes both on Linux and fails on any IL warning from ZcapLd,
+DataProofs or NetCid.
+
+```bash
+dotnet publish examples/ZcapLd.AotSample -c Release -r <rid>   # osx-arm64, linux-x64, win-x64, …
+dotnet run examples/ZcapLd.AotFileBasedApp/app.cs
+```
+
+With `TrimmerSingleWarn=false` the publish lists five IL2026/IL3050 pairs from Newtonsoft.Json
+(dotNetRdf.Core's `dynamic` support, which the RDFC path never reaches;
+[moisesja/dataproofs-dotnet#27](https://github.com/moisesja/dataproofs-dotnet/issues/27)); they can
+be ignored. The ILCompiler package the 10.0.100 SDK resolves for `PublishAot` carries advisory
+GHSA-p3jp-9v83-76w9 (NU1903): use a newer 10.0.x SDK, or a `NuGetAuditSuppress` scoped to that
+advisory as in the sample's csproj.
 
 ## Quick Start
 
@@ -305,6 +344,10 @@ var verifier = new VerificationService(resolver, revocations, nonces,
 - The resource owns cost calculation, atomic hierarchical accounting (debit every grant by
   `GrantKey`), idempotency by invocation id, and shared state across replicas. See the
   [enforcement contract](docs/CAVEAT-PROFILE.md#enforcement-contract-icaveathandler).
+- Under native AOT, trimming or a file-based app, register with generated metadata instead:
+  `Register("EpsilonBudget", EpsilonBudgetCaveatContext.Default.EpsilonBudgetCaveat)`, where the
+  context is a `JsonSerializerContext` with `[JsonSerializable(typeof(EpsilonBudgetCaveat))]`. Same
+  context document and wire bytes (#154; see the [caveat profile](docs/CAVEAT-PROFILE.md#registering-types)).
 
 ## Root vs Delegated Semantics
 
@@ -325,6 +368,11 @@ var verifier = new VerificationService(resolver, revocations, nonces,
 - `examples/ZcapLd.RevocationEndpointsDemo`: ASP.NET signed revocation with SQLite, a protected resource,
   and `-- --walkthrough`, which provisions a root and shows read `200` → stranger revoke `403` → owner
   revoke `200` → read `403 Revoked` over HTTP
+- `examples/ZcapLd.AotSample`: native AOT consumer of both packages (`PublishAot`): the full round trip,
+  a custom caveat registered with source-generated metadata and the revocation endpoint in a
+  `CreateSlimBuilder` host; every outcome is checked and `ci-aot` publishes and runs it
+- `examples/ZcapLd.AotFileBasedApp/app.cs`: the same round trip as a .NET 10 file-based app
+  (`dotnet run examples/ZcapLd.AotFileBasedApp/app.cs`); not part of the solution
 - `interop`: live cross-stack interop harness vs `@digitalbazaar/zcap` (run `interop/run-interop.sh`)
 - `docs`: implementation/security notes
 
@@ -346,12 +394,16 @@ dotnet build ZcapLd.sln
 dotnet test ZcapLd.sln
 dotnet pack src/ZcapLd.Core/ZcapLd.Core.csproj -c Release
 dotnet pack src/ZcapLd.AspNetCore/ZcapLd.AspNetCore.csproj -c Release
+dotnet publish examples/ZcapLd.AotSample -c Release -r <rid>   # native AOT sample; e.g. osx-arm64
+dotnet run examples/ZcapLd.AotFileBasedApp/app.cs              # .NET 10 file-based app
 ```
 
 ## CI/CD
 
 - Core CI: `.github/workflows/ci-core.yml`
 - ASP.NET Adapter CI: `.github/workflows/ci-aspnet.yml`
+- Native AOT CI: `.github/workflows/ci-aot.yml` (publishes the AOT sample and the file-based app on
+  Linux; fails on any IL2xxx/IL3xxx warning from a ZcapLd, DataProofsDotnet or NetCid assembly)
 - Core publish: `.github/workflows/release-core-nuget.yml` on `core-v*.*.*` tags
 - ASP.NET adapter publish: `.github/workflows/release-aspnet-nuget.yml` on `aspnet-v*.*.*` tags
 - Shared package version source: `Directory.Build.props` (`ZcapLdVersion`)
