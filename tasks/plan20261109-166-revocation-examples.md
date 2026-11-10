@@ -197,3 +197,10 @@ Implemented on 2026-11-09 by sub-agents under the orchestrator, then verified by
   understated the null fields (fixed). Info: all `BadHttpRequestException` map to 413 (matches the library
   endpoint); the SQLite file grows across walkthrough runs (harmless, gitignored).
 - No change under `src/`. The stale ignored `revocations-demo.db` from an earlier run was deleted.
+- **PR #167 review round 1 (P2, confirmed):** duplicate JSON properties in the body of `POST /documents/report`
+  produced an HTTP 500: `DeserializeAsync<JsonObject>` reports the duplicate as `ArgumentException`, which the
+  handler did not catch. Fixed by catching `ArgumentException` in the deserialization block (400). Regression
+  tests `ReadReport_WithDuplicateJsonProperties_Returns400` (top-level and nested, Development and Production,
+  built from raw strings) were red before the fix and green after; `ReadReport_WithMalformedBody_...` pins
+  400 for a non-object and the empty Production 403. The library's revocation endpoint was probed with the
+  same bodies and already returns 400 (typed target). Lesson recorded in `tasks/lessons.md`.

@@ -97,6 +97,13 @@ app.MapPost(DemoResource.ReportPath, async (HttpRequest httpRequest, IVerificati
     {
         return Results.BadRequest("Request body is not a JSON object.");
     }
+    catch (ArgumentException)
+    {
+        // ZcapJsonOptions.Default rejects duplicate properties, but a JsonObject target reports the
+        // duplicate as ArgumentException (from its ordered dictionary), not JsonException. It is still
+        // malformed input from an unauthenticated caller: 400, never an exception page.
+        return Results.BadRequest("Request body repeats a JSON property.");
+    }
     catch (BadHttpRequestException)
     {
         return Results.StatusCode(StatusCodes.Status413PayloadTooLarge);

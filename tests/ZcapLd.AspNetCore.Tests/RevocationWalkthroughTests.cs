@@ -38,8 +38,18 @@ public sealed class RevocationWalkthroughTests
     /// <summary>Boots the demo host as shipped, except for the revocation store (in-memory, no DB file).</summary>
     private sealed class DemoHostFactory : WebApplicationFactory<Program>
     {
+        private readonly string? _environment;
+
+        /// <param name="environment">The hosting environment; null keeps the factory default (Development).</param>
+        public DemoHostFactory(string? environment = null) => _environment = environment;
+
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
+            if (_environment is not null)
+            {
+                builder.UseEnvironment(_environment);
+            }
+
             builder.ConfigureServices(services =>
             {
                 services.RemoveAll<IRevocationStore>();
@@ -133,6 +143,61 @@ public sealed class RevocationWalkthroughTests
         // only difference.
         outcome.Should().Be(nameof(VerificationOutcome.CouldNotVerify),
             "the chain references the root by id and the host's empty resolver cannot obtain it");
+    }
+
+    // ----- Regression (PR #167 review): duplicate JSON properties are a 400, never a 500 -----
+    //
+    // ZcapJsonOptions.Default rejects duplicate properties, but when the target is a JsonObject the
+    // rejection surfaces as ArgumentException (OrderedDictionary.Add inside JsonObjectConverter), not
+    // JsonException. The protected endpoint caught only JsonException, so an unauthenticated body with a
+    // repeated key produced an HTTP 500 (and, in Development, the exception page). The body must be built
+    // from a string: a JsonObject cannot represent duplicate keys.
+
+    [Theory]
+    [InlineData("Development", "{\"id\":\"x\",\"id\":\"y\"}")]
+    [InlineData("Development", "{\"proof\":{\"id\":\"x\",\"id\":\"y\"}}")]
+    [InlineData("Production", "{\"id\":\"x\",\"id\":\"y\"}")]
+    [InlineData("Production", "{\"proof\":{\"id\":\"x\",\"id\":\"y\"}}")]
+    public async Task ReadReport_WithDuplicateJsonProperties_Returns400(string environment, string body)
+    {
+        using var factory = new DemoHostFactory(environment);
+        factory.Services.GetRequiredService<IHostEnvironment>().EnvironmentName.Should().Be(environment);
+        var http = factory.CreateClient();
+
+        using var content = new StringContent(body, Encoding.UTF8, "application/json");
+        using var response = await http.PostAsync(DemoResource.ReportPath, content);
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest,
+            "a duplicate property is malformed input, rejected before any verification, and must not become a 500");
+        (await response.Content.ReadAsStringAsync()).Should().NotContain("Exception",
+            "no exception detail may leak, in any environment");
+    }
+
+    [Theory]
+    [InlineData("Development")]
+    [InlineData("Production")]
+    public async Task ReadReport_WithMalformedBody_Returns400OrEmpty403ByEnvironment(string environment)
+    {
+        using var factory = new DemoHostFactory(environment);
+        var http = factory.CreateClient();
+
+        // Not an object at all: 400 everywhere.
+        using var array = new StringContent("[1,2]", Encoding.UTF8, "application/json");
+        (await http.PostAsync(DemoResource.ReportPath, array)).StatusCode.Should().Be(HttpStatusCode.BadRequest);
+
+        // A well-formed object that is not a valid invocation: 403, with the outcome only in Development.
+        using var bogus = new StringContent("{\"id\":\"urn:x\"}", Encoding.UTF8, "application/json");
+        using var denied = await http.PostAsync(DemoResource.ReportPath, bogus);
+        denied.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        var deniedBody = await denied.Content.ReadAsStringAsync();
+        if (environment == "Development")
+        {
+            deniedBody.Should().Contain("\"outcome\"");
+        }
+        else
+        {
+            deniedBody.Should().BeEmpty("outside Development the denial reason is not disclosed");
+        }
     }
 
     private static string Report(IEnumerable<RevocationWalkthrough.StepResult> results)
