@@ -3,6 +3,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.Json.Serialization.Metadata;
 using DataProofsDotnet;
 using DataProofsDotnet.DataIntegrity;
 using DataProofsDotnet.Legacy.DataIntegrity;
@@ -25,6 +26,11 @@ namespace ZcapLd.Core.Cryptography;
 internal sealed class LegacyProofCrypto
 {
     private const string ZcapContext = ZcapSuiteCatalog.ZcapContextUrl;
+
+    // DataProofs' own (source-generated) metadata for its proof model, so the mapping below needs no
+    // reflection under native AOT (#154).
+    private static readonly JsonTypeInfo<DataIntegrityProof> DataIntegrityProofTypeInfo =
+        (JsonTypeInfo<DataIntegrityProof>)DataProofsJsonOptions.Default.GetTypeInfo(typeof(DataIntegrityProof));
 
     // RDFC canonicalizer wired with zcap's offline context loader (serves zcap/v1, the suite contexts,
     // the revocation context and the generated context of each registered caveat type). RDFC-1.0 (W3C RDF Dataset
@@ -144,14 +150,14 @@ internal sealed class LegacyProofCrypto
     // "@context" in the model; this handles the serialized-without-context case.
     private static JsonElement BuildDocumentElement(object documentWithoutProof, Proof proof)
     {
-        var element = JsonSerializer.SerializeToElement(documentWithoutProof, ZcapJsonOptions.Default);
+        var element = JsonSerializer.SerializeToElement(documentWithoutProof, ZcapJsonOptions.TypeInfo<object>());
 
         if (element.ValueKind == JsonValueKind.Object
             && !element.TryGetProperty("@context", out _))
         {
             var node = JsonObject.Create(element)!;
             node["@context"] = new JsonArray(EnvelopeContext(proof).Select(c => (JsonNode?)c).ToArray());
-            return JsonSerializer.SerializeToElement(node, ZcapJsonOptions.Default);
+            return JsonSerializer.SerializeToElement(node, ZcapJsonOptions.TypeInfo<JsonObject>());
         }
 
         return element;
@@ -189,8 +195,8 @@ internal sealed class LegacyProofCrypto
 
     internal static DataIntegrityProof ToDataIntegrityProof(Proof proof)
     {
-        var element = JsonSerializer.SerializeToElement(proof, ZcapJsonOptions.Default);
-        return element.Deserialize<DataIntegrityProof>(DataProofsJsonOptions.Default)
+        var element = JsonSerializer.SerializeToElement(proof, ZcapJsonOptions.TypeInfo<Proof>());
+        return element.Deserialize(DataIntegrityProofTypeInfo)
             ?? throw new CryptographicException("Failed to map the ZCAP proof to a DataIntegrity proof.");
     }
 }

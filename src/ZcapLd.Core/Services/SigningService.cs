@@ -264,7 +264,7 @@ public class SigningService : ISigningService
         ConfirmSignature(document, proof, resolvedKey);
 
         var secured = document.DeepClone()!.AsObject();
-        secured["proof"] = JsonSerializer.SerializeToNode(proof, ZcapJsonOptions.Default);
+        secured["proof"] = JsonSerializer.SerializeToNode(proof, ZcapJsonOptions.TypeInfo<Proof>());
         return secured;
     }
 
@@ -381,9 +381,10 @@ public class SigningService : ISigningService
 
         var data = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
         if (hasReason)
-            data[Proof.RevocationReasonField] = JsonSerializer.SerializeToElement(reason, ZcapJsonOptions.Default);
+            data[Proof.RevocationReasonField] = JsonSerializer.SerializeToElement(reason!, ZcapJsonOptions.TypeInfo<string>());
         if (hasMetadata)
-            data[Proof.RevocationMetadataField] = JsonSerializer.SerializeToElement(metadata, ZcapJsonOptions.Default);
+            data[Proof.RevocationMetadataField] = JsonSerializer.SerializeToElement(
+                metadata!, ZcapJsonOptions.TypeInfo<IDictionary<string, string>>());
         return data;
     }
 

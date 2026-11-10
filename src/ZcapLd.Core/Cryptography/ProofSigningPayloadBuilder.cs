@@ -26,11 +26,8 @@ internal static class ProofSigningPayloadBuilder
 {
     private static readonly RdfcDocumentCanonicalizer DefaultRdfc = new();
 
-    /// <summary>
-    /// Sign-time and verifier-time JSON options live in <see cref="ZcapJsonOptions.Default"/>
-    /// so model shape and extension data round-trip consistently across signing and verification.
-    /// </summary>
-    private static JsonSerializerOptions ModelSerializerOptions => ZcapJsonOptions.Default;
+    // Sign-time and verifier-time JSON metadata comes from ZcapJsonOptions.TypeInfo so model shape and
+    // extension data round-trip consistently across signing and verification, without reflection (#154).
 
     public static Capability CloneCapabilityWithoutProof(Capability capability)
     {
@@ -100,7 +97,7 @@ internal static class ProofSigningPayloadBuilder
         // so JSON-LD processing has the same vocabulary the document uses.
         var proofOptions = ToFieldDictionary(proof, exclude: "proofValue");
         proofOptions["@context"] = JsonSerializer.SerializeToElement(
-            capabilityWithoutProof.Context, ModelSerializerOptions);
+            capabilityWithoutProof.Context, ZcapJsonOptions.TypeInfo<object>());
 
         return ConcatenateHashes(
             canonicalizer.Canonicalize(capabilityWithoutProof),
@@ -116,10 +113,10 @@ internal static class ProofSigningPayloadBuilder
         var context = LegacyProofCrypto.EnvelopeContext(proof);
 
         var invocationDoc = ToFieldDictionary(invocationWithoutProof);
-        invocationDoc["@context"] = JsonSerializer.SerializeToElement(context, ModelSerializerOptions);
+        invocationDoc["@context"] = JsonSerializer.SerializeToElement(context, ZcapJsonOptions.TypeInfo<string[]>());
 
         var proofOptions = ToFieldDictionary(proof, exclude: "proofValue");
-        proofOptions["@context"] = JsonSerializer.SerializeToElement(context, ModelSerializerOptions);
+        proofOptions["@context"] = JsonSerializer.SerializeToElement(context, ZcapJsonOptions.TypeInfo<string[]>());
 
         return ConcatenateHashes(
             canonicalizer.Canonicalize(invocationDoc),
@@ -148,7 +145,7 @@ internal static class ProofSigningPayloadBuilder
     /// </summary>
     private static Dictionary<string, object> ToFieldDictionary<T>(T value, string? exclude = null)
     {
-        var element = JsonSerializer.SerializeToElement(value, ModelSerializerOptions);
+        var element = JsonSerializer.SerializeToElement(value, ZcapJsonOptions.TypeInfo<T>());
         var dict = new Dictionary<string, object>(StringComparer.Ordinal);
         foreach (var prop in element.EnumerateObject())
         {
