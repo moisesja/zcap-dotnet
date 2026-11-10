@@ -76,6 +76,16 @@ public sealed class CaveatTypeRegistry
     /// through that resolver, so the context's options do not matter, and the generated context
     /// document and wire bytes are identical to those of <see cref="Register{TCaveat}(string)"/>.
     /// Same rules and exceptions as that overload otherwise.
+    /// <para>
+    /// Member-level <see cref="System.Text.Json.Serialization.JsonConverterAttribute"/>s are honoured
+    /// identically by both overloads; options-level converters declared on the context
+    /// (<c>UseStringEnumConverter</c>, <c>Converters</c>) are not, because the reflection overload never
+    /// sees them. Enum parameters are therefore checked at registration and must serialize as JSON
+    /// numbers through the context's metadata. An <c>object</c>-typed parameter reads back as a
+    /// <see cref="System.Text.Json.JsonElement"/>; where reflection-based serialization is disabled it
+    /// can hold only a string, a <see cref="System.Text.Json.JsonElement"/>, a
+    /// <see cref="System.Text.Json.Nodes.JsonNode"/> or arrays of those.
+    /// </para>
     /// </summary>
     /// <param name="type">The caveat type name; see <see cref="Register{TCaveat}(string)"/>.</param>
     /// <param name="typeInfo">Generated metadata for <typeparamref name="TCaveat"/>, for example

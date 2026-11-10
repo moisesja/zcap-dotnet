@@ -4,6 +4,9 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 using FluentAssertions;
+using Microsoft.AspNetCore.Http.Metadata;
+using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 using ZcapLd.AspNetCore.Contracts;
 using ZcapLd.Core.Cryptography;
@@ -105,7 +108,92 @@ public sealed class SourceGeneratedJsonTests
         options.WriteIndented.Should().BeFalse();
         options.PropertyNamingPolicy.Should().BeNull();
         ZcapAspNetCoreJsonOptions.Request.Options.Should().BeSameAs(options);
-        ZcapAspNetCoreJsonOptions.Response.Options.Should().BeSameAs(options);
+        ZcapAspNetCoreJsonOptions.Response.Options.Should().BeSameAs(ZcapAspNetCoreJsonOptions.ResponseDefault);
+    }
+
+    /// <summary>
+    /// 6.0.0 answered with <c>TypedResults.Ok</c> through the host's default <c>JsonOptions</c>: the
+    /// relaxed encoder (ASP.NET Core's default), every member written including nulls. The response
+    /// options copy the adapter's options and only lift the null omission (red-team F3).
+    /// </summary>
+    [Fact]
+    public void ResponseOptions_CopyTheAdapterOptionsAndWriteNullMembers()
+    {
+        var options = ZcapAspNetCoreJsonOptions.ResponseDefault;
+
+        options.Should().NotBeSameAs(ZcapAspNetCoreJsonOptions.Default);
+        options.IsReadOnly.Should().BeTrue();
+        options.DefaultIgnoreCondition.Should().Be(JsonIgnoreCondition.Never);
+        options.Encoder.Should().BeSameAs(ZcapJsonOptions.Default.Encoder);
+        options.TypeInfoResolverChain.Should().Equal(ZcapAspNetCoreJsonOptions.Default.TypeInfoResolverChain);
+        options.GetTypeInfo(typeof(RevocationStatusHttpResponse)).OriginatingResolver
+            .Should().BeSameAs(ZcapAspNetCoreJsonContext.Default);
+    }
+
+    /// <summary>
+    /// The exact 6.0.0 body, captured by executing <c>TypedResults.Ok</c> against the 4f0cc8e demo host:
+    /// <c>+&lt;&gt;&amp;'</c> and BMP non-ASCII unescaped, a supplementary-plane character as a UTF-16
+    /// escape pair, every null member present.
+    /// </summary>
+    [Fact]
+    public void ResponseOptions_WriteThe600BodyShapeAndEscaping()
+    {
+        var response = new RevocationStatusHttpResponse { CapabilityId = "urn:x:a+b<c>&'d ünï 😀", IsRevoked = true };
+
+        var json = JsonSerializer.Serialize(response, ZcapAspNetCoreJsonOptions.Response);
+
+        json.Should().Be(
+            """{"capabilityId":"urn:x:a+b<c>&'d ünï \uD83D\uDE00","isRevoked":true,"rootCapabilityId":null,"revokedBy":null,"revokedAt":null,"expiresAt":null,"reason":null,"metadata":null}""");
+    }
+
+    /// <summary>
+    /// The same over HTTP: a root id keeps <c>'()!~*</c> unencoded (<c>encodeURIComponent</c> leaves
+    /// them), and 6.0.0 wrote them verbatim.
+    /// </summary>
+    [Fact]
+    public async Task Post_RootRevocation_BodyIsThe600Shape()
+    {
+        var http = _factory.CreateClient();
+        var did = new InMemoryDidProvider();
+        var signing = new SigningService(did, did);
+        var capabilities = new CapabilityService(signing);
+        var rootDid = did.GenerateDidKey();
+        var root = await capabilities.CreateRootCapabilityAsync(rootDid, "https://example.com/it's-(a)!~*");
+        _factory.RootResolver.Register(root);
+        var signed = await signing.SignRevocationAsync(root.Id, rootDid, root.InvocationTarget);
+        var body = JsonSerializer.Serialize(
+            new SignedRevocationHttpRequest { Capability = root, SignedRevocation = signed }, ContextOnlyOptions());
+        using var content = new StringContent(body, Encoding.UTF8, "application/json");
+
+        var response = await http.PostAsync($"/zcaps/revocations/{Uri.EscapeDataString(root.Id)}", content);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        root.Id.Should().Be("urn:zcap:root:https%3A%2F%2Fexample.com%2Fit's-(a)!~*");
+        (await response.Content.ReadAsStringAsync()).Should().Be(
+            """{"capabilityId":"urn:zcap:root:https%3A%2F%2Fexample.com%2Fit's-(a)!~*","isRevoked":true,"rootCapabilityId":null,"revokedBy":null,"revokedAt":null,"expiresAt":null,"reason":null,"metadata":null}""");
+    }
+
+    /// <summary>
+    /// The <c>RequestDelegate</c> mapping declares what the Delegate overload inferred (red-team F4):
+    /// the accepted JSON body, no cookie-authentication redirect (a 401/403 stays a status code), and
+    /// the three response types.
+    /// </summary>
+    [Fact]
+    public void Endpoint_DeclaresAcceptsNoCookieRedirectAndProducesMetadata()
+    {
+        var endpoint = _factory.Services.GetRequiredService<EndpointDataSource>().Endpoints
+            .OfType<RouteEndpoint>()
+            .Single(e => e.Metadata.GetMetadata<IEndpointNameMetadata>()?.EndpointName == "ZcapRevokeCapability");
+
+        endpoint.RoutePattern.RawText.Should().Be("/zcaps/revocations/{*capabilityId}");
+        endpoint.Metadata.GetMetadata<IDisableCookieRedirectMetadata>().Should().NotBeNull();
+        var accepts = endpoint.Metadata.GetMetadata<IAcceptsMetadata>()!;
+        accepts.RequestType.Should().Be(typeof(SignedRevocationHttpRequest));
+        accepts.ContentTypes.Should().Equal("application/json");
+        accepts.IsOptional.Should().BeFalse();
+        endpoint.Metadata.GetOrderedMetadata<IProducesResponseTypeMetadata>()
+            .Select(m => (m.StatusCode, m.Type))
+            .Should().Equal((200, typeof(RevocationStatusHttpResponse)), (400, typeof(string)), (403, null));
     }
 
     [Fact]
@@ -163,8 +251,11 @@ public sealed class SourceGeneratedJsonTests
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         response.Content.Headers.ContentType!.MediaType.Should().Be("application/json");
         var json = await response.Content.ReadAsStringAsync();
-        // Written through the adapter's options: null members omitted, no indentation.
-        json.Should().Be($"{{\"capabilityId\":\"{delegated.Id}\",\"isRevoked\":true}}");
+        // The 6.0.0 shape: every member, null ones included, no indentation (red-team F3; an earlier
+        // revision of this test pinned the null-omitting body, which was the regression).
+        json.Should().Be(
+            $"{{\"capabilityId\":\"{delegated.Id}\",\"isRevoked\":true,\"rootCapabilityId\":null,\"revokedBy\":null," +
+            "\"revokedAt\":null,\"expiresAt\":null,\"reason\":null,\"metadata\":null}");
         var status = JsonSerializer.Deserialize<RevocationStatusHttpResponse>(json, options)!;
         status.CapabilityId.Should().Be(delegated.Id);
         status.IsRevoked.Should().BeTrue();

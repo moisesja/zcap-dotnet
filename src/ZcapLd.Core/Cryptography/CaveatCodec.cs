@@ -56,8 +56,16 @@ internal static class CaveatCodec
     /// property dropped) through <paramref name="resolver"/>, and proves the resolver also covers every
     /// parameter type, so a context that omits a nested type fails here rather than at the first
     /// delegation. The result is cached for <see cref="ParametersEqual(Caveat, Caveat)"/>.
+    /// <para>
+    /// The resolver is backed by <see cref="ZcapJsonContext"/> for the JSON DOM and string collection
+    /// types zcap itself serializes: an <c>object</c>-typed parameter reads back as a
+    /// <see cref="JsonElement"/>, whose metadata a consumer context that lists only the caveat class does
+    /// not generate. Every enum reachable from the class is probed to write as a JSON number, so the
+    /// bytes do not depend on an options-level converter the context may bake into its metadata
+    /// (<c>UseStringEnumConverter</c>), which the reflection overload would not apply.
+    /// </para>
     /// </summary>
-    /// <exception cref="ArgumentException">The resolver does not provide metadata for the class or one of its parameter types.</exception>
+    /// <exception cref="ArgumentException">The resolver does not provide metadata for the class or one of its parameter types, or an enum parameter does not serialize as a number.</exception>
     internal static JsonTypeInfo ResolveTypeInfo(Type clrType, IJsonTypeInfoResolver resolver)
     {
         var options = new JsonSerializerOptions(ZcapJsonOptions.Default)
@@ -66,7 +74,8 @@ internal static class CaveatCodec
             RespectNullableAnnotations = true,
             RespectRequiredConstructorParameters = true,
             NumberHandling = JsonNumberHandling.Strict,
-            TypeInfoResolver = resolver.WithAddedModifier(RemoveTypeOverride),
+            TypeInfoResolver = JsonTypeInfoResolver.Combine(resolver, ZcapJsonContext.Default)
+                .WithAddedModifier(RemoveTypeOverride),
         };
         options.MakeReadOnly();
 
@@ -74,7 +83,7 @@ internal static class CaveatCodec
         try
         {
             typeInfo = options.GetTypeInfo(clrType);
-            EnsureCovered(typeInfo, options, new HashSet<Type>());
+            EnsureCovered(typeInfo, options, clrType.Name, new HashSet<Type>());
         }
         catch (Exception ex) when (ex is NotSupportedException or InvalidOperationException)
         {
@@ -111,17 +120,50 @@ internal static class CaveatCodec
               && property.PropertyType == typeof(string) && property.Set is null;
 
     // Every parameter type reachable from the caveat class must resolve now: System.Text.Json resolves
-    // nested metadata lazily, so a context missing one would otherwise surface on first use.
-    private static void EnsureCovered(JsonTypeInfo typeInfo, JsonSerializerOptions options, HashSet<Type> visited)
+    // nested metadata lazily, so a context missing one would otherwise surface on first use. The path
+    // names the parameter in the registration error.
+    private static void EnsureCovered(JsonTypeInfo typeInfo, JsonSerializerOptions options, string path, HashSet<Type> visited)
     {
         if (!visited.Add(typeInfo.Type))
             return;
+        if ((Nullable.GetUnderlyingType(typeInfo.Type) ?? typeInfo.Type) is { IsEnum: true } enumType)
+            EnsureEnumWritesNumbers(enumType, options, path);
+        if (typeInfo.Type == typeof(object))
+        {
+            // The object converter reads any JSON value back as a JsonElement and writes that element
+            // through its own metadata, so the registration must resolve it as well as object.
+            EnsureCovered(options.GetTypeInfo(typeof(JsonElement)), options, path, visited);
+        }
         foreach (var property in typeInfo.Properties)
-            EnsureCovered(options.GetTypeInfo(property.PropertyType), options, visited);
+            EnsureCovered(options.GetTypeInfo(property.PropertyType), options, $"{path}.{property.Name}", visited);
         if (typeInfo.ElementType is { } elementType)
-            EnsureCovered(options.GetTypeInfo(elementType), options, visited);
+            EnsureCovered(options.GetTypeInfo(elementType), options, $"{path}[]", visited);
         if (typeInfo.KeyType is { } keyType)
-            EnsureCovered(options.GetTypeInfo(keyType), options, visited);
+            EnsureCovered(options.GetTypeInfo(keyType), options, $"{path}{{key}}", visited);
+    }
+
+    // Both overloads must write the same bytes, and the only serializer setting a consumer's generated
+    // context carries into its metadata that changes them is an options-level enum converter
+    // (UseStringEnumConverter, Converters = …): the resulting converter is not distinguishable through
+    // the public metadata, so a defined member is written and must come out as a JSON number. Member-level
+    // [JsonConverter] attributes sit on the property, not the enum's own metadata, and both overloads honour
+    // them alike, so they are not what this probes. Enum.GetValuesAsUnderlyingType and Enum.ToObject are
+    // the AOT-safe way to obtain a boxed member without creating an array of the enum type.
+    private static void EnsureEnumWritesNumbers(Type enumType, JsonSerializerOptions options, string path)
+    {
+        var values = Enum.GetValuesAsUnderlyingType(enumType);
+        if (values.Length == 0)
+            return; // every value of a member-less enum is undefined and written as a number by any converter
+        var sample = Enum.ToObject(enumType, values.GetValue(0)!);
+        var written = JsonSerializer.SerializeToElement(sample, options.GetTypeInfo(enumType));
+        // A [JsonConverter] on the enum type itself is read by reflection and the generator alike, so a
+        // string form that comes from it is the same under both overloads (6.0.0 behaviour kept).
+        if (written.ValueKind != JsonValueKind.Number && !enumType.IsDefined(typeof(JsonConverterAttribute), inherit: false))
+            throw new ArgumentException(
+                $"Caveat parameter {path} ({enumType.FullName}) serializes as {written.ValueKind}, not as a number. " +
+                "The JsonSerializerContext must not use UseStringEnumConverter or any options-level converter, " +
+                "because Register<TCaveat>(string) and Register<TCaveat>(string, JsonTypeInfo<TCaveat>) must write the " +
+                "same bytes; declare the converter on the member with [JsonConverter] instead, which both overloads honour.");
     }
 
     /// <summary>

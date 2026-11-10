@@ -55,6 +55,12 @@ internal static class UnionJsonValue
             // Reference-type element sequences only: a dictionary enumerates value-type pairs and so
             // still serializes as an object through the metadata path below.
             case IEnumerable<object?> items:
+                // This recursion bypasses the serializer's own depth check, which is what caught a
+                // self-referencing array (and any other cycle) before #154; apply the same bound.
+                if (writer.CurrentDepth >= EffectiveMaxDepth(options))
+                    throw new JsonException(
+                        $"A possible object cycle was detected in {member}: the value nests deeper than the maximum " +
+                        $"allowed depth of {EffectiveMaxDepth(options)}.");
                 writer.WriteStartArray();
                 foreach (var item in items)
                     Write(writer, item, options, member);
@@ -65,6 +71,10 @@ internal static class UnionJsonValue
                 break;
         }
     }
+
+    // JsonSerializerOptions.MaxDepth reports 0 for the default, which the serializer treats as 64.
+    private static int EffectiveMaxDepth(JsonSerializerOptions options)
+        => options.MaxDepth > 0 ? options.MaxDepth : 64;
 
     private static JsonTypeInfo GetRuntimeTypeInfo(Type runtimeType, JsonSerializerOptions options, string member)
     {

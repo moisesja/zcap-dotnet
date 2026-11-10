@@ -63,9 +63,14 @@ public static class ZcapRevocationEndpointRouteBuilderExtensions
         // (RequiresUnreferencedCode/RequiresDynamicCode), and the Request Delegate Generator only
         // intercepts MapPost calls in the application's own compilation, never in a referenced library,
         // so a trimmed or native AOT host (#154) needs the handler to read the route value, request,
-        // services and cancellation token itself.
+        // services and cancellation token itself. The metadata the Delegate overload inferred is declared
+        // explicitly: the JSON body it accepts, and no cookie-authentication redirect, so an
+        // unauthenticated or forbidden signed request is answered with its status code, not a 302 to a
+        // login page.
         group.MapPost("/{*capabilityId}", RevokeCapabilityAsync)
             .WithName("ZcapRevokeCapability")
+            .DisableCookieRedirect()
+            .WithMetadata(new AcceptsMetadata(["application/json"], typeof(SignedRevocationHttpRequest), isOptional: false))
             .WithMetadata(new ProducesResponseTypeMetadata(
                 StatusCodes.Status200OK, typeof(RevocationStatusHttpResponse), ["application/json"]))
             .WithMetadata(new ProducesResponseTypeMetadata(StatusCodes.Status400BadRequest, typeof(string), ["application/json"]))

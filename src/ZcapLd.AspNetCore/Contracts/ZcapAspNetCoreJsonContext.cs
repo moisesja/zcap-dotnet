@@ -47,9 +47,17 @@ internal static class ZcapAspNetCoreJsonOptions
     public static JsonTypeInfo<SignedRevocationHttpRequest> Request { get; } =
         (JsonTypeInfo<SignedRevocationHttpRequest>)Default.GetTypeInfo(typeof(SignedRevocationHttpRequest));
 
-    /// <summary>Metadata for the response body, bound to <see cref="Default"/>.</summary>
+    /// <summary>
+    /// Read-only options for the 200 body: <see cref="Default"/> with every member written, null or not.
+    /// 6.0.0 responded with <c>TypedResults.Ok</c> through the host's default <c>JsonOptions</c>, whose
+    /// relaxed encoder matches <see cref="Default"/>'s but which includes null members, so the body was
+    /// <c>{"capabilityId":…,"isRevoked":true,"rootCapabilityId":null,…}</c>; clients may depend on that shape.
+    /// </summary>
+    public static JsonSerializerOptions ResponseDefault { get; } = CreateResponse();
+
+    /// <summary>Metadata for the response body, bound to <see cref="ResponseDefault"/>.</summary>
     public static JsonTypeInfo<RevocationStatusHttpResponse> Response { get; } =
-        (JsonTypeInfo<RevocationStatusHttpResponse>)Default.GetTypeInfo(typeof(RevocationStatusHttpResponse));
+        (JsonTypeInfo<RevocationStatusHttpResponse>)ResponseDefault.GetTypeInfo(typeof(RevocationStatusHttpResponse));
 
     /// <summary>Metadata for a <c>string</c> body (the 400 messages), bound to <see cref="Default"/>.</summary>
     public static JsonTypeInfo<string> Text { get; } = (JsonTypeInfo<string>)Default.GetTypeInfo(typeof(string));
@@ -63,6 +71,15 @@ internal static class ZcapAspNetCoreJsonOptions
         var options = new JsonSerializerOptions(ZcapJsonOptions.Default);
         var chain = options.TypeInfoResolverChain;
         chain.Insert(chain.IndexOf(ZcapJsonContext.Default) + 1, ZcapAspNetCoreJsonContext.Default);
+        options.MakeReadOnly();
+        return options;
+    }
+
+    private static JsonSerializerOptions CreateResponse()
+    {
+        // The generation attribute's WhenWritingNull applies to the context's own options only; property
+        // metadata resolved through these options follows this instance's ignore condition.
+        var options = new JsonSerializerOptions(Default) { DefaultIgnoreCondition = JsonIgnoreCondition.Never };
         options.MakeReadOnly();
         return options;
     }

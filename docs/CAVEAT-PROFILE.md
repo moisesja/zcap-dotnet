@@ -232,7 +232,11 @@ way and run it as a native binary and as a file-based app.
 
 A context that does not cover one of the class's parameter types fails at registration, not at
 the first delegation. The overriding `Type` property is dropped from the metadata on both paths,
-so it is never a parameter.
+so it is never a parameter. Member-level `[JsonConverter]` attributes are honoured identically by
+both overloads, but options-level converters declared on the context (`UseStringEnumConverter`,
+`Converters = …`) are not, so enum parameters are checked at registration and must serialize as
+JSON numbers; an `object`-typed parameter reads back as a `JsonElement` and, without reflection,
+can hold only a string, a `JsonElement`/`JsonNode` or arrays of those.
 
 Register every type before the services are first resolved: a registry is frozen when a
 service receives it. `capability.GetCaveats(registry)` reads validated caveats (form only, not

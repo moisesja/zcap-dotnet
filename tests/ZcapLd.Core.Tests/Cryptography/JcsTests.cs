@@ -119,6 +119,57 @@ public class JcsTests
         new Action(() => Jcs.Canonicalize(root)).Should().Throw<NetCid.JcsFormatException>();
     }
 
+    // ─── Node validation equals NetCid's node overload (#154 red team F2) ─────
+
+    /// <summary>
+    /// Inputs NetCid's node overload refuses before serializing. <see cref="Utf8JsonWriter"/> would
+    /// substitute U+FFFD for an unpaired surrogate, so two distinct inputs would canonicalize alike,
+    /// and NaN/±infinity have no RFC 8785 form.
+    /// </summary>
+    public static IEnumerable<object?[]> InvalidNodes()
+    {
+        yield return new object?[] { "lone high surrogate in a value", JsonValue.Create("urn:x:\ud800") };
+        yield return new object?[] { "lone low surrogate in a value", JsonValue.Create("\udc00urn:x") };
+        yield return new object?[] { "lone high surrogate in a key", new JsonObject { ["k\ud800"] = 1 } };
+        yield return new object?[] { "surrogate char value", JsonValue.Create('\ud800') };
+        yield return new object?[] { "nested lone surrogate", new JsonObject { ["a"] = new JsonArray(1, new JsonObject { ["b"] = "\ud800" }) } };
+        yield return new object?[] { "double NaN", JsonValue.Create(double.NaN) };
+        yield return new object?[] { "double +infinity", JsonValue.Create(double.PositiveInfinity) };
+        yield return new object?[] { "double -infinity", JsonValue.Create(double.NegativeInfinity) };
+        yield return new object?[] { "float NaN", JsonValue.Create(float.NaN) };
+        yield return new object?[] { "float +infinity", JsonValue.Create(float.PositiveInfinity) };
+        yield return new object?[] { "float -infinity", JsonValue.Create(float.NegativeInfinity) };
+    }
+
+    [Theory]
+    [MemberData(nameof(InvalidNodes))]
+    public void Canonicalize_Node_RejectsWhatNetCidRejects_WithTheSameMessage(string _, JsonNode node)
+    {
+        var fromNetCid = new Action(() => NetCid.JcsCanonicalizer.Canonicalize(node))
+            .Should().Throw<NetCid.JcsFormatException>().Which;
+
+        new Action(() => Jcs.Canonicalize(node)).Should().Throw<NetCid.JcsFormatException>()
+            .WithMessage(fromNetCid.Message);
+        new Action(() => Jcs.ToElement(node)).Should().Throw<NetCid.JcsFormatException>()
+            .WithMessage(fromNetCid.Message);
+    }
+
+    [Fact]
+    public void Canonicalize_Node_AcceptsAPairedSurrogateAndALiteralReplacementCharacter()
+    {
+        foreach (var node in new JsonNode[] { JsonValue.Create("urn:x:\ud83d\ude00"), JsonValue.Create("urn:x:\ufffd"), new JsonObject { ["\ud83d\ude00"] = "\ufffd" } })
+            Jcs.Canonicalize(node).Should().Equal(NetCid.JcsCanonicalizer.Canonicalize(node));
+    }
+
+    [Fact]
+    public void RevocationScope_KeyFor_RejectsAnUnpairedSurrogateAs600Did()
+    {
+        // 6.0.0 threw through NetCid's node overload; a substituted U+FFFD would collide with the literal one.
+        new Action(() => RevocationScope.Root.KeyFor("urn:x:\ud800")).Should().Throw<NetCid.JcsFormatException>();
+        new Action(() => RevocationScope.Delegated(Alice).KeyFor("urn:x:\udc00")).Should().Throw<NetCid.JcsFormatException>();
+        RevocationScope.Root.KeyFor("urn:x:\ufffd").Should().MatchRegex("^[0-9a-f]{64}$");
+    }
+
     // ─── Pinned 6.0.0 bytes ───────────────────────────────────────────────────
 
     [Theory]
