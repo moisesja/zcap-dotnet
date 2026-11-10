@@ -372,3 +372,21 @@
   the public bool API. Promoting the helper `private`→`internal` (repo already had
   `InternalsVisibleTo`) to assert "returns false WITHOUT throwing" is what gives the guard teeth. When a
   bug's only observable difference is swallowed by a catch, push the assertion below the catch.
+
+## 2026-11-10 — A `JsonObject` target reports duplicate keys as `ArgumentException`, not `JsonException` (PR #167 review)
+- **Reviewer correction (P2):** the demo's protected endpoint deserialized the request with
+  `JsonSerializer.DeserializeAsync<JsonObject>(body, ZcapJsonOptions.Default)` and caught only `JsonException`
+  (+ `BadHttpRequestException` for the size cap). `AllowDuplicateProperties = false` does reject `{"id":"x","id":"y"}`,
+  but for a `JsonObject`/`JsonNode` target the rejection surfaces as **`ArgumentException`** from
+  `OrderedDictionary.Add` inside `JsonObjectConverter`, so an unauthenticated body with a repeated key (top-level
+  or nested) produced an HTTP 500 and, in Development, the exception page. The typed target in the library's
+  revocation endpoint (`SignedRevocationHttpRequest`) raises `JsonException` for the same input, which is why
+  the library endpoint was fine and the copy in the demo was not.
+- **Rule — at an unauthenticated deserialization boundary, prove the exception type per target type.** Do not
+  assume "invalid JSON ⇒ `JsonException`"; the exception depends on the converter. For `JsonNode` targets catch
+  `ArgumentException` too (or parse to a typed model first), and map every parse failure to 400.
+- **Rule — the red team and the regression tests must send malformed input as raw strings.** A `JsonObject`
+  cannot represent duplicate keys, so any probe built from the model types can never exercise this path; the
+  adversarial pass probed `[]`, `{}`, `{"bogus":1}` and an oversized body and missed it. Add "duplicate key,
+  top-level and nested" to the standard malformed-body probe list, and run it in both Development and
+  Production (the latter must stay an empty 4xx, never a 500).

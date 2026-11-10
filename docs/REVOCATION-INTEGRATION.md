@@ -288,5 +288,5 @@ captured it can re-post it:
 
 Neither reaches beyond the signer's authority: the verifier must trust the chain, and the signer
 must be allowed to revoke on it, so a replay can only widen a revocation the signer could have made.
-It never grants access. Binding the request to the copy is tracked in
-[#161](https://github.com/moisesja/zcap-dotnet/issues/161).
+It never grants access. Binding the request to the copy is not planned
+([#161](https://github.com/moisesja/zcap-dotnet/issues/161), closed as won't fix).

@@ -76,9 +76,9 @@ Community Group draft; interoperability claims are limited to the tested cases.
   write `Unscoped` (architecture.md, "Revocation scope"). A signed request binds the capability id,
   not the presented copy or a verifier: records are written before the nonce is consumed so a failed
   write can be retried, and a replay inside the window can only widen a revocation the signer could
-  have made (#161, accepted for 6.0.0). Distribution to
+  have made (#161, accepted for 6.0.0 and closed as won't fix). Distribution to
   independent verifiers is a deployment responsibility. HTTP-signature invocation
-  transport (#119), gRPC hosting and WASM remain separate work.
+  transport (#119) is not planned; gRPC hosting and WASM remain separate work.
 
 ## Project Structure
 
@@ -106,7 +106,7 @@ zcap-dotnet/
 ├── interop/                     # .NET CLI, pinned JS peer, target/profile matrix
 ├── examples/
 │   ├── ZcapLd.Examples/          # Native restrictions, invocation formats and revocation
-│   └── ZcapLd.RevocationEndpointsDemo/ # ASP.NET signed revocation with SQLite
+│   └── ZcapLd.RevocationEndpointsDemo/ # ASP.NET signed revocation with SQLite, protected resource, --walkthrough
 ├── docs/
 ├── tasks/
 ├── .github/workflows/
@@ -123,7 +123,8 @@ dotnet build ZcapLd.sln
 dotnet test ZcapLd.sln
 dotnet pack src/ZcapLd.Core/ZcapLd.Core.csproj -c Release
 dotnet pack src/ZcapLd.AspNetCore/ZcapLd.AspNetCore.csproj -c Release
-dotnet run --project examples/ZcapLd.Examples
+dotnet run --project examples/ZcapLd.Examples            # self-checking; non-zero exit on a mismatch
+dotnet run --project examples/ZcapLd.RevocationEndpointsDemo -- --walkthrough
 bash interop/run-interop.sh
 ```
 

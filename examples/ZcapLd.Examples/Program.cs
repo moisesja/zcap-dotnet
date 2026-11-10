@@ -3,17 +3,36 @@ using ZcapLd.Core.Models;
 using ZcapLd.Core.Services;
 using ZcapLd.Examples;
 
+// Every outcome below is checked against the expected value, so this program doubles as a smoke test:
+// CI runs it and a mismatch exits non-zero.
+var checks = 0;
+var failures = 0;
+void Check<T>(string label, T expected, T actual)
+{
+    checks++;
+    if (EqualityComparer<T>.Default.Equals(expected, actual))
+    {
+        Console.WriteLine($"{label}: {actual}");
+        return;
+    }
+
+    failures++;
+    Console.WriteLine($"FAIL {label}: {actual} (expected {expected})");
+}
+
 // The example provider keeps private keys in memory. Supply an HSM/KMS-backed IDidSigner
 // and your DID resolver in an application.
 var dids = new InMemoryDidProvider();
 const string owner = "did:key:z6MkOwner";
 const string agent = "did:key:z6MkAgent";
 const string assistant = "did:key:z6MkAssistant";
+const string helperBot = "did:key:z6MkHelper";
 // The agent signs with P-256 (EcdsaSecp256r1Signature2019), the others with Ed25519Signature2020:
 // each link carries its signer's suite context, and a chain can mix suites (#159).
 dids.GenerateAndRegisterKeyPair(owner);
 dids.GenerateAndRegisterKeyPair(agent, KeyType.P256);
 dids.GenerateAndRegisterKeyPair(assistant);
+dids.GenerateAndRegisterKeyPair(helperBot);
 var signing = new SigningService(dids, dids);
 var capabilities = new CapabilityService(signing);
 var revocations = new RevocationService(new InMemoryRevocationStore());
@@ -29,29 +48,58 @@ var delegated = await capabilities.DelegateCapabilityAsync(root, agent, new[] { 
     DateTime.UtcNow.AddDays(7), invocationTarget: root.InvocationTarget + "/report");
 var leaf = await capabilities.DelegateCapabilityAsync(delegated, assistant, new[] { "read" },
     DateTime.UtcNow.AddDays(1), invocationTarget: delegated.InvocationTarget + "?section=summary");
-Console.WriteLine($"Two-level delegation valid: {await verifier.VerifyCapabilityChainAsync(leaf)}");
+Check("Two-level delegation", VerificationOutcome.Valid,
+    (await verifier.VerifyCapabilityChainDetailedAsync(leaf)).Outcome);
 
 var invocation = capabilities.CreateInvocation(leaf, "read");
 invocation.Proof = await signing.SignInvocationAsync(invocation, assistant);
-Console.WriteLine($"Envelope invocation valid: {await verifier.VerifyInvocationAsync(invocation, leaf)}");
+Check("Envelope invocation", VerificationOutcome.Valid,
+    (await verifier.VerifyInvocationDetailedAsync(invocation, leaf)).Outcome);
 
 // The target API must enforce section=summary. The library enforces lexical narrowing;
 // it cannot infer API semantics or prevent an API from ignoring its own query parameters.
 var secured = await signing.SignCapabilityInvocationAsync(
     InvocationCapability.FromCapability(leaf), "read", leaf.InvocationTarget, assistant);
-Console.WriteLine($"DI invocation valid: {await verifier.VerifyCapabilityInvocationAsync(
-    secured, "read", new[] { leaf.InvocationTarget })}");
+Check("DI invocation", VerificationOutcome.Valid,
+    (await verifier.VerifyCapabilityInvocationDetailedAsync(secured, "read", new[] { leaf.InvocationTarget })).Outcome);
 
 // Exact targets are the default. A verifier must consciously opt into narrowing.
 var exactOnly = new VerificationService(dids);
-Console.WriteLine($"Exact-only verifier rejects narrowed chain: {!await exactOnly.VerifyCapabilityChainAsync(leaf)}");
+Check("Exact-only verifier rejects narrowed chain", VerificationOutcome.AttenuationViolation,
+    (await exactOnly.VerifyCapabilityChainDetailedAsync(leaf)).Outcome);
 
 // Revocation is authenticated and recorded at the verifier responsible for the target.
 // Replicas must share an authoritative revocation store; no arbitrary caveat URL is polled.
+// A signed request is honoured only from a controller of the capability or of one of its ancestors.
+
+// 1. Unauthorized signer: the assistant controls only `leaf`, so it cannot revoke its parent.
+var forged = await signing.SignRevocationAsync(delegated.Id, signerDid: assistant, invocationTarget: delegated.InvocationTarget);
+Check("Revocation signed by a descendant accepted", false, await verifier.RevokeCapabilityAsync(delegated, forged));
+Check("Parent after the refused revocation", VerificationOutcome.Valid,
+    (await verifier.VerifyCapabilityChainDetailedAsync(delegated)).Outcome);
+
+// 2. Mid-chain delegator: the agent may revoke what it delegated, and only that. Its own grant stays.
+var helper = await capabilities.DelegateCapabilityAsync(delegated, helperBot, new[] { "read" },
+    DateTime.UtcNow.AddDays(1), invocationTarget: delegated.InvocationTarget);
+var agentRevoke = await signing.SignRevocationAsync(helper.Id, signerDid: agent, invocationTarget: helper.InvocationTarget);
+Check("Revocation signed by the delegator accepted", true, await verifier.RevokeCapabilityAsync(helper, agentRevoke));
+Check("Helper after its delegator revoked it", VerificationOutcome.Revoked,
+    (await verifier.VerifyCapabilityChainDetailedAsync(helper)).Outcome);
+Check("Delegator's own grant after revoking the helper", VerificationOutcome.Valid,
+    (await verifier.VerifyCapabilityChainDetailedAsync(delegated)).Outcome);
+
+// 3. Ancestor revocation: the owner revokes the agent's grant, which cuts off every descendant.
+// A forged copy of an id under another chain lands in another revocation scope (#158); see
+// VerificationServiceRevocationScopeTests.
 var revoke = await signing.SignRevocationAsync(delegated.Id, signerDid: owner, invocationTarget: delegated.InvocationTarget,
     reason: "Agent access withdrawn");
-Console.WriteLine($"Signed revocation accepted: {await verifier.RevokeCapabilityAsync(delegated, revoke)}");
-Console.WriteLine($"Descendant rejected after revocation: {!await verifier.VerifyCapabilityChainAsync(leaf)}");
+Check("Revocation signed by the owner accepted", true, await verifier.RevokeCapabilityAsync(delegated, revoke));
+Check("Descendant chain after the ancestor was revoked", VerificationOutcome.Revoked,
+    (await verifier.VerifyCapabilityChainDetailedAsync(leaf)).Outcome);
+var afterRevocation = capabilities.CreateInvocation(leaf, "read");
+afterRevocation.Proof = await signing.SignInvocationAsync(afterRevocation, assistant);
+Check("Descendant invocation after the ancestor was revoked", VerificationOutcome.Revoked,
+    (await verifier.VerifyInvocationDetailedAsync(afterRevocation, leaf)).Outcome);
 
 // Custom caveats (#157) are an opt-in extension profile, not part of ZCAP-LD v0.4: other ZCAP
 // implementations reject capabilities that carry them. Register the type on every service.
@@ -74,17 +122,22 @@ async Task<VerificationOutcome> QueryAsync(Capability grant, string action)
     return (await clinicalVerifier.VerifyInvocationDetailedAsync(request, grant)).Outcome;
 }
 
-Console.WriteLine($"Budget 3: query (cost 1): {await QueryAsync(genomics, "query")}");
-Console.WriteLine($"Budget 3: cohort-query (cost 2): {await QueryAsync(genomics, "cohort-query")}");
-Console.WriteLine($"Budget 3: one more query: {await QueryAsync(genomics, "query")}");
+Check("Budget 3: query (cost 1)", VerificationOutcome.Valid, await QueryAsync(genomics, "query"));
+Check("Budget 3: cohort-query (cost 2)", VerificationOutcome.Valid, await QueryAsync(genomics, "cohort-query"));
+Check("Budget 3: one more query", VerificationOutcome.CaveatNotSatisfied, await QueryAsync(genomics, "query"));
 
 // Chain verification authenticates caveats but never authorizes them; only invocation enforces.
 var chainResult = await clinicalVerifier.VerifyCapabilityChainDetailedAsync(genomics);
-Console.WriteLine($"Chain check: {chainResult.Outcome}, budgets {string.Join(" > ",
-    chainResult.Caveats!.Select(g => ((EpsilonBudgetCaveat)g.Caveat).MaxEpsilon))}");
+Check("Chain check", VerificationOutcome.CaveatEnforcementRequired, chainResult.Outcome);
+Check("Chain budgets", "8 > 3", string.Join(" > ",
+    chainResult.Caveats!.Select(g => ((EpsilonBudgetCaveat)g.Caveat).MaxEpsilon)));
 
 // The budget is signed: raising it after delegation breaks the orchestrator's signature.
 var raised = System.Text.Json.JsonSerializer.Deserialize<Capability>(
     System.Text.Json.JsonSerializer.Serialize(genomics, ZcapLd.Core.Cryptography.ZcapJsonOptions.Default)
         .Replace("\"maxEpsilon\":3,", "\"maxEpsilon\":30,"), ZcapLd.Core.Cryptography.ZcapJsonOptions.Default)!;
-Console.WriteLine($"Raised budget after signing: {(await clinicalVerifier.VerifyCapabilityChainDetailedAsync(raised)).Outcome}");
+Check("Raised budget after signing", VerificationOutcome.InvalidSignature,
+    (await clinicalVerifier.VerifyCapabilityChainDetailedAsync(raised)).Outcome);
+
+Console.WriteLine(failures == 0 ? $"All {checks} checks passed" : $"{failures} of {checks} check(s) FAILED");
+return failures == 0 ? 0 : 1;

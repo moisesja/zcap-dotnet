@@ -320,8 +320,11 @@ var verifier = new VerificationService(resolver, revocations, nonces,
 - `src/ZcapLd.Core`: library code
 - `src/ZcapLd.AspNetCore`: optional ASP.NET endpoint adapter package
 - `tests/ZcapLd.Core.Tests`: unit, integration, and compliance tests
-- `examples/ZcapLd.Examples`: native restriction and signed revocation examples
-- `examples/ZcapLd.RevocationEndpointsDemo`: ASP.NET revocation with SQLite
+- `examples/ZcapLd.Examples`: native restrictions, invocation formats and signed revocation (refused
+  signer, mid-chain revocation, `Revoked` descendants); every outcome is checked and CI runs it
+- `examples/ZcapLd.RevocationEndpointsDemo`: ASP.NET signed revocation with SQLite, a protected resource,
+  and `-- --walkthrough`, which provisions a root and shows read `200` → stranger revoke `403` → owner
+  revoke `200` → read `403 Revoked` over HTTP
 - `interop`: live cross-stack interop harness vs `@digitalbazaar/zcap` (run `interop/run-interop.sh`)
 - `docs`: implementation/security notes
 
@@ -368,4 +371,4 @@ dotnet pack src/ZcapLd.AspNetCore/ZcapLd.AspNetCore.csproj -c Release
 Capability **delegation** interoperates with `@digitalbazaar/zcap` (proven live by [`interop/`](interop/README.md)). Two things to know for cross-stack use:
 
 - **Use `Ed25519Signature2020`.** P-256 (`EcdsaSecp256r1Signature2019`) is a zcap-dotnet-only profile: `@digitalbazaar/zcap` has no such suite (it ships/tests Ed25519 only), the base58-btc `proofValue` over an IEEE P1363 signature is zcap-dotnet's convention, and the capability's suite context is zcap-dotnet's own, so a P-256 capability will not verify there.
-- **Invocation** interop works via Data Integrity `capabilityInvocation` proofs (`SignCapabilityInvocationAsync` / `VerifyCapabilityInvocationAsync`), proven cross-stack for root + delegated. The verifier requires the relying party to declare the **expected action and target(s)** it authorizes (as the reference impl does) and validates the application document's `@context`, so a valid invocation can't be replayed against a different endpoint or have its terms rewritten. HTTP-Signature invocations (the `ezcap` transport) are not yet supported (tracked in #119).
+- **Invocation** interop works via Data Integrity `capabilityInvocation` proofs (`SignCapabilityInvocationAsync` / `VerifyCapabilityInvocationAsync`), proven cross-stack for root + delegated. The verifier requires the relying party to declare the **expected action and target(s)** it authorizes (as the reference impl does) and validates the application document's `@context`, so a valid invocation can't be replayed against a different endpoint or have its terms rewritten. HTTP-Signature invocations (the `ezcap` transport) are not supported and not planned (#119, closed as won't fix).

@@ -77,7 +77,7 @@ Delegation proofs are durable and have no lower freshness bound.
 
 Evidence: `DataIntegrityInvocationTests`, `DelegatedInvocationComplianceTests`,
 `VerificationServiceFreshnessTests`, `VerificationServiceReplayTests` and interop
-checks 7–12. HTTP-signature transport is not implemented by this library (#119).
+checks 7–12. HTTP-signature transport is not implemented by this library and not planned (#119, closed as won't fix).
 
 ## Unsupported caveats and security regression contract (#149)
 

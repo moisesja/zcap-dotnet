@@ -223,7 +223,7 @@ before the replay is refused, or sent to another verifier that trusts the chain,
 records it too. Every recorded scope still comes from a proof verified on a chain that
 verifier trusts and on which the signer may revoke, so a replay can only widen a revocation
 the signer could have made, and it grants nothing. This is accepted for 6.0.0; binding the
-request to the copy is tracked in #161.
+request to the copy is not planned (#161, closed as won't fix).
 
 The store key is `RevocationScope.KeyFor(id)`, a SHA-256 over the RFC 8785 form of the id
 and the scope's text, so no bare id is ever a key and collation cannot merge records.
@@ -254,6 +254,6 @@ revocation looks up the revoked id and a fault fails the revocation closed.
 Core holds no private keys. Shared stores/signers/resolvers supplied by consumers
 must be safe for their application concurrency. In-memory implementations use
 concurrent storage. Chain traversal is bounded (maximum length 10). HTTP-signature
-invocation transport, WASM integration, and a negotiated modern cryptosuite profile
-remain separate work; the current interop harness tests Ed25519 delegation and DI
-invocation, not every feature of every peer.
+invocation transport is not planned (#119, closed as won't fix); WASM integration and a
+negotiated modern cryptosuite profile remain separate work; the current interop harness
+tests Ed25519 delegation and DI invocation, not every feature of every peer.

@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+No package change. Examples, tests and CI only (#166):
+
+- `examples/ZcapLd.RevocationEndpointsDemo` gains `--walkthrough`, which provisions demo keys and a
+  root with trusted startup code and drives the real endpoints: a delegated read (`200`), a stranger's
+  revocation (`403`), the owner's revocation (`200`) and the same delegate's next read (`403`,
+  `Revoked`). It also gains a protected resource (`POST /documents/report`, verified with
+  `VerifyCapabilityInvocationDetailedAsync`; the denial outcome is disclosed only in `Development`),
+  `appsettings.Development.json` raising `ZcapLd` to `Debug`, launch settings, and a README with the
+  request shape `SignRevocationAsync` actually emits. As shipped in 6.0.0 the demo registered an
+  empty root resolver and so refused every valid revocation.
+- `examples/ZcapLd.Examples` shows a refused unauthorized revoker, a mid-chain delegator revoking only
+  its own sub-delegation, and `Revoked` chain and invocation outcomes; every outcome is checked and a
+  mismatch exits non-zero.
+- `tests/ZcapLd.AspNetCore.Tests` adds `RevocationWalkthroughTests`, which boots the demo without
+  replacing its root resolver, and CI now builds both examples, runs the console example and runs the
+  ASP.NET tests (`ci-core`, `ci-aspnet`, `release-aspnet-nuget`).
+- Docs no longer describe the HTTP-signature transport (#119) or request-copy binding (#161) as
+  pending; both were closed as won't fix.
+
 ## [6.0.0] - 2026-11-02
 
 Breaking: new interface and constructor parameters, a scoped `IRevocationStore`, in-stack signing

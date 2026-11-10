@@ -14,8 +14,8 @@ See [requirements](ZCAP-LD-SPECIFICATION-REQUIREMENTS.md),
 
 ## Remaining work
 
-- HTTP-signature invocation transport (#119), distinct from the implemented DI
-  application-document path.
+- Not planned: HTTP-signature invocation transport (#119, closed as won't fix), distinct
+  from the implemented DI application-document path.
 - An explicitly negotiated/tested modern `DataIntegrityProof` cryptosuite profile
   if consumers need it. v0.4 examples alone do not mandate a wire-format change.
 - Deployment-specific revocation distribution between independent operators;
