@@ -84,7 +84,7 @@ format. Supporting another suite requires a separately tested peer configuration
 P-256 is a zcap-dotnet-only profile (its own suite context and `proofValue`
 convention) and is not covered by the stock Ed25519 harness. The
 in-stack `Invocation` envelope is distinct from the interoperable application-doc
-DI mode. HTTP-signature invocation transport remains separate (#119).
+DI mode. HTTP-signature invocation transport is not planned (#119, closed as won't fix).
 
 Revocation distribution, replay-store sharing, endpoint query semantics and
 multi-operator trust are application/deployment concerns. The live tests do not
