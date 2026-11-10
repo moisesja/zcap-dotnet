@@ -1,4 +1,7 @@
+using System.Collections.Concurrent;
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
+using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -36,13 +39,26 @@ internal static class CaveatCodec
     private const double MinMagnitude = 1e-4;
     private const double MaxMagnitude = 9007199254740992d;
 
-    /// <summary>Strict options for caveat parameters: no unknown members, no numbers in strings.</summary>
-    internal static JsonSerializerOptions SerializerOptions { get; } = CreateOptions();
+    /// <summary>
+    /// Serializer metadata per caveat class, filled by both <see cref="CaveatTypeRegistry"/> overloads
+    /// (first registration wins; every registration of a class yields the same shape). It only lets
+    /// <see cref="Caveat.IsAttenuationOf"/>, which has no registry in scope, compare parameters; it never
+    /// decides which types a verifier accepts.
+    /// </summary>
+    private static readonly ConcurrentDictionary<Type, JsonTypeInfo> Metadata = new();
 
     /// <summary>One checked caveat entry: its raw signed JSON and, when materialized, the typed value.</summary>
     internal sealed record Entry(CaveatTypeRegistration Registration, JsonElement Json, Caveat? Value);
 
-    private static JsonSerializerOptions CreateOptions()
+    /// <summary>
+    /// Resolves the strict caveat metadata for <paramref name="clrType"/> (no unknown members, no numbers
+    /// in strings, nullability and <c>required</c> honoured, the overriding <see cref="Caveat.Type"/>
+    /// property dropped) through <paramref name="resolver"/>, and proves the resolver also covers every
+    /// parameter type, so a context that omits a nested type fails here rather than at the first
+    /// delegation. The result is cached for <see cref="ParametersEqual(Caveat, Caveat)"/>.
+    /// </summary>
+    /// <exception cref="ArgumentException">The resolver does not provide metadata for the class or one of its parameter types.</exception>
+    internal static JsonTypeInfo ResolveTypeInfo(Type clrType, IJsonTypeInfoResolver resolver)
     {
         var options = new JsonSerializerOptions(ZcapJsonOptions.Default)
         {
@@ -50,29 +66,90 @@ internal static class CaveatCodec
             RespectNullableAnnotations = true,
             RespectRequiredConstructorParameters = true,
             NumberHandling = JsonNumberHandling.Strict,
-            TypeInfoResolver = new DefaultJsonTypeInfoResolver
-            {
-                Modifiers =
-                {
-                    // The library writes "type" from the registration; an overriding Type property would
-                    // otherwise serialize as a second, CLR-named member (System.Text.Json does not
-                    // inherit [JsonIgnore] onto overrides).
-                    static info =>
-                    {
-                        if (!typeof(Caveat).IsAssignableFrom(info.Type) || info.Kind != JsonTypeInfoKind.Object)
-                            return;
-                        for (var i = info.Properties.Count - 1; i >= 0; i--)
-                        {
-                            if (info.Properties[i].AttributeProvider is System.Reflection.PropertyInfo { Name: nameof(Caveat.Type) })
-                                info.Properties.RemoveAt(i);
-                        }
-                    },
-                },
-            },
+            TypeInfoResolver = resolver.WithAddedModifier(RemoveTypeOverride),
         };
         options.MakeReadOnly();
-        return options;
+
+        JsonTypeInfo typeInfo;
+        try
+        {
+            typeInfo = options.GetTypeInfo(clrType);
+            EnsureCovered(typeInfo, options, new HashSet<Type>());
+        }
+        catch (Exception ex) when (ex is NotSupportedException or InvalidOperationException)
+        {
+            throw new ArgumentException(
+                $"{clrType.FullName} cannot be serialized with the supplied metadata: {ex.Message} " +
+                "Pass a JsonTypeInfo from a JsonSerializerContext whose [JsonSerializable] types include the caveat " +
+                "class (its parameter types are then generated with it).", ex);
+        }
+
+        Metadata.TryAdd(clrType, typeInfo);
+        return typeInfo;
     }
+
+    // The library writes "type" from the registration; an overriding Type property would otherwise
+    // serialize as a second, CLR-named member. Neither resolver inherits the base [JsonIgnore] onto the
+    // override: reflection and the source generator both emit it, and both expose the declaring
+    // PropertyInfo as the AttributeProvider (the generator through a lazy factory that reads the
+    // preserved member), so one rule serves both paths.
+    private static void RemoveTypeOverride(JsonTypeInfo info)
+    {
+        if (!typeof(Caveat).IsAssignableFrom(info.Type) || info.Kind != JsonTypeInfoKind.Object)
+            return;
+        for (var i = info.Properties.Count - 1; i >= 0; i--)
+        {
+            if (IsTypeOverride(info.Properties[i]))
+                info.Properties.RemoveAt(i);
+        }
+    }
+
+    private static bool IsTypeOverride(JsonPropertyInfo property)
+        => property.AttributeProvider is PropertyInfo { Name: nameof(Caveat.Type) } member
+            ? typeof(Caveat).IsAssignableFrom(member.DeclaringType)
+            : property.AttributeProvider is null && property.Name == nameof(Caveat.Type)
+              && property.PropertyType == typeof(string) && property.Set is null;
+
+    // Every parameter type reachable from the caveat class must resolve now: System.Text.Json resolves
+    // nested metadata lazily, so a context missing one would otherwise surface on first use.
+    private static void EnsureCovered(JsonTypeInfo typeInfo, JsonSerializerOptions options, HashSet<Type> visited)
+    {
+        if (!visited.Add(typeInfo.Type))
+            return;
+        foreach (var property in typeInfo.Properties)
+            EnsureCovered(options.GetTypeInfo(property.PropertyType), options, visited);
+        if (typeInfo.ElementType is { } elementType)
+            EnsureCovered(options.GetTypeInfo(elementType), options, visited);
+        if (typeInfo.KeyType is { } keyType)
+            EnsureCovered(options.GetTypeInfo(keyType), options, visited);
+    }
+
+    /// <summary>
+    /// The cached metadata of a caveat class, for the paths that have no registration in scope. A class
+    /// that was never registered is resolved by reflection when the application allows it; otherwise it
+    /// must have been registered through the <see cref="JsonTypeInfo{T}"/> overload first.
+    /// </summary>
+    private static JsonTypeInfo MetadataFor(Type clrType)
+    {
+        if (Metadata.TryGetValue(clrType, out var typeInfo))
+            return typeInfo;
+        if (!JsonSerializer.IsReflectionEnabledByDefault)
+            throw new InvalidOperationException(
+                $"Caveat class {clrType.FullName} has no serializer metadata and reflection-based serialization is " +
+                "disabled in this application. Register it with CaveatTypeRegistry.Register<TCaveat>(string, " +
+                "JsonTypeInfo<TCaveat>) from a JsonSerializerContext before comparing its instances.");
+        return ResolveByReflection(clrType);
+    }
+
+    // Only reached when the reflection feature switch is on, so the trimmer removes this branch (and
+    // its warnings' subject) from a trimmed or AOT application; the same pattern guards the runtime's
+    // own JsonSerializerOptions.Default and ZcapJsonOptions.CombineWithReflection.
+    [UnconditionalSuppressMessage("Trimming", "IL2026",
+        Justification = "Guarded by JsonSerializer.IsReflectionEnabledByDefault, a feature switch the trimmer evaluates; the branch is dead when reflection-based serialization is disabled.")]
+    [UnconditionalSuppressMessage("AOT", "IL3050",
+        Justification = "Guarded by JsonSerializer.IsReflectionEnabledByDefault, a feature switch the trimmer evaluates; the branch is dead when reflection-based serialization is disabled.")]
+    private static JsonTypeInfo ResolveByReflection(Type clrType)
+        => ResolveTypeInfo(clrType, new DefaultJsonTypeInfoResolver());
 
     /// <summary>
     /// Reads the caveats of a typed capability. Returns <see langword="null"/> on success or the
@@ -155,15 +232,15 @@ internal static class CaveatCodec
                 $"Caveat type '{caveat.Type}' ({caveat.GetType().FullName}) is not registered.");
         caveat.Validate();
 
-        var node = JsonSerializer.SerializeToNode(caveat, caveat.GetType(), SerializerOptions)!.AsObject();
+        var node = JsonSerializer.SerializeToNode(caveat, registration.TypeInfo)!.AsObject();
         node["type"] = registration.Type;
-        using var document = JsonDocument.Parse(NetCid.JcsCanonicalizer.Canonicalize(node));
+        using var document = JsonDocument.Parse(Jcs.Canonicalize(node));
         var element = document.RootElement.Clone();
 
-        var wrapped = JsonSerializer.SerializeToElement(new[] { element });
+        var wrapped = JsonSerializer.SerializeToElement(new[] { element }, ZcapJsonOptions.TypeInfo<JsonElement[]>());
         if (TryRead(wrapped, new[] { registration.ContextUrl }, registry, materialize: true, out var read) is { } failure)
             throw new CapabilityValidationException(failure.Message ?? "Caveat value is not supported.");
-        if (!ParametersEqual(read[0].Value!, caveat))
+        if (!ParametersEqual(read[0].Value!, caveat, registration.TypeInfo))
             throw new CapabilityValidationException(
                 $"Caveat '{caveat.Type}' does not read back identically from its JSON form (check numeric precision).");
         return element;
@@ -174,15 +251,17 @@ internal static class CaveatCodec
     /// exact value (<see cref="JsonElement.DeepEquals"/>), not by a lossy double rendering.
     /// </summary>
     internal static bool ParametersEqual(Caveat first, Caveat second)
-        => first.GetType() == second.GetType()
-           && JsonElement.DeepEquals(
-               JsonSerializer.SerializeToElement(first, first.GetType(), SerializerOptions),
-               JsonSerializer.SerializeToElement(second, second.GetType(), SerializerOptions));
+        => first.GetType() == second.GetType() && ParametersEqual(first, second, MetadataFor(first.GetType()));
+
+    private static bool ParametersEqual(Caveat first, Caveat second, JsonTypeInfo typeInfo)
+        => JsonElement.DeepEquals(
+            JsonSerializer.SerializeToElement(first, typeInfo),
+            JsonSerializer.SerializeToElement(second, typeInfo));
 
     /// <summary>Lowercase hex SHA-256 of the RFC 8785 array of ids from the root to a link.</summary>
     internal static string GrantKey(IEnumerable<string> idsFromRoot)
         => Convert.ToHexStringLower(SHA256.HashData(
-            NetCid.JcsCanonicalizer.Canonicalize(new JsonArray(idsFromRoot.Select(id => (JsonNode?)id).ToArray()))));
+            Jcs.Canonicalize(new JsonArray(idsFromRoot.Select(id => (JsonNode?)id).ToArray()))));
 
     /// <summary>The <c>@context</c> entries when it is an array of strings (model or JSON form), else null.</summary>
     internal static IReadOnlyList<string>? ContextUrls(object? context)
@@ -191,7 +270,7 @@ internal static class CaveatCodec
         {
             null => default,
             JsonElement element => element,
-            _ => JsonSerializer.SerializeToElement(context, ZcapJsonOptions.Default),
+            _ => JsonSerializer.SerializeToElement(context, ZcapJsonOptions.TypeInfo<object>()),
         };
         if (json.ValueKind != JsonValueKind.Array)
             return null;
@@ -212,7 +291,7 @@ internal static class CaveatCodec
         {
             var parameters = JsonObject.Create(item)!;
             parameters.Remove("type");
-            caveat = (Caveat?)parameters.Deserialize(registration.ClrType, SerializerOptions);
+            caveat = (Caveat?)JsonSerializer.Deserialize(parameters, registration.TypeInfo);
             if (caveat is null || caveat.Type != registration.Type)
                 return Malformed($"Caveat '{registration.Type}' does not deserialize to a matching {registration.ClrType.Name}.");
             caveat.Validate();
@@ -279,7 +358,7 @@ internal static class CaveatCodec
         var magnitude = Math.Abs(number);
         if (magnitude != 0 && (magnitude < MinMagnitude || magnitude > MaxMagnitude))
             return $"number {raw} must be 0 or have a magnitude between 0.0001 and 2^53.";
-        if (!string.Equals(Encoding.UTF8.GetString(NetCid.JcsCanonicalizer.Canonicalize(value)), raw, StringComparison.Ordinal))
+        if (!string.Equals(Encoding.UTF8.GetString(Jcs.Canonicalize(value)), raw, StringComparison.Ordinal))
             return $"number {raw} must be written in its RFC 8785 form.";
         return null;
     }

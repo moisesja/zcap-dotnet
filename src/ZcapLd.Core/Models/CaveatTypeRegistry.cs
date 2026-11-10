@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
+using System.Text.Json;
+using System.Text.Json.Serialization.Metadata;
 using System.Text.RegularExpressions;
 using ZcapLd.Core.Cryptography;
 
@@ -37,26 +39,74 @@ public sealed class CaveatTypeRegistry
     private volatile bool _frozen;
 
     /// <summary>
-    /// Registers <typeparamref name="TCaveat"/> under its wire <paramref name="type"/>. Idempotent for
-    /// the same pair. Throws when the name or a parameter name is invalid, when a parameter collides
-    /// with a ZCAP/suite context term, when the class captures extension data, when the type or class
-    /// is already registered differently, or when the registry has been handed to a service.
+    /// Registers <typeparamref name="TCaveat"/> under its wire <paramref name="type"/>, reading and
+    /// writing it with reflection-based serializer metadata. Idempotent for the same pair. Throws when
+    /// the name or a parameter name is invalid, when a parameter collides with a ZCAP/suite context
+    /// term, when the class captures extension data, when the type or class is already registered
+    /// differently, or when the registry has been handed to a service.
+    /// <para>
+    /// Reflection-based serialization is unavailable under native AOT, trimming and .NET 10 file-based
+    /// apps (<c>dotnet run app.cs</c>); there this overload throws, and
+    /// <see cref="Register{TCaveat}(string, JsonTypeInfo{TCaveat})"/> with a
+    /// <see cref="System.Text.Json.Serialization.JsonSerializerContext"/> is the supported path (#154).
+    /// </para>
     /// </summary>
     /// <param name="type">The caveat type name: an ASCII letter followed by up to 63 letters, digits
     /// or underscores. It must equal <see cref="Caveat.Type"/> for instances of the class.</param>
     /// <returns>This registry, for chaining.</returns>
+    [RequiresUnreferencedCode(ReflectionMessage)]
+    [RequiresDynamicCode(ReflectionMessage)]
     public CaveatTypeRegistry Register<TCaveat>(string type) where TCaveat : Caveat
+    {
+        if (!JsonSerializer.IsReflectionEnabledByDefault)
+            throw new InvalidOperationException(
+                "Reflection-based serialization is disabled in this application (native AOT, trimming or a file-based app), " +
+                $"so caveat class {typeof(TCaveat).FullName} cannot be registered by reflection. Use " +
+                "Register<TCaveat>(string, JsonTypeInfo<TCaveat>) with a [JsonSerializable(typeof(TCaveat))] JsonSerializerContext.");
+        return Register(type, typeof(TCaveat), new DefaultJsonTypeInfoResolver());
+    }
+
+    /// <summary>
+    /// Registers <typeparamref name="TCaveat"/> under its wire <paramref name="type"/> with
+    /// source-generated serializer metadata, the overload for native AOT, trimmed and file-based
+    /// applications (#154). <paramref name="typeInfo"/> is a property of a
+    /// <see cref="System.Text.Json.Serialization.JsonSerializerContext"/> that lists the class with
+    /// <c>[JsonSerializable(typeof(TCaveat))]</c>; its resolver must also cover every parameter type
+    /// (the generator includes them automatically). The registry applies its own strict settings
+    /// through that resolver, so the context's options do not matter, and the generated context
+    /// document and wire bytes are identical to those of <see cref="Register{TCaveat}(string)"/>.
+    /// Same rules and exceptions as that overload otherwise.
+    /// </summary>
+    /// <param name="type">The caveat type name; see <see cref="Register{TCaveat}(string)"/>.</param>
+    /// <param name="typeInfo">Generated metadata for <typeparamref name="TCaveat"/>, for example
+    /// <c>MyCaveatContext.Default.MyCaveat</c>.</param>
+    /// <returns>This registry, for chaining.</returns>
+    /// <exception cref="ArgumentException">The metadata has no resolver, or its resolver does not cover the class or one of its parameter types.</exception>
+    public CaveatTypeRegistry Register<TCaveat>(string type, JsonTypeInfo<TCaveat> typeInfo) where TCaveat : Caveat
+    {
+        ArgumentNullException.ThrowIfNull(typeInfo);
+        var resolver = typeInfo.OriginatingResolver ?? typeInfo.Options.TypeInfoResolver
+            ?? throw new ArgumentException(
+                "The JsonTypeInfo has no originating resolver; pass a property of a JsonSerializerContext.", nameof(typeInfo));
+        return Register(type, typeof(TCaveat), resolver);
+    }
+
+    private const string ReflectionMessage =
+        "Reflection-based caveat registration is unavailable under native AOT, trimming and file-based apps. " +
+        "Use Register<TCaveat>(string, JsonTypeInfo<TCaveat>) with a JsonSerializerContext.";
+
+    private CaveatTypeRegistry Register(string type, Type clrType, IJsonTypeInfoResolver resolver)
     {
         if (_frozen)
             throw new InvalidOperationException("The caveat type registry is in use by a service and can no longer change.");
 
-        var registration = CaveatTypeRegistration.Create(type, typeof(TCaveat));
-        if (_byType.Values.FirstOrDefault(r => r.ClrType == typeof(TCaveat) && r.Type != type) is { } other)
+        var registration = CaveatTypeRegistration.Create(type, clrType, resolver);
+        if (_byType.Values.FirstOrDefault(r => r.ClrType == clrType && r.Type != type) is { } other)
             throw new InvalidOperationException(
-                $"{typeof(TCaveat).FullName} is already registered as caveat type '{other.Type}'.");
+                $"{clrType.FullName} is already registered as caveat type '{other.Type}'.");
 
         var existing = _byType.GetOrAdd(type, registration);
-        if (existing.ClrType != typeof(TCaveat))
+        if (existing.ClrType != clrType)
             throw new InvalidOperationException(
                 $"Caveat type '{type}' is already registered to {existing.ClrType.FullName}.");
         return this;

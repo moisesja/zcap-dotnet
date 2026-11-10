@@ -2406,7 +2406,7 @@ public class VerificationService : IVerificationService
     // legitimate maximum-length chain is not refused as CouldNotVerify.
     private const int MaxComparedJsonBytes = 16 * 1024 * 1024;
 
-    private static byte[] CanonicalForComparison(object value) => NetCid.JcsCanonicalizer.Canonicalize(
+    private static byte[] CanonicalForComparison(object value) => Jcs.Canonicalize(
         JsonSerializer.SerializeToElement(value, ZcapJsonOptions.TypeInfo<object>()), MaxComparedJsonBytes);
 
     private static bool IsSameJson(object first, object second)

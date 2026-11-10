@@ -7,7 +7,9 @@ namespace ZcapLd.Core.Models;
 /// Base class for a custom, signed restriction carried in a delegated capability's <c>caveat</c>
 /// array (#157). Derive one class per caveat type, expose its parameters as JSON-serializable
 /// properties (mark mandatory ones <c>required</c>), and register it with
-/// <see cref="CaveatTypeRegistry.Register{TCaveat}(string)"/>.
+/// <see cref="CaveatTypeRegistry.Register{TCaveat}(string, System.Text.Json.Serialization.Metadata.JsonTypeInfo{TCaveat})"/>
+/// (source-generated metadata, required under native AOT, trimming and file-based apps) or
+/// <see cref="CaveatTypeRegistry.Register{TCaveat}(string)"/> (reflection).
 /// <para>
 /// A caveat is data plus two rules: <see cref="Validate"/> (well-formed values) and
 /// <see cref="IsAttenuationOf"/> (a child may only narrow its parent). It never decides whether an
