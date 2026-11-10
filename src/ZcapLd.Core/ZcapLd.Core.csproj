@@ -31,6 +31,9 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="ZcapLd.Core.Tests" />
+    <!-- The adapter's source-generated JsonSerializerContext embeds Capability/Invocation and must see
+         the internal union converters those models declare (#154). -->
+    <InternalsVisibleTo Include="ZcapLd.AspNetCore" />
   </ItemGroup>
 
   <ItemGroup>
