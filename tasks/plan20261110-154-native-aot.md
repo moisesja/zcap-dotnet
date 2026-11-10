@@ -174,3 +174,20 @@ Commits on `154-native-aot` (one per task): ae4eece (T1), 919472f (T2), 6fa38e9 
 - **Decisions revised during the work:** D7 (editorconfig gate). D6's resolver order: the adapter's
   context is inserted right after Core's context in the chain (not appended), or the JIT reflection
   resolver would answer first for the contract types.
+
+### Review round 1 (PR #168, comment 6766170401, reviewed a70b4b9)
+
+- **P2 confirmed:** both sample `RateLimitLedger`s chose the minute bucket from `context.Created`,
+  the holder-signed proof time, and kept only the last `(Minute, Count)` per grant; signing at minute
+  offsets `[0, 0, -1, 0, -1, 0]` gave `Valid, CaveatNotSatisfied, Valid, Valid, Valid, Valid`. Example
+  handler defect, not a Core bypass.
+- **Fix:** both ledgers take an injected `TimeProvider` (the host registers `TimeProvider.System`
+  before `AddZcapCaveatHandler<RateLimitLedger>()`; the in-process verifier passes it directly) and
+  bucket on `clock.GetUtcNow()`; a grant's entry is only replaced when the clock has moved past it, so
+  an earlier reading can never erase a consumed minute. `docs/CAVEAT-PROFILE.md` now says `Created` is
+  for audit, never for choosing a window.
+- **Regression (both samples' self-checks, run by ci-aot and `dotnet run`):** a still `StillClock`
+  with signed minutes alternating `[0, 0, 1, 0, 1, 0]` ago must give
+  `Valid, CaveatNotSatisfied ×5`; advancing the clock one minute gives `Valid` then
+  `CaveatNotSatisfied`. Proven red against the original semantics (rebuilt, exact reviewer sequence
+  reproduced in both samples: 2 of 18 / 2 of 12 checks failed), then green (18/18, 12/12).

@@ -408,3 +408,19 @@
   become U+FFFD) and reports NaN as `ArgumentException`; a canonicalizer that keyed stores on its output
   (`RevocationScope.KeyFor`) would collide where the upstream node path threw. Port the upstream validation
   walk along with the shim and compare exception type and message per input.
+
+## 2026-11-10 — A resource-side caveat handler never takes time, counters or buckets from holder-signed fields (PR #168 review)
+- **Reviewer correction (P2):** the two sample `RateLimitLedger`s bucketed on `context.Created`, the invocation
+  proof's signed timestamp. The holder chooses it, freshness admits the previous minute, and the ledger kept only
+  the last minute per grant, so alternating two signed minutes reset the counter: `Valid, Deny, Valid, Valid, …`.
+  Reproduced through the real verifier with real signatures; no forgery or replay needed.
+- **Rule — anything that selects an enforcement window, bucket, cost or expiry in an `ICaveatHandler` comes from
+  the resource (an injected `TimeProvider`, the signed action/target), never from `Created`, `InvocationId` or any
+  other field the invoker fills in, even when the library has authenticated it.** Authenticated is not
+  resource-chosen. `Created` is for audit records.
+- **Rule — an exhausted bucket must survive a revisit:** never replace stored consumption with an earlier
+  period's; roll over only when the resource clock has moved past the stored period.
+- **Rule — a rate-limit sample's self-check needs the adversarial sequence, not two consecutive calls:** hold the
+  resource clock still (injected fake), alternate the holder-controlled timestamps, then advance the clock to show
+  rollover. Prove it red against the original semantics by rebuilding (the reviewer's exact outcome sequence must
+  reproduce), then green.

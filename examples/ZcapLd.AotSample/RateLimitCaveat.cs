@@ -44,9 +44,12 @@ internal sealed partial class SampleJsonContext : JsonSerializerContext
 
 /// <summary>
 /// The resource's enforcement of <see cref="RateLimitCaveat"/>: counts invocations per grant within
-/// the current minute. A production ledger is a shared store used by every verifier replica.
+/// the current minute of the resource's own clock. A production ledger is a shared store used by every
+/// verifier replica.
 /// </summary>
-public sealed class RateLimitLedger : ICaveatHandler
+/// <param name="clock">The resource's clock, which chooses the enforcement bucket. The host registers
+/// <see cref="TimeProvider.System"/>; the self-checks pass a still clock.</param>
+public sealed class RateLimitLedger(TimeProvider clock) : ICaveatHandler
 {
     private readonly Dictionary<string, (long Minute, int Count)> _counts = new(StringComparer.Ordinal);
     private readonly object _gate = new();
@@ -55,25 +58,32 @@ public sealed class RateLimitLedger : ICaveatHandler
 
     public Task<CaveatDecision> EnforceAsync(CaveatEnforcementContext context)
     {
-        var minute = context.Created.Ticks / TimeSpan.TicksPerMinute;
+        // The bucket is the resource's minute, never the holder's. context.Created is the proof time
+        // the holder signed, and freshness admits any value inside the window, so a bucket chosen from
+        // it lets a holder alternate two minutes and reset its own count (PR #168 review).
+        var minute = clock.GetUtcNow().UtcTicks / TimeSpan.TicksPerMinute;
         lock (_gate)
         {
             // Every grant in the chain is counted, so a delegate shares its ancestors' limits.
             foreach (var grant in context.Grants)
             {
                 var limit = ((RateLimitCaveat)grant.Caveat).MaxPerMinute;
-                var current = _counts.TryGetValue(grant.GrantKey, out var entry) && entry.Minute == minute ? entry.Count : 0;
-                if (current + 1 > limit)
+                if (Live(grant.GrantKey, minute).Count + 1 > limit)
                     return Task.FromResult(CaveatDecision.Deny($"{grant.CapabilityId} exceeded {limit} invocations this minute."));
             }
 
             foreach (var grant in context.Grants)
             {
-                var current = _counts.TryGetValue(grant.GrantKey, out var entry) && entry.Minute == minute ? entry.Count : 0;
-                _counts[grant.GrantKey] = (minute, current + 1);
+                var live = Live(grant.GrantKey, minute);
+                _counts[grant.GrantKey] = (live.Minute, live.Count + 1);
             }
 
             return Task.FromResult(CaveatDecision.Satisfied);
         }
     }
+
+    // The live bucket of a grant: its entry unless the clock has moved past it. An entry is never
+    // replaced by an earlier minute, so a clock that steps back cannot erase a consumed minute.
+    private (long Minute, int Count) Live(string key, long minute)
+        => _counts.TryGetValue(key, out var entry) && entry.Minute >= minute ? entry : (minute, 0);
 }

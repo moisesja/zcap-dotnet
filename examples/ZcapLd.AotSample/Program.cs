@@ -53,7 +53,7 @@ var capabilities = new CapabilityService(signing, caveatTypes);
 var roots = new InMemoryRootCapabilityResolver();
 var revocations = new RevocationService(new InMemoryRevocationStore());
 var verifier = new VerificationService(resolver, revocations, new InMemoryNonceStore(),
-    rootResolver: roots, caveats: caveatTypes, caveatHandlers: new ICaveatHandler[] { new RateLimitLedger() });
+    rootResolver: roots, caveats: caveatTypes, caveatHandlers: new ICaveatHandler[] { new RateLimitLedger(TimeProvider.System) });
 
 // ─── Root -> delegate -> invoke ────────────────────────────────────────────────────────────────
 const string target = "https://example.com/documents";
@@ -105,6 +105,30 @@ async Task<VerificationOutcome> InvokeAsync(Capability grant, string invoker)
 Check("Caveat invocation 1 of 1", VerificationOutcome.Valid, await InvokeAsync(narrowed, stranger));
 Check("Caveat invocation 2 of 1", VerificationOutcome.CaveatNotSatisfied, await InvokeAsync(narrowed, stranger));
 
+// The ledger buckets on the resource's clock, never on the holder-signed `created`: a holder may sign
+// any time inside the freshness window, so a bucket chosen from it could be reset by alternating two
+// minutes (PR #168 review). Here resource time stands still while the signed minute alternates.
+var clock = new StillClock(DateTimeOffset.UtcNow);
+var clocked = new VerificationService(resolver, revocations, new InMemoryNonceStore(),
+    rootResolver: roots, caveats: caveatTypes, caveatHandlers: new ICaveatHandler[] { new RateLimitLedger(clock) });
+
+async Task<VerificationOutcome> InvokeSignedAtAsync(Capability grant, string invoker, int minutesAgo)
+{
+    var request = capabilities.CreateInvocation(grant, "read");
+    request.Proof = await signing.SignInvocationAsync(request, invoker, DateTime.UtcNow.AddMinutes(-minutesAgo));
+    return (await clocked.VerifyInvocationDetailedAsync(request, grant)).Outcome;
+}
+
+var alternating = new List<VerificationOutcome>();
+foreach (var minutesAgo in new[] { 0, 0, 1, 0, 1, 0 })
+    alternating.Add(await InvokeSignedAtAsync(narrowed, stranger, minutesAgo));
+Check("Alternating signed minutes, resource clock still",
+    "Valid, CaveatNotSatisfied, CaveatNotSatisfied, CaveatNotSatisfied, CaveatNotSatisfied, CaveatNotSatisfied",
+    string.Join(", ", alternating));
+clock.Advance(TimeSpan.FromMinutes(1));
+Check("Resource clock rolled over", VerificationOutcome.Valid, await InvokeSignedAtAsync(narrowed, stranger, 0));
+Check("Rolled-over minute exhausted", VerificationOutcome.CaveatNotSatisfied, await InvokeSignedAtAsync(narrowed, stranger, 0));
+
 // ─── Signed revocation ────────────────────────────────────────────────────────────────────────
 var revocation = await signing.SignRevocationAsync(delegated.Id, owner, delegated.InvocationTarget, reason: "access withdrawn");
 Check("Owner revocation accepted", true, await verifier.RevokeCapabilityAsync(delegated, revocation));
@@ -119,8 +143,9 @@ builder.Services.AddZcapServices();
 builder.Services.AddZcapDidResolver(_ => resolver);
 builder.Services.AddZcapRootCapabilityResolver(_ => roots);
 builder.Services.AddZcapRevocationSupport(_ => new InMemoryRevocationStore());
-// The DI sibling of the typed registration above, plus the resource's handler.
+// The DI sibling of the typed registration above, plus the resource's handler and its clock.
 builder.Services.AddZcapCaveatType(RateLimitCaveat.TypeName, SampleJsonContext.Default.RateLimitCaveat);
+builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddZcapCaveatHandler<RateLimitLedger>();
 
 var app = builder.Build();
@@ -176,4 +201,14 @@ static async Task<HttpResponseMessage> PostAsync(HttpClient http, string path, s
 {
     using var content = new StringContent(json, Encoding.UTF8, "application/json");
     return await http.PostAsync(path, content);
+}
+
+/// <summary>A resource clock the self-checks hold still and advance by hand.</summary>
+sealed class StillClock(DateTimeOffset now) : TimeProvider
+{
+    private DateTimeOffset _now = now;
+
+    public override DateTimeOffset GetUtcNow() => _now;
+
+    public void Advance(TimeSpan by) => _now += by;
 }

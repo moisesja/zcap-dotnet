@@ -48,7 +48,7 @@ var signing = new SigningService(keyring, resolver, caveatTypes);
 var capabilities = new CapabilityService(signing, caveatTypes);
 var roots = new InMemoryRootCapabilityResolver();
 var verifier = new VerificationService(resolver, new RevocationService(new InMemoryRevocationStore()), new InMemoryNonceStore(),
-    rootResolver: roots, caveats: caveatTypes, caveatHandlers: new ICaveatHandler[] { new RateLimitLedger() });
+    rootResolver: roots, caveats: caveatTypes, caveatHandlers: new ICaveatHandler[] { new RateLimitLedger(TimeProvider.System) });
 
 var root = roots.Register(await capabilities.CreateRootCapabilityAsync(owner, "https://example.com/documents", new[] { "read" }));
 Console.WriteLine($"Root: {root.Id}");
@@ -79,6 +79,27 @@ Check("Caveat invocation 1 of 1", VerificationOutcome.Valid, (await verifier.Ver
 var denied = capabilities.CreateInvocation(limited, "read");
 denied.Proof = await signing.SignInvocationAsync(denied, agent);
 Check("Caveat invocation 2 of 1", VerificationOutcome.CaveatNotSatisfied, (await verifier.VerifyInvocationDetailedAsync(denied, limited)).Outcome);
+
+// The ledger buckets on the resource's clock, never on the holder-signed `created` (PR #168 review):
+// resource time stands still while the signed minute alternates, then rolls over.
+var clock = new StillClock(DateTimeOffset.UtcNow);
+var clocked = new VerificationService(resolver, new RevocationService(new InMemoryRevocationStore()), new InMemoryNonceStore(),
+    rootResolver: roots, caveats: caveatTypes, caveatHandlers: new ICaveatHandler[] { new RateLimitLedger(clock) });
+async Task<VerificationOutcome> InvokeSignedAtAsync(int minutesAgo)
+{
+    var request = capabilities.CreateInvocation(limited, "read");
+    request.Proof = await signing.SignInvocationAsync(request, agent, DateTime.UtcNow.AddMinutes(-minutesAgo));
+    return (await clocked.VerifyInvocationDetailedAsync(request, limited)).Outcome;
+}
+var alternating = new List<VerificationOutcome>();
+foreach (var minutesAgo in new[] { 0, 0, 1, 0, 1, 0 })
+    alternating.Add(await InvokeSignedAtAsync(minutesAgo));
+Check("Alternating signed minutes, resource clock still",
+    "Valid, CaveatNotSatisfied, CaveatNotSatisfied, CaveatNotSatisfied, CaveatNotSatisfied, CaveatNotSatisfied",
+    string.Join(", ", alternating));
+clock.Advance(TimeSpan.FromMinutes(1));
+Check("Resource clock rolled over", VerificationOutcome.Valid, await InvokeSignedAtAsync(0));
+Check("Rolled-over minute exhausted", VerificationOutcome.CaveatNotSatisfied, await InvokeSignedAtAsync(0));
 
 var revocation = await signing.SignRevocationAsync(delegated.Id, owner, delegated.InvocationTarget, reason: "access withdrawn");
 Check("Owner revocation accepted", true, await verifier.RevokeCapabilityAsync(delegated, revocation));
@@ -135,7 +156,9 @@ sealed partial class AppJsonContext : JsonSerializerContext
 {
 }
 
-sealed class RateLimitLedger : ICaveatHandler
+// Buckets on the resource's clock: context.Created is the holder-signed proof time, admitted anywhere
+// inside the freshness window, so a bucket chosen from it could be reset by alternating two minutes.
+sealed class RateLimitLedger(TimeProvider clock) : ICaveatHandler
 {
     private readonly Dictionary<string, (long Minute, int Count)> _counts = new(StringComparer.Ordinal);
     private readonly object _gate = new();
@@ -144,24 +167,36 @@ sealed class RateLimitLedger : ICaveatHandler
 
     public Task<CaveatDecision> EnforceAsync(CaveatEnforcementContext context)
     {
-        var minute = context.Created.Ticks / TimeSpan.TicksPerMinute;
+        var minute = clock.GetUtcNow().UtcTicks / TimeSpan.TicksPerMinute;
         lock (_gate)
         {
             foreach (var grant in context.Grants)
             {
                 var limit = ((RateLimitCaveat)grant.Caveat).MaxPerMinute;
-                var current = _counts.TryGetValue(grant.GrantKey, out var entry) && entry.Minute == minute ? entry.Count : 0;
-                if (current + 1 > limit)
+                if (Live(grant.GrantKey, minute).Count + 1 > limit)
                     return Task.FromResult(CaveatDecision.Deny($"{grant.CapabilityId} exceeded {limit} invocations this minute."));
             }
 
             foreach (var grant in context.Grants)
             {
-                var current = _counts.TryGetValue(grant.GrantKey, out var entry) && entry.Minute == minute ? entry.Count : 0;
-                _counts[grant.GrantKey] = (minute, current + 1);
+                var live = Live(grant.GrantKey, minute);
+                _counts[grant.GrantKey] = (live.Minute, live.Count + 1);
             }
 
             return Task.FromResult(CaveatDecision.Satisfied);
         }
     }
+
+    // An entry is never replaced by an earlier minute, so a clock that steps back cannot erase a consumed minute.
+    private (long Minute, int Count) Live(string key, long minute)
+        => _counts.TryGetValue(key, out var entry) && entry.Minute >= minute ? entry : (minute, 0);
+}
+
+sealed class StillClock(DateTimeOffset now) : TimeProvider
+{
+    private DateTimeOffset _now = now;
+
+    public override DateTimeOffset GetUtcNow() => _now;
+
+    public void Advance(TimeSpan by) => _now += by;
 }

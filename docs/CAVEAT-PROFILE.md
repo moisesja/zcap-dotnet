@@ -130,7 +130,11 @@ handler's context contains only authenticated data:
 - `Grants`: each link's caveat of this type, root side first, with `GrantKey`;
 - `Chain` and `RootCapabilityId`;
 - `CapabilityAction` and `InvocationTarget`;
-- `InvocationId` (the replay nonce), `VerificationMethod` and `Created`.
+- `InvocationId` (the replay nonce), `VerificationMethod` and `Created`. `Created` is the proof time
+  the holder signed, admitted anywhere inside the freshness window: record it for audit, but take
+  the time that chooses a rate-limit window, bucket or expiry from the resource's own clock (an
+  injected `TimeProvider`), as the samples' `RateLimitLedger` does. A bucket chosen from `Created`
+  lets a holder reset its own count by alternating two signed minutes.
 
 There is deliberately no property bag. **The resource is responsible for:**
 
