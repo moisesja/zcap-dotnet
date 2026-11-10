@@ -1,0 +1,93 @@
+name: ci-aot
+
+# Native AOT, trimming and file-based app support (#154): publishes the sample consumer with
+# ILCompiler, fails on any IL2xxx/IL3xxx warning that names a ZcapLd, DataProofsDotnet or NetCid
+# assembly, runs the native binary, and runs the .NET 10 file-based app.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'examples/ZcapLd.AotSample/**'
+      - 'examples/ZcapLd.AotFileBasedApp/**'
+      - 'ZcapLd.sln'
+      - '.github/workflows/ci-aot.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'examples/ZcapLd.AotSample/**'
+      - 'examples/ZcapLd.AotFileBasedApp/**'
+      - 'ZcapLd.sln'
+      - '.github/workflows/ci-aot.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish-aot-sample:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # The latest 10.0.x patch: the 10.0.100 SDK resolves an ILCompiler that carries advisory
+      # GHSA-p3jp-9v83-76w9 (NU1903), which the sample suppresses by id for local use.
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Install native AOT prerequisites
+        run: sudo apt-get update && sudo apt-get install -y clang zlib1g-dev
+
+      - name: Restore
+        run: dotnet restore examples/ZcapLd.AotSample/ZcapLd.AotSample.csproj -r linux-x64
+
+      # Per-call-site warnings (TrimmerSingleWarn=false) so the log names the member, never only the assembly.
+      - name: Publish native AOT
+        run: |
+          set -o pipefail
+          dotnet publish examples/ZcapLd.AotSample/ZcapLd.AotSample.csproj --configuration Release --runtime linux-x64 --no-restore -p:TrimmerSingleWarn=false 2>&1 | tee publish.log
+
+      # The #154 contract (the trailing `[<project>]` MSBuild suffix names the sample project, so it is
+      # stripped before matching): no trim/AOT/single-file analyzer warning may come from zcap or the
+      # proof/canonicalization dependencies it relies on. Newtonsoft.Json 13.0.4 (transitive through
+      # dotNetRdf.Core) reports five IL2026/IL3050 pairs (IL2104/IL3053 with single-warn) from the
+      # `dynamic` support in JObject/JToken/JValue.GetMetaObject and JValue.IConvertible.ToType, which
+      # the RDFC path never reaches (moisesja/dataproofs-dotnet#27); those are listed, not fatal.
+      - name: Gate IL warnings
+        run: |
+          echo "All IL warnings in the publish log:"
+          grep -E 'IL[23][0-9]{3}' publish.log | sed -E 's/ \[[^]]*\]$//' | sort -u || echo "(none)"
+          if grep -E 'IL[23][0-9]{3}' publish.log | sed -E 's/ \[[^]]*\]$//' | grep -E 'ZcapLd|DataProofsDotnet|NetCid'; then
+            echo "::error::IL2xxx/IL3xxx warning from a ZcapLd, DataProofsDotnet or NetCid assembly (see above)"
+            exit 1
+          fi
+          echo "No IL warnings from ZcapLd, DataProofsDotnet or NetCid."
+
+      - name: Run native binary
+        run: |
+          binary=examples/ZcapLd.AotSample/bin/Release/net10.0/linux-x64/publish/ZcapLd.AotSample
+          ls -l "$binary"
+          file "$binary"
+          "$binary"
+
+      # A .NET 10 file-based app: reflection-based serialization is off by default, so this run
+      # exercises the generated metadata under the JIT; the native publish of the same file follows.
+      - name: Run file-based app
+        run: dotnet run examples/ZcapLd.AotFileBasedApp/app.cs
+
+      - name: Publish and run file-based app natively
+        run: |
+          set -o pipefail
+          dotnet publish examples/ZcapLd.AotFileBasedApp/app.cs -o artifacts/aot-file-based 2>&1 | tee publish-file-based.log
+          if grep -E 'IL[23][0-9]{3}' publish-file-based.log | sed -E 's/ \[[^]]*\]$//' | grep -E 'ZcapLd|DataProofsDotnet|NetCid'; then
+            echo "::error::IL2xxx/IL3xxx warning from a ZcapLd, DataProofsDotnet or NetCid assembly in the file-based publish"
+            exit 1
+          fi
+          ls -l artifacts/aot-file-based
+          artifacts/aot-file-based/app

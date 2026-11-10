@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <!-- Native AOT consumer of both packages (#154). CI (ci-aot.yml) publishes it with ILCompiler on
+       Linux, fails on any IL2xxx/IL3xxx warning that names a ZcapLd, DataProofsDotnet or NetCid
+       assembly, and runs the binary; it also runs under the JIT with `dotnet run`. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <PublishAot>true</PublishAot>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- One warning per call site, not one per assembly, so the publish log names the member. -->
+    <TrimmerSingleWarn>false</TrimmerSingleWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/ZcapLd.Core/ZcapLd.Core.csproj" />
+    <ProjectReference Include="../../src/ZcapLd.AspNetCore/ZcapLd.AspNetCore.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The ILCompiler package that the 10.0.100 SDK resolves for PublishAot carries advisory
+         GHSA-p3jp-9v83-76w9 (NU1903). CI runs the latest 10.0.x SDK; this scoped suppression lets a
+         developer on 10.0.100 publish locally without disabling NuGet audit as a whole. -->
+    <NuGetAuditSuppress Include="https://github.com/advisories/GHSA-p3jp-9v83-76w9" />
+  </ItemGroup>
+
+</Project>
